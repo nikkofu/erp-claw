@@ -1,0 +1,27 @@
+env: local
+
+http:
+  host: 0.0.0.0
+  port: 8080
+  readTimeoutSeconds: 5
+  writeTimeoutSeconds: 5
+
+database:
+  dsn: postgres://erp:erp@localhost:5432/erp_claw?sslmode=disable
+  maxOpenConns: 25
+  maxIdleConns: 5
+redis:
+  addr: localhost:6379
+  password: ""
+nats:
+  servers:
+    - nats://localhost:4222
+  cluster: local
+objectStorage:
+  provider: minio
+  bucket: erp-claw-local
+  region: us-east-1
+
+telemetry:
+  metricsPath: /metrics
+  tracingEndpoint: http://localhost:4317
