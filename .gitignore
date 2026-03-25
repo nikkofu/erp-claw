@@ -1,3 +1,4 @@
 references/
 .cache/
 .DS_Store
+.worktrees/
