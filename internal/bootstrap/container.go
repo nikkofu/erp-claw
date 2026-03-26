@@ -7,7 +7,9 @@ import (
 	domaincap "github.com/nikkofu/erp-claw/internal/domain/capability"
 	"github.com/nikkofu/erp-claw/internal/domain/controlplane"
 	"github.com/nikkofu/erp-claw/internal/interfaces/ws"
+	"github.com/nikkofu/erp-claw/internal/platform/audit"
 	"github.com/nikkofu/erp-claw/internal/platform/health"
+	"github.com/nikkofu/erp-claw/internal/platform/policy"
 )
 
 type ControlPlaneCatalog interface {
@@ -38,6 +40,11 @@ type CapabilityCatalog interface {
 	domaincap.ToolCatalogRepository
 }
 
+type GovernanceCatalog interface {
+	policy.RuleRepository
+	audit.EventStore
+}
+
 type Container struct {
 	Config              Config
 	Health              *health.Service
@@ -45,6 +52,7 @@ type Container struct {
 	AgentRuntimeCatalog AgentRuntimeCatalog
 	ApprovalCatalog     ApprovalCatalog
 	CapabilityCatalog   CapabilityCatalog
+	GovernanceCatalog   GovernanceCatalog
 	WorkspaceGateway    *ws.WorkspaceGateway
 }
 
@@ -56,6 +64,7 @@ func NewContainer(cfg Config) *Container {
 		AgentRuntimeCatalog: newAgentRuntimeCatalog(cfg),
 		ApprovalCatalog:     newApprovalCatalog(cfg),
 		CapabilityCatalog:   newCapabilityCatalog(cfg),
+		GovernanceCatalog:   newGovernanceCatalog(cfg),
 		WorkspaceGateway:    ws.NewWorkspaceGateway(),
 	}
 }

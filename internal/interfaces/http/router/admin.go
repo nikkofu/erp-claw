@@ -2,15 +2,21 @@ package router
 
 import (
 	"net/http"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	approvalapp "github.com/nikkofu/erp-claw/internal/application/approval"
 	capabilityapp "github.com/nikkofu/erp-claw/internal/application/capability"
 	controlcommand "github.com/nikkofu/erp-claw/internal/application/controlplane/command"
 	controlquery "github.com/nikkofu/erp-claw/internal/application/controlplane/query"
+	governancecommand "github.com/nikkofu/erp-claw/internal/application/governance/command"
+	governancequery "github.com/nikkofu/erp-claw/internal/application/governance/query"
 	"github.com/nikkofu/erp-claw/internal/bootstrap"
 	"github.com/nikkofu/erp-claw/internal/interfaces/http/presenter"
+	"github.com/nikkofu/erp-claw/internal/platform/audit"
+	"github.com/nikkofu/erp-claw/internal/platform/policy"
 )
 
 type createTenantRequest struct {
@@ -92,6 +98,20 @@ type createToolCatalogEntryRequest struct {
 	Status      string `json:"status"`
 }
 
+type createPolicyRuleRequest struct {
+	TenantID    string `json:"tenant_id"`
+	ID          string `json:"id"`
+	CommandName string `json:"command_name"`
+	ActorID     string `json:"actor_id"`
+	Decision    string `json:"decision"`
+	Priority    int    `json:"priority"`
+	Active      bool   `json:"active"`
+}
+
+type setPolicyRuleActiveRequest struct {
+	TenantID string `json:"tenant_id"`
+}
+
 func registerAdminRoutes(rg *gin.RouterGroup, container *bootstrap.Container) {
 	if container == nil {
 		panic("router: container must not be nil")
@@ -105,10 +125,14 @@ func registerAdminRoutes(rg *gin.RouterGroup, container *bootstrap.Container) {
 	if container.CapabilityCatalog == nil {
 		panic("router: capability catalog must not be nil")
 	}
+	if container.GovernanceCatalog == nil {
+		panic("router: governance catalog must not be nil")
+	}
 
 	catalog := container.ControlPlaneCatalog
 	approvalCatalog := container.ApprovalCatalog
 	capabilityCatalog := container.CapabilityCatalog
+	governanceCatalog := container.GovernanceCatalog
 	createTenantHandler := controlcommand.CreateTenantHandler{Tenants: catalog}
 	listTenantsHandler := controlquery.ListTenantsHandler{Tenants: catalog}
 	createUserHandler := controlcommand.CreateUserHandler{Users: catalog}
@@ -154,6 +178,18 @@ func registerAdminRoutes(rg *gin.RouterGroup, container *bootstrap.Container) {
 	if err != nil {
 		panic("router: tool catalog list handler init failed: " + err.Error())
 	}
+	ruleService, err := policy.NewRuleService(governanceCatalog)
+	if err != nil {
+		panic("router: governance rule service init failed: " + err.Error())
+	}
+	auditService, err := audit.NewService(governanceCatalog)
+	if err != nil {
+		panic("router: governance audit service init failed: " + err.Error())
+	}
+	upsertPolicyRuleHandler := governancecommand.UpsertPolicyRuleHandler{Rules: ruleService}
+	listPolicyRulesHandler := governancequery.ListPolicyRulesHandler{Rules: ruleService}
+	setPolicyRuleActiveHandler := governancecommand.SetPolicyRuleActiveHandler{Rules: ruleService}
+	listAuditEventsHandler := governancequery.ListAuditEventsHandler{AuditEvents: auditService}
 
 	rg.POST("/tenants", func(c *gin.Context) {
 		var req createTenantRequest
@@ -561,6 +597,130 @@ func registerAdminRoutes(rg *gin.RouterGroup, container *bootstrap.Container) {
 
 		presenter.OK(c, entries)
 	})
+
+	rg.POST("/policy-rules", func(c *gin.Context) {
+		var req createPolicyRuleRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			adminError(c, http.StatusBadRequest, err)
+			return
+		}
+
+		created, err := upsertPolicyRuleHandler.Handle(c.Request.Context(), governancecommand.UpsertPolicyRule{
+			TenantID:    tenantIDFromValueOrHeader(req.TenantID, c),
+			ID:          req.ID,
+			CommandName: req.CommandName,
+			ActorID:     req.ActorID,
+			Decision:    policy.Decision(req.Decision),
+			Priority:    req.Priority,
+			Active:      req.Active,
+		})
+		if err != nil {
+			adminError(c, http.StatusBadRequest, err)
+			return
+		}
+
+		adminCreated(c, created)
+	})
+
+	rg.GET("/policy-rules", func(c *gin.Context) {
+		activeOnly, err := parseBoolQuery(c.Query("active_only"))
+		if err != nil {
+			adminError(c, http.StatusBadRequest, err)
+			return
+		}
+		limit, err := parseIntQuery(c.Query("limit"))
+		if err != nil {
+			adminError(c, http.StatusBadRequest, err)
+			return
+		}
+
+		rules, err := listPolicyRulesHandler.Handle(c.Request.Context(), governancequery.ListPolicyRules{
+			TenantID:    tenantIDFromQueryOrHeader(c),
+			CommandName: strings.TrimSpace(c.Query("command_name")),
+			ActorID:     strings.TrimSpace(c.Query("actor_id")),
+			ActiveOnly:  activeOnly,
+			Limit:       limit,
+		})
+		if err != nil {
+			adminError(c, http.StatusBadRequest, err)
+			return
+		}
+
+		presenter.OK(c, rules)
+	})
+
+	rg.POST("/policy-rules/:rule_id/activate", func(c *gin.Context) {
+		var req setPolicyRuleActiveRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			adminError(c, http.StatusBadRequest, err)
+			return
+		}
+
+		updated, err := setPolicyRuleActiveHandler.Handle(c.Request.Context(), governancecommand.SetPolicyRuleActive{
+			TenantID: tenantIDFromValueOrHeader(req.TenantID, c),
+			RuleID:   c.Param("rule_id"),
+			Active:   true,
+		})
+		if err != nil {
+			adminError(c, http.StatusBadRequest, err)
+			return
+		}
+
+		adminCreated(c, updated)
+	})
+
+	rg.POST("/policy-rules/:rule_id/deactivate", func(c *gin.Context) {
+		var req setPolicyRuleActiveRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			adminError(c, http.StatusBadRequest, err)
+			return
+		}
+
+		updated, err := setPolicyRuleActiveHandler.Handle(c.Request.Context(), governancecommand.SetPolicyRuleActive{
+			TenantID: tenantIDFromValueOrHeader(req.TenantID, c),
+			RuleID:   c.Param("rule_id"),
+			Active:   false,
+		})
+		if err != nil {
+			adminError(c, http.StatusBadRequest, err)
+			return
+		}
+
+		adminCreated(c, updated)
+	})
+
+	rg.GET("/audit-events", func(c *gin.Context) {
+		limit, err := parseIntQuery(c.Query("limit"))
+		if err != nil {
+			adminError(c, http.StatusBadRequest, err)
+			return
+		}
+		occurredAfter, err := parseTimeQuery(c.Query("occurred_after"))
+		if err != nil {
+			adminError(c, http.StatusBadRequest, err)
+			return
+		}
+		occurredBefore, err := parseTimeQuery(c.Query("occurred_before"))
+		if err != nil {
+			adminError(c, http.StatusBadRequest, err)
+			return
+		}
+
+		events, err := listAuditEventsHandler.Handle(c.Request.Context(), governancequery.ListAuditEvents{
+			TenantID:       tenantIDFromQueryOrHeader(c),
+			CommandName:    strings.TrimSpace(c.Query("command_name")),
+			ActorID:        strings.TrimSpace(c.Query("actor_id")),
+			OccurredAfter:  occurredAfter,
+			OccurredBefore: occurredBefore,
+			Limit:          limit,
+		})
+		if err != nil {
+			adminError(c, http.StatusBadRequest, err)
+			return
+		}
+
+		presenter.OK(c, events)
+	})
 }
 
 func tenantIDFromQueryOrHeader(c *gin.Context) string {
@@ -591,4 +751,28 @@ func adminError(c *gin.Context, status int, err error) {
 		"error": err.Error(),
 		"meta":  gin.H{"request_id": c.GetString("request_id")},
 	})
+}
+
+func parseBoolQuery(value string) (bool, error) {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return false, nil
+	}
+	return strconv.ParseBool(trimmed)
+}
+
+func parseIntQuery(value string) (int, error) {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return 0, nil
+	}
+	return strconv.Atoi(trimmed)
+}
+
+func parseTimeQuery(value string) (time.Time, error) {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return time.Time{}, nil
+	}
+	return time.Parse(time.RFC3339, trimmed)
 }

@@ -8,10 +8,13 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	controlcommand "github.com/nikkofu/erp-claw/internal/application/controlplane/command"
 	"github.com/nikkofu/erp-claw/internal/bootstrap"
 	"github.com/nikkofu/erp-claw/internal/interfaces/http/router"
+	"github.com/nikkofu/erp-claw/internal/platform/audit"
+	"github.com/nikkofu/erp-claw/internal/platform/policy"
 )
 
 func TestControlPlaneMigrationContainsCatalogTables(t *testing.T) {
@@ -387,6 +390,63 @@ func TestAdminCapabilityCatalogRoutes(t *testing.T) {
 	}
 	if !strings.Contains(toolsRec.Body.String(), "purchase.submit") {
 		t.Fatalf("expected tool catalog response to contain purchase.submit, got %s", toolsRec.Body.String())
+	}
+}
+
+func TestAdminGovernanceRoutes(t *testing.T) {
+	container := bootstrap.NewTestContainer()
+	if _, err := container.GovernanceCatalog.Append(context.Background(), audit.Record{
+		TenantID:    "tenant-gov",
+		ID:          "evt-1",
+		CommandName: "purchase.submit",
+		ActorID:     "actor-a",
+		Decision:    policy.DecisionRequireApproval,
+		Outcome:     "pending_approval",
+		OccurredAt:  time.Date(2026, 3, 26, 10, 0, 0, 0, time.UTC),
+	}); err != nil {
+		t.Fatalf("seed audit event: %v", err)
+	}
+
+	h := router.New(router.WithContainer(container))
+
+	ruleReq := httptest.NewRequest(http.MethodPost, "/api/admin/v1/policy-rules", strings.NewReader(`{"tenant_id":"tenant-gov","id":"rule-gov","command_name":"purchase.submit","actor_id":"*","decision":"REQUIRE_APPROVAL","priority":80,"active":true}`))
+	ruleReq.Header.Set("Content-Type", "application/json")
+	ruleReq.Header.Set("X-Tenant-ID", "tenant-gov")
+	ruleRec := httptest.NewRecorder()
+	h.ServeHTTP(ruleRec, ruleReq)
+	if ruleRec.Code != http.StatusCreated {
+		t.Fatalf("expected policy rule create 201, got %d: %s", ruleRec.Code, ruleRec.Body.String())
+	}
+
+	rulesReq := httptest.NewRequest(http.MethodGet, "/api/admin/v1/policy-rules?tenant_id=tenant-gov&command_name=purchase.submit&active_only=true", nil)
+	rulesReq.Header.Set("X-Tenant-ID", "tenant-gov")
+	rulesRec := httptest.NewRecorder()
+	h.ServeHTTP(rulesRec, rulesReq)
+	if rulesRec.Code != http.StatusOK {
+		t.Fatalf("expected policy rules 200, got %d: %s", rulesRec.Code, rulesRec.Body.String())
+	}
+	if !strings.Contains(rulesRec.Body.String(), "rule-gov") {
+		t.Fatalf("expected rules response to contain rule-gov, got %s", rulesRec.Body.String())
+	}
+
+	deactivateReq := httptest.NewRequest(http.MethodPost, "/api/admin/v1/policy-rules/rule-gov/deactivate", strings.NewReader(`{"tenant_id":"tenant-gov"}`))
+	deactivateReq.Header.Set("Content-Type", "application/json")
+	deactivateReq.Header.Set("X-Tenant-ID", "tenant-gov")
+	deactivateRec := httptest.NewRecorder()
+	h.ServeHTTP(deactivateRec, deactivateReq)
+	if deactivateRec.Code != http.StatusCreated {
+		t.Fatalf("expected policy rule deactivate 201, got %d: %s", deactivateRec.Code, deactivateRec.Body.String())
+	}
+
+	eventsReq := httptest.NewRequest(http.MethodGet, "/api/admin/v1/audit-events?tenant_id=tenant-gov&command_name=purchase.submit&actor_id=actor-a", nil)
+	eventsReq.Header.Set("X-Tenant-ID", "tenant-gov")
+	eventsRec := httptest.NewRecorder()
+	h.ServeHTTP(eventsRec, eventsReq)
+	if eventsRec.Code != http.StatusOK {
+		t.Fatalf("expected audit events 200, got %d: %s", eventsRec.Code, eventsRec.Body.String())
+	}
+	if !strings.Contains(eventsRec.Body.String(), "pending_approval") {
+		t.Fatalf("expected audit events response to contain pending_approval, got %s", eventsRec.Body.String())
 	}
 }
 

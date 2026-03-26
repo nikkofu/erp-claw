@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.4] - 2026-03-26
+
+### Added
+
+- Governance catalog bootstrap with Postgres runtime wiring and in-memory test fallback for policy rules and audit events.
+- Admin API routes for policy rule create/list, activate/deactivate, and audit event list queries.
+- Integration coverage for governance admin lifecycle routing on top of the existing policy rule and audit services.
+
+### Changed
+
+- Phase 1 docs now reflect that governance baseline includes an Admin HTTP management surface instead of only application-level handlers and repository seams.
+
 ## [0.2.3] - 2026-03-26
 
 ### Added

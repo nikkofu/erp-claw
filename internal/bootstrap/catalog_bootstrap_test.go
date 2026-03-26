@@ -77,3 +77,22 @@ func TestNewCapabilityCatalogPanicsWhenDatabaseInitFailsOutsideTest(t *testing.T
 		},
 	})
 }
+
+func TestNewGovernanceCatalogPanicsWhenDatabaseInitFailsOutsideTest(t *testing.T) {
+	t.Parallel()
+
+	defer func() {
+		if recover() == nil {
+			t.Fatal("expected governance catalog bootstrap to panic on invalid runtime database")
+		}
+	}()
+
+	_ = newGovernanceCatalog(Config{
+		Env: "local",
+		Database: DatabaseConfig{
+			DSN:          "postgres://invalid:invalid@127.0.0.1:1/erp_claw?sslmode=disable",
+			MaxOpenConns: 1,
+			MaxIdleConns: 1,
+		},
+	})
+}

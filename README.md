@@ -40,12 +40,14 @@ Catalog entities in this slice:
 - Agent Profiles (governed AI agent definitions per tenant)
 - Approval Definitions / Instances / Tasks (tenant-scoped governance workflow baseline)
 - Model Catalog Entries / Tool Catalog Entries (tenant-scoped capability governance baseline)
+- Policy Rules / Audit Events (tenant-scoped governance control baseline)
 
 Bootstrap behavior for `bootstrap.NewContainer(cfg)`:
 
 - Uses a Postgres-backed control-plane catalog repository when the configured database is reachable.
 - Uses a Postgres-backed approval catalog repository for approval definitions, instances, and tasks when the configured database is reachable.
 - Uses a Postgres-backed capability catalog repository for model catalog and tool catalog entries when the configured database is reachable.
+- Uses a Postgres-backed governance catalog repository for policy rules and audit events when the configured database is reachable.
 - Fails fast when a runtime Postgres catalog cannot be initialized, so control-plane and workspace state do not silently degrade into ephemeral storage.
 - Uses in-memory catalogs only for explicit test bootstrap paths such as `bootstrap.NewTestContainer()` or configurations with an empty database DSN.
 
