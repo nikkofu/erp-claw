@@ -2,6 +2,7 @@ package memory
 
 import (
 	"context"
+	"strings"
 	"sync"
 
 	"github.com/nikkofu/erp-claw/internal/domain/approval"
@@ -253,6 +254,20 @@ func (r *payableRepository) GetByPurchaseOrder(_ context.Context, tenantID, purc
 		return payable.Bill{}, payable.ErrBillNotFound
 	}
 	return clonePayableBill(bill), nil
+}
+
+func (r *payableRepository) ListByTenant(_ context.Context, tenantID string) ([]payable.Bill, error) {
+	r.store.mu.RLock()
+	defer r.store.mu.RUnlock()
+
+	out := make([]payable.Bill, 0)
+	prefix := tenantID + "/"
+	for k, bill := range r.store.bills {
+		if strings.HasPrefix(k, prefix) {
+			out = append(out, clonePayableBill(bill))
+		}
+	}
+	return out, nil
 }
 
 func (r *payableRepository) SavePaymentPlan(_ context.Context, plan payable.PaymentPlan) error {

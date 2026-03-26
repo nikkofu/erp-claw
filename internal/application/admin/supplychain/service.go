@@ -338,6 +338,10 @@ func (s *Service) GetPayableBill(ctx context.Context, input GetPayableBillInput)
 	return s.payables.Get(ctx, input.TenantID, input.BillID)
 }
 
+func (s *Service) ListPayableBills(ctx context.Context, input ListPayableBillsInput) ([]payable.Bill, error) {
+	return s.payables.ListByTenant(ctx, input.TenantID)
+}
+
 func (s *Service) CreatePayablePaymentPlan(ctx context.Context, input CreatePayablePaymentPlanInput) (payable.PaymentPlan, error) {
 	var plan payable.PaymentPlan
 	err := s.pipeline.Execute(ctx, shared.Command{
