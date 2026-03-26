@@ -1,0 +1,48 @@
+package supplychain
+
+type CreateSupplierInput struct {
+	TenantID string
+	ActorID  string
+	Code     string
+	Name     string
+}
+
+type CreateProductInput struct {
+	TenantID string
+	ActorID  string
+	SKU      string
+	Name     string
+	Unit     string
+}
+
+type CreateWarehouseInput struct {
+	TenantID string
+	ActorID  string
+	Code     string
+	Name     string
+}
+
+type CreatePurchaseOrderLine struct {
+	ProductID string
+	Quantity  int
+}
+
+type CreatePurchaseOrderInput struct {
+	TenantID    string
+	ActorID     string
+	SupplierID  string
+	WarehouseID string
+	Lines       []CreatePurchaseOrderLine
+}
+
+type SubmitPurchaseOrderInput struct {
+	TenantID        string
+	ActorID         string
+	PurchaseOrderID string
+}
+
+type ResolveApprovalInput struct {
+	TenantID   string
+	ActorID    string
+	ApprovalID string
+}

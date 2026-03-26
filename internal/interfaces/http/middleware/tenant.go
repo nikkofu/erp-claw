@@ -27,7 +27,11 @@ func Tenant(resolver tenant.Resolver) gin.HandlerFunc {
 		}
 		rc := requestContext(c)
 		rc.TenantID = route.TenantID
+		c.Set("tenant_id", route.TenantID)
 		c.Header("X-Tenant-ID", route.TenantID)
+		if route.Isolation != "" {
+			c.Header("X-Tenant-Isolation", route.Isolation)
+		}
 		c.Next()
 	}
 }

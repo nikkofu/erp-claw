@@ -8,3 +8,7 @@ type WorkspaceEvent struct {
 	TaskID    string
 	Payload   any
 }
+
+type WorkspaceEventSink interface {
+	Broadcast(evt WorkspaceEvent) error
+}

@@ -8,3 +8,10 @@ func OK(c *gin.Context, data any) {
 		"meta": gin.H{"request_id": c.GetString("request_id")},
 	})
 }
+
+func Error(c *gin.Context, status int, message string) {
+	c.AbortWithStatusJSON(status, gin.H{
+		"error": gin.H{"message": message},
+		"meta":  gin.H{"request_id": c.GetString("request_id")},
+	})
+}

@@ -19,3 +19,22 @@ func (SimpleResolver) Resolve(tenantID string) (CellRoute, error) {
 	}
 	return CellRoute{TenantID: tenantID}, nil
 }
+
+// ChainResolver resolves with Primary first and falls back when Primary fails.
+type ChainResolver struct {
+	Primary  Resolver
+	Fallback Resolver
+}
+
+func (r ChainResolver) Resolve(tenantID string) (CellRoute, error) {
+	if r.Primary != nil {
+		route, err := r.Primary.Resolve(tenantID)
+		if err == nil {
+			return route, nil
+		}
+	}
+	if r.Fallback != nil {
+		return r.Fallback.Resolve(tenantID)
+	}
+	return CellRoute{}, errUnknownTenant
+}
