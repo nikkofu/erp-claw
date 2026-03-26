@@ -50,6 +50,14 @@ func TestNewCapabilityRepositoryRejectsNilDB(t *testing.T) {
 	}
 }
 
+func TestNewCapabilityRepositoryFromSQLDBRejectsNilDB(t *testing.T) {
+	t.Parallel()
+
+	if _, err := NewCapabilityRepositoryFromSQLDB(nil); err == nil {
+		t.Fatalf("expected error when sql db is nil")
+	}
+}
+
 func TestCapabilityRepositorySaveWritesCatalogColumns(t *testing.T) {
 	t.Parallel()
 

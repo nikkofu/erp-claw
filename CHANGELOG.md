@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.2] - 2026-03-26
+
+### Added
+
+- Capability catalog bootstrap with Postgres runtime wiring and in-memory test fallback for model catalog and tool catalog repositories.
+- Admin API routes for tenant-scoped model catalog entries and tool catalog entries with create/list coverage.
+- Integration and repository tests that verify capability admin lifecycle routing and `*sql.DB` adapter construction for the capability repository.
+
+### Changed
+
+- Phase 1 coverage docs and README now reflect that capability governance includes a minimal Admin HTTP management surface for model/tool catalog baselines.
+
 ## [0.2.1] - 2026-03-26
 
 ### Added

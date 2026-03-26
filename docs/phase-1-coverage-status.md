@@ -26,7 +26,7 @@
 更准确地说，当前状态是：
 
 - 平台底座已经具备可运行骨架
-- 控制面已经落地 tenant/user/role/department/agent profile 目录、user-role/user-department 绑定、policy/audit 持久化查询，以及 capability 的 model/tool catalog 基线
+- 控制面已经落地 tenant/user/role/department/agent profile 目录、user-role/user-department 绑定、policy/audit 持久化查询，以及 capability 的 model/tool catalog 基线与最小 Admin 管理面
 - Agent 执行与工作台入口已经具备 session/task 仓储、状态机、workspace event seam，以及最小 read side/replay query
 - Approval baseline 已经具备 definition / instance / task 模型、start / approve / reject 闭环、最小 Admin HTTP 管理面，以及 `REQUIRE_APPROVAL` 的最小接线
 - Outbox 已经具备 dispatcher、重试、终态失败与人工 recovery 基线
@@ -67,7 +67,7 @@
 - 控制面实体化第一批切片：tenant / user / role / department / agent profile catalog 与用户绑定关系
 - 治理核心第一批切片：policy rule 持久化、生命周期、audit query
 - Agent runtime 第一批切片：session/task 仓储、状态流转、workspace event
-- Capability governance 第一批切片：tenant-scoped model catalog 与 tool catalog baseline
+- Capability governance 第一批切片：tenant-scoped model catalog 与 tool catalog baseline，以及最小 Admin create/list 管理面
 - Outbox reliability 第一批切片：dispatcher、retry、failed recovery、poll observability seam
 - Agent Gateway 的 workspace 事件入口骨架
 - 本地 smoke 脚本与 live 健康验证流程
@@ -114,7 +114,7 @@
 | 领域 | 模块 | 功能清单 | 优先级 | 当前实现情况 | 代码锚点 |
 | --- | --- | --- | --- | --- | --- |
 | Experience Plane | API Server 运行时 | 加载配置、装配容器、启动 Gin HTTP 服务 | P0 | 已实现 | `cmd/api-server/main.go` |
-| Experience Plane | HTTP 路由分组 | `Admin API`、`Workspace API`、`Platform API`、`Integration API` 的分组入口 | P0 | 部分实现 | `internal/interfaces/http/router/router.go`、`admin.go`、`workspace.go`、`platform.go`、`integration.go`；当前 `Platform API` 已提供健康检查，`Admin API` 已提供控制面目录与审批定义/实例/任务的最小写入/查询接口，`Workspace API` 已提供 sessions/tasks/events 最小只读接口，`Integration API` 仍是占位 |
+| Experience Plane | HTTP 路由分组 | `Admin API`、`Workspace API`、`Platform API`、`Integration API` 的分组入口 | P0 | 部分实现 | `internal/interfaces/http/router/router.go`、`admin.go`、`workspace.go`、`platform.go`、`integration.go`；当前 `Platform API` 已提供健康检查，`Admin API` 已提供控制面目录、审批定义/实例/任务，以及 model/tool catalog 的最小写入/查询接口，`Workspace API` 已提供 sessions/tasks/events 最小只读接口，`Integration API` 仍是占位 |
 | Experience Plane | 健康检查接口 | `/api/platform/v1/health/livez`、`/readyz` | P0 | 已实现 | `internal/interfaces/http/router/health.go`、`internal/platform/health/service.go` |
 | Experience Plane | 中间件链 | request ID、logging、tenant、auth、audit | P0 | 已实现 | `internal/interfaces/http/middleware/*` |
 | Experience Plane | Workspace Gateway seam | 工作台会话注册、事件广播骨架 | P1 | 部分实现 | `internal/interfaces/ws/workspace_gateway.go`；已经具备 session channel 注册、广播和最小事件 replay/query seam，并已通过 `internal/interfaces/http/router/workspace.go` 暴露最小只读 HTTP surface；但仍未实现真实 WebSocket 协议和跨进程回放。 |
@@ -129,8 +129,8 @@
 | Control Plane | Policy Engine | 策略决策枚举、评估接口、规则生命周期、命令治理缝合点 | P1 | 部分实现 | `internal/platform/policy/*`、`internal/application/governance/*`、`internal/infrastructure/persistence/postgres/policy_audit_repository.go`；当前已具备 repository-backed rule evaluator、activate/deactivate 生命周期和治理命令处理器，但还没有真实 ABAC / RBAC / rules engine |
 | Control Plane | Audit 基线 | 审计记录模型、Recorder / Store、持久化查询 | P1 | 部分实现 | `internal/platform/audit/*`、`internal/infrastructure/persistence/postgres/policy_audit_repository.go`；已具备持久化 store 和查询服务，但还没有更完整的审计治理、分页和 retention 策略 |
 | Control Plane | Agent session/task 元数据 | session/task 表、仓储、状态机、workspace event identity | P1 | 部分实现 | `internal/domain/agentruntime/*`、`internal/application/agentruntime/*`、`internal/infrastructure/persistence/postgres/agent_runtime_repository.go`、`migrations/000004_phase1_agent_runtime_control.*`；已具备仓储、状态流转、close/fail/cancel 流程，以及以 `session_key` 为查询契约的 list sessions/list tasks/replay workspace events 最小 read side，但还没有流式协议与执行记录模型。 |
-| Control Plane | Plugin / Tool Registry | 插件注册、工具目录、租户启用、风险级别、输入输出 schema | P1 | 部分实现 | 已补 `internal/domain/capability/tool_catalog_entry.go`、`internal/application/capability/*tool*`、`internal/infrastructure/persistence/postgres/capability_repository.go` 与 `migrations/000008_phase1_tool_catalog.*`，落地 tenant-scoped tool catalog baseline；但 plugin registry、tenant enablement、tool schema/runtime 和 policy binding 仍未完成。 |
-| Control Plane | Quota / Feature Flag / Model Catalog | 配额、租户特性开关、模型与工具可用性治理 | P2 | 部分实现 | `internal/domain/capability/*`、`internal/application/capability/*`、`internal/infrastructure/persistence/postgres/capability_repository.go`、`migrations/000005_phase1_capability_governance.*`、`migrations/000008_phase1_tool_catalog.*`；当前已经落地 tenant-scoped model catalog 与 tool catalog baseline，quota、feature flag 和更完整的 capability policy binding 仍未开始。 |
+| Control Plane | Plugin / Tool Registry | 插件注册、工具目录、租户启用、风险级别、输入输出 schema | P1 | 部分实现 | 已补 `internal/domain/capability/tool_catalog_entry.go`、`internal/application/capability/*tool*`、`internal/infrastructure/persistence/postgres/capability_repository.go`、`internal/bootstrap/capability_catalog.go` 与 `migrations/000008_phase1_tool_catalog.*`，落地 tenant-scoped tool catalog baseline 和最小 Admin create/list 管理面；但 plugin registry、tenant enablement、tool schema/runtime 和 policy binding 仍未完成。 |
+| Control Plane | Quota / Feature Flag / Model Catalog | 配额、租户特性开关、模型与工具可用性治理 | P2 | 部分实现 | `internal/domain/capability/*`、`internal/application/capability/*`、`internal/infrastructure/persistence/postgres/capability_repository.go`、`internal/bootstrap/capability_catalog.go`、`migrations/000005_phase1_capability_governance.*`、`migrations/000008_phase1_tool_catalog.*`；当前已经落地 tenant-scoped model catalog 与 tool catalog baseline，以及最小 Admin create/list 管理面，quota、feature flag 和更完整的 capability policy binding 仍未开始。 |
 
 ### 5.3 Execution Plane / Agent 与自动化执行面
 
@@ -143,7 +143,7 @@
 | Execution Plane | Agent Gateway Runtime | 工作台事件入口、会话 channel 注册、进程生命周期 | P1 | 部分实现 | `cmd/agent-gateway/main.go`、`internal/interfaces/ws/workspace_gateway.go` |
 | Execution Plane | Session Context Assembler | tenant/actor/business/policy/knowledge/execution context 组装 | P1 | 部分实现 | `internal/platform/runtime/request_context.go` 只覆盖 request 级元数据，没有完整 session context assembler |
 | Execution Plane | Workflow Orchestration | 长事务编排、审批暂停/恢复、人工接管、回滚与补偿 | P1 | 部分实现 | 当前已经具备 approval baseline 和 `REQUIRE_APPROVAL` -> approval instance 的最小接线，但还没有真正的 workflow engine、暂停/恢复状态机或 orchestration service。 |
-| Execution Plane | Tool Runtime / Query Tool / Command Tool | 工具目录、输入输出 schema、权限、审批、风险控制 | P1 | 部分实现 | 当前已具备 tenant-scoped tool catalog baseline，但还没有 tool executor、tool policy binding、schema contract 和 runtime approval integration |
+| Execution Plane | Tool Runtime / Query Tool / Command Tool | 工具目录、输入输出 schema、权限、审批、风险控制 | P1 | 部分实现 | 当前已具备 tenant-scoped tool catalog baseline 和最小 Admin 管理面，但还没有 tool executor、tool policy binding、schema contract 和 runtime approval integration |
 
 ### 5.4 Data and Integration Plane / 数据与集成层
 

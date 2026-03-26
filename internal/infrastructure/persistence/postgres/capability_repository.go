@@ -34,6 +34,25 @@ func NewCapabilityRepository(db dbExecutor) (*CapabilityRepository, error) {
 	return &CapabilityRepository{db: db}, nil
 }
 
+type sqlDBAdapter struct {
+	db *sql.DB
+}
+
+func (a sqlDBAdapter) ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error) {
+	return a.db.ExecContext(ctx, query, args...)
+}
+
+func (a sqlDBAdapter) QueryContext(ctx context.Context, query string, args ...any) (rowScanner, error) {
+	return a.db.QueryContext(ctx, query, args...)
+}
+
+func NewCapabilityRepositoryFromSQLDB(db *sql.DB) (*CapabilityRepository, error) {
+	if db == nil {
+		return nil, errors.New("db executor is required")
+	}
+	return NewCapabilityRepository(sqlDBAdapter{db: db})
+}
+
 func (r *CapabilityRepository) Save(ctx context.Context, entry *capability.ModelCatalogEntry) error {
 	if entry == nil {
 		return errors.New("entry is required")

@@ -6,6 +6,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	approvalapp "github.com/nikkofu/erp-claw/internal/application/approval"
+	capabilityapp "github.com/nikkofu/erp-claw/internal/application/capability"
 	controlcommand "github.com/nikkofu/erp-claw/internal/application/controlplane/command"
 	controlquery "github.com/nikkofu/erp-claw/internal/application/controlplane/query"
 	"github.com/nikkofu/erp-claw/internal/bootstrap"
@@ -75,6 +76,22 @@ type decideApprovalTaskRequest struct {
 	Comment  string `json:"comment"`
 }
 
+type createModelCatalogEntryRequest struct {
+	EntryID     string `json:"entry_id"`
+	ModelKey    string `json:"model_key"`
+	DisplayName string `json:"display_name"`
+	Provider    string `json:"provider"`
+	Status      string `json:"status"`
+}
+
+type createToolCatalogEntryRequest struct {
+	EntryID     string `json:"entry_id"`
+	ToolKey     string `json:"tool_key"`
+	DisplayName string `json:"display_name"`
+	RiskLevel   string `json:"risk_level"`
+	Status      string `json:"status"`
+}
+
 func registerAdminRoutes(rg *gin.RouterGroup, container *bootstrap.Container) {
 	if container == nil {
 		panic("router: container must not be nil")
@@ -85,9 +102,13 @@ func registerAdminRoutes(rg *gin.RouterGroup, container *bootstrap.Container) {
 	if container.ApprovalCatalog == nil {
 		panic("router: approval catalog must not be nil")
 	}
+	if container.CapabilityCatalog == nil {
+		panic("router: capability catalog must not be nil")
+	}
 
 	catalog := container.ControlPlaneCatalog
 	approvalCatalog := container.ApprovalCatalog
+	capabilityCatalog := container.CapabilityCatalog
 	createTenantHandler := controlcommand.CreateTenantHandler{Tenants: catalog}
 	listTenantsHandler := controlquery.ListTenantsHandler{Tenants: catalog}
 	createUserHandler := controlcommand.CreateUserHandler{Users: catalog}
@@ -116,6 +137,22 @@ func registerAdminRoutes(rg *gin.RouterGroup, container *bootstrap.Container) {
 	rejectApprovalTaskHandler := approvalapp.RejectTaskHandler{
 		Instances: approvalCatalog,
 		Tasks:     approvalCatalog,
+	}
+	createModelCatalogEntryHandler, err := capabilityapp.NewCreateModelCatalogEntryHandler(capabilityCatalog)
+	if err != nil {
+		panic("router: model catalog handler init failed: " + err.Error())
+	}
+	listModelCatalogEntriesHandler, err := capabilityapp.NewListModelCatalogEntriesHandler(capabilityCatalog)
+	if err != nil {
+		panic("router: model catalog list handler init failed: " + err.Error())
+	}
+	createToolCatalogEntryHandler, err := capabilityapp.NewCreateToolCatalogEntryHandler(capabilityCatalog)
+	if err != nil {
+		panic("router: tool catalog handler init failed: " + err.Error())
+	}
+	listToolCatalogEntriesHandler, err := capabilityapp.NewListToolCatalogEntriesHandler(capabilityCatalog)
+	if err != nil {
+		panic("router: tool catalog list handler init failed: " + err.Error())
 	}
 
 	rg.POST("/tenants", func(c *gin.Context) {
@@ -445,6 +482,84 @@ func registerAdminRoutes(rg *gin.RouterGroup, container *bootstrap.Container) {
 		}
 
 		adminCreated(c, updated)
+	})
+
+	rg.POST("/model-catalog-entries", func(c *gin.Context) {
+		var req createModelCatalogEntryRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			adminError(c, http.StatusBadRequest, err)
+			return
+		}
+
+		tenantID := tenantIDFromQueryOrHeader(c)
+		if err := createModelCatalogEntryHandler.Handle(c.Request.Context(), tenantID, capabilityapp.CreateModelCatalogEntryPayload{
+			ID:          req.EntryID,
+			ModelKey:    req.ModelKey,
+			DisplayName: req.DisplayName,
+			Provider:    req.Provider,
+			Status:      req.Status,
+		}); err != nil {
+			adminError(c, http.StatusBadRequest, err)
+			return
+		}
+
+		adminCreated(c, gin.H{
+			"TenantID":    tenantID,
+			"EntryID":     req.EntryID,
+			"ModelKey":    req.ModelKey,
+			"DisplayName": req.DisplayName,
+			"Provider":    req.Provider,
+			"Status":      req.Status,
+		})
+	})
+
+	rg.GET("/model-catalog-entries", func(c *gin.Context) {
+		entries, err := listModelCatalogEntriesHandler.Handle(c.Request.Context(), tenantIDFromQueryOrHeader(c))
+		if err != nil {
+			adminError(c, http.StatusBadRequest, err)
+			return
+		}
+
+		presenter.OK(c, entries)
+	})
+
+	rg.POST("/tool-catalog-entries", func(c *gin.Context) {
+		var req createToolCatalogEntryRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			adminError(c, http.StatusBadRequest, err)
+			return
+		}
+
+		tenantID := tenantIDFromQueryOrHeader(c)
+		if err := createToolCatalogEntryHandler.Handle(c.Request.Context(), tenantID, capabilityapp.CreateToolCatalogEntryPayload{
+			ID:          req.EntryID,
+			ToolKey:     req.ToolKey,
+			DisplayName: req.DisplayName,
+			RiskLevel:   req.RiskLevel,
+			Status:      req.Status,
+		}); err != nil {
+			adminError(c, http.StatusBadRequest, err)
+			return
+		}
+
+		adminCreated(c, gin.H{
+			"TenantID":    tenantID,
+			"EntryID":     req.EntryID,
+			"ToolKey":     req.ToolKey,
+			"DisplayName": req.DisplayName,
+			"RiskLevel":   req.RiskLevel,
+			"Status":      req.Status,
+		})
+	})
+
+	rg.GET("/tool-catalog-entries", func(c *gin.Context) {
+		entries, err := listToolCatalogEntriesHandler.Handle(c.Request.Context(), tenantIDFromQueryOrHeader(c))
+		if err != nil {
+			adminError(c, http.StatusBadRequest, err)
+			return
+		}
+
+		presenter.OK(c, entries)
 	})
 }
 

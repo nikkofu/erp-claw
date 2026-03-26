@@ -344,6 +344,52 @@ func TestAdminApprovalRejectRoutes(t *testing.T) {
 	}
 }
 
+func TestAdminCapabilityCatalogRoutes(t *testing.T) {
+	h := router.New(router.WithContainer(bootstrap.NewTestContainer()))
+
+	tenantID := createAdminEntityAndReadID(t, h, http.MethodPost, "/api/admin/v1/tenants", `{"code":"tenant-capability","name":"Tenant Capability"}`, "platform-root")
+
+	modelReq := httptest.NewRequest(http.MethodPost, "/api/admin/v1/model-catalog-entries", strings.NewReader(`{"entry_id":"model-1","model_key":"gpt-5.4","display_name":"GPT 5.4","provider":"openai","status":"active"}`))
+	modelReq.Header.Set("Content-Type", "application/json")
+	modelReq.Header.Set("X-Tenant-ID", tenantID)
+	modelRec := httptest.NewRecorder()
+	h.ServeHTTP(modelRec, modelReq)
+	if modelRec.Code != http.StatusCreated {
+		t.Fatalf("expected model catalog create 201, got %d: %s", modelRec.Code, modelRec.Body.String())
+	}
+
+	toolReq := httptest.NewRequest(http.MethodPost, "/api/admin/v1/tool-catalog-entries", strings.NewReader(`{"entry_id":"tool-1","tool_key":"purchase.submit","display_name":"Purchase Submit","risk_level":"medium","status":"active"}`))
+	toolReq.Header.Set("Content-Type", "application/json")
+	toolReq.Header.Set("X-Tenant-ID", tenantID)
+	toolRec := httptest.NewRecorder()
+	h.ServeHTTP(toolRec, toolReq)
+	if toolRec.Code != http.StatusCreated {
+		t.Fatalf("expected tool catalog create 201, got %d: %s", toolRec.Code, toolRec.Body.String())
+	}
+
+	modelsReq := httptest.NewRequest(http.MethodGet, "/api/admin/v1/model-catalog-entries?tenant_id="+tenantID, nil)
+	modelsReq.Header.Set("X-Tenant-ID", tenantID)
+	modelsRec := httptest.NewRecorder()
+	h.ServeHTTP(modelsRec, modelsReq)
+	if modelsRec.Code != http.StatusOK {
+		t.Fatalf("expected model catalog list 200, got %d: %s", modelsRec.Code, modelsRec.Body.String())
+	}
+	if !strings.Contains(modelsRec.Body.String(), "gpt-5.4") {
+		t.Fatalf("expected model catalog response to contain gpt-5.4, got %s", modelsRec.Body.String())
+	}
+
+	toolsReq := httptest.NewRequest(http.MethodGet, "/api/admin/v1/tool-catalog-entries?tenant_id="+tenantID, nil)
+	toolsReq.Header.Set("X-Tenant-ID", tenantID)
+	toolsRec := httptest.NewRecorder()
+	h.ServeHTTP(toolsRec, toolsReq)
+	if toolsRec.Code != http.StatusOK {
+		t.Fatalf("expected tool catalog list 200, got %d: %s", toolsRec.Code, toolsRec.Body.String())
+	}
+	if !strings.Contains(toolsRec.Body.String(), "purchase.submit") {
+		t.Fatalf("expected tool catalog response to contain purchase.submit, got %s", toolsRec.Body.String())
+	}
+}
+
 func createAdminEntityAndReadID(t *testing.T, h http.Handler, method, path, payload, tenantID string) string {
 	t.Helper()
 
