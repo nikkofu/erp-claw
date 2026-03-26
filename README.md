@@ -105,8 +105,10 @@ Run `go test ./test/integration -run 'TestAdminSupplyChainFlow|TestAdminInventor
 
 - `GET /api/workspace/v1/inventory/balances?product_id=<id>&warehouse_id=<id>`
 - `GET /api/workspace/v1/inventory/ledger?product_id=<id>&warehouse_id=<id>`
+- `GET /api/workspace/v1/sales-orders`
+- `GET /api/workspace/v1/sales-orders/:id`
 
-Run `go test ./test/integration -run 'TestWorkspaceInventoryQueriesReturnBalanceAndLedger' -v` to verify workspace inventory query routing and response shape.
+Run `go test ./test/integration -run 'TestWorkspaceInventoryQueriesReturnBalanceAndLedger|TestWorkspaceSalesOrderQueriesReturnListAndDetail' -v` to verify workspace inventory/sales query routing and response shape.
 
 ## Smoke Run
 

@@ -37,4 +37,27 @@ func registerWorkspaceRoutes(rg *gin.RouterGroup, container *bootstrap.Container
 		}
 		presenter.OK(c, ledgerEntriesResponse(entries))
 	})
+
+	salesGroup := rg.Group("/sales-orders")
+	salesGroup.GET("", func(c *gin.Context) {
+		orders, err := container.SupplyChain.ListSalesOrders(c.Request.Context(), supplychain.ListSalesOrdersInput{
+			TenantID: tenantIDFromContext(c),
+		})
+		if err != nil {
+			renderSupplyChainError(c, err)
+			return
+		}
+		presenter.OK(c, salesOrdersResponse(orders))
+	})
+	salesGroup.GET("/:id", func(c *gin.Context) {
+		order, err := container.SupplyChain.GetSalesOrder(c.Request.Context(), supplychain.GetSalesOrderInput{
+			TenantID:     tenantIDFromContext(c),
+			SalesOrderID: c.Param("id"),
+		})
+		if err != nil {
+			renderSupplyChainError(c, err)
+			return
+		}
+		presenter.OK(c, salesOrderResponse(order))
+	})
 }
