@@ -146,6 +146,12 @@ Use `make smoke` to run the live HTTP health probe in `TestHealthRoutesLive` aft
 scripts/phase_handoff_new.sh phase2-wave-next
 ```
 
+次日恢复建议先跑：
+
+```bash
+scripts/phase_resume_from_latest.sh
+```
+
 生成后请补齐“新鲜验证结果 + 明天第一任务 + merge 安全状态”。
 
 ## Configuration

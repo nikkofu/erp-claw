@@ -30,3 +30,16 @@
 1. 使用 `skills/phase-handoff-playbook/handoff-template.md` 起草
 2. 对照 `skills/phase-handoff-playbook/handoff-quality-checklist.md` 自检
 3. 在次日开工前执行 `skills/phase-handoff-playbook/resume-checklist.md`
+
+## 明早快速恢复
+
+```bash
+scripts/phase_resume_from_latest.sh
+```
+
+该脚本会输出：
+
+- 最新 handoff 文件路径
+- 当前分支/HEAD/远端主线快照
+- handoff 中记录的“明天第一任务”
+- handoff 中提取到的验证命令（best-effort）
