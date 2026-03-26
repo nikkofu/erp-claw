@@ -1,6 +1,6 @@
 # 全局阶段路线总览
 
-更新时间：2026-03-25
+更新时间：2026-03-26
 
 ## 1. 文档目的
 
@@ -17,7 +17,7 @@
 当前项目处于：
 
 - `Phase 0/1 平台底座已完成第一批可运行基线`
-- `Phase 1 控制面主线仅完成骨架`
+- `Phase 1 控制面已经落地第一批可执行切片，但离完整交付仍有明显缺口`
 - `Phase 2~4 仍处于设计完成、执行未开始状态`
 
 因此，后续路线不应该继续扩展更多无业务承载的技术骨架，而应该沿着既定路线逐步完成：
@@ -31,7 +31,7 @@
 
 | 阶段 | 名称 | 核心目标 | 主要产出 | 当前状态 |
 | --- | --- | --- | --- | --- |
-| Phase 0/1 | 平台底座与控制面骨架 | 跑通运行时、配置、租户上下文、策略审计、事件总线、agent gateway seam | 五个 runtime、基础中间件、迁移、event bus、command pipeline、smoke 流程 | 已部分完成 |
+| Phase 0/1 | 平台底座与控制面骨架 | 跑通运行时、配置、租户上下文、策略审计、事件总线、agent gateway seam | 五个 runtime、基础中间件、迁移、event bus、command pipeline、smoke 流程，以及第一批控制面可执行切片 | 已完成第一批可执行切片 |
 | Phase 2 | 供应链交易闭环 | 把采购、库存、审批、主数据等最小业务闭环落地 | 领域模型、命令处理、管理 API、读模型、闭环交易流 | 未开始 |
 | Phase 3 | AI-Native Execution Strengthening | 把 Agent Workspace、任务状态机、工具运行时、知识检索、审批暂停/恢复做成真正的执行系统 | workspace 流式协议、agent session/task runtime、workflow orchestration、human handoff | 未开始 |
 | Phase 4 | Enterprise Expansion | 把平台从“可用”扩展到“企业可规模化运行” | 开放集成平台、专属租户单元、增强搜索分析、深度治理 | 未开始 |

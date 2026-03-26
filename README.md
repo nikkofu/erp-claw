@@ -27,6 +27,24 @@ Each entrypoint uses `internal/bootstrap` to surface the shared runtime metadata
 - `worker` owns asynchronous processing such as outbox draining and later background execution.
 - `scheduler` emits timed orchestration signals instead of mutating business data directly.
 
+## Admin API Control-Plane Slice (Phase 1)
+
+The Admin API now includes the first control-plane catalog slice. Its purpose is to bootstrap and manage foundational catalog data needed before workspace and execution-plane workflows can be layered on top.
+
+This is the first Phase 1 control-plane implementation, not the full control plane. It intentionally ships a narrow set of catalog capabilities so the runtime wiring and contracts can be validated incrementally.
+
+Catalog entities in this slice:
+
+- Tenants (control-plane catalog roots)
+- IAM Users (tenant-scoped identities)
+- Agent Profiles (governed AI agent definitions per tenant)
+
+Bootstrap behavior for `bootstrap.NewContainer(cfg)`:
+
+- Uses a Postgres-backed control-plane catalog repository when the configured database is reachable.
+- Fails fast when a runtime Postgres catalog cannot be initialized, so control-plane and workspace state do not silently degrade into ephemeral storage.
+- Uses in-memory catalogs only for explicit test bootstrap paths such as `bootstrap.NewTestContainer()` or configurations with an empty database DSN.
+
 ## Dependencies
 
 Third-party services (databases, message brokers, etc.) are expected to be brought up through `docker-compose.yml` before running any Go runtime.
