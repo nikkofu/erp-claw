@@ -1114,6 +1114,85 @@ func TestServiceListActorsSupportsRoleDepartmentAndPagination(t *testing.T) {
 	}
 }
 
+func TestServiceListPolicyRulesSupportsCommandPrefixAndPagination(t *testing.T) {
+	store := memory.NewControlPlaneStore()
+	ruleStore := policy.NewInMemoryRuleStore()
+	svc := NewService(ServiceDeps{
+		TenantCatalog: store.TenantCatalog(),
+		IAMDirectory:  store.IAMDirectory(),
+		Sessions:      store.SessionRepository(),
+		Tasks:         store.TaskRepository(),
+		PolicyRules:   ruleStore,
+		Pipeline: shared.NewPipeline(shared.PipelineDeps{
+			Policy: policy.StaticEvaluator(policy.DecisionAllow),
+		}),
+	})
+
+	ctx := context.Background()
+	for _, rule := range []UpsertPolicyRuleInput{
+		{
+			OperatorTenantID: "tenant-admin",
+			OperatorActorID:  "actor-admin",
+			TenantID:         "tenant-a",
+			CommandPrefix:    "masterdata.products.",
+			AnyOfRoles:       []string{"viewer"},
+		},
+		{
+			OperatorTenantID: "tenant-admin",
+			OperatorActorID:  "actor-admin",
+			TenantID:         "tenant-a",
+			CommandPrefix:    "masterdata.suppliers.",
+			AnyOfRoles:       []string{"viewer"},
+		},
+		{
+			OperatorTenantID: "tenant-admin",
+			OperatorActorID:  "actor-admin",
+			TenantID:         "tenant-a",
+			CommandPrefix:    "procurement.purchase_orders.",
+			AnyOfRoles:       []string{"buyer"},
+		},
+	} {
+		if _, err := svc.UpsertPolicyRule(ctx, rule); err != nil {
+			t.Fatalf("upsert rule %s: %v", rule.CommandPrefix, err)
+		}
+	}
+
+	masterdataRules, err := svc.ListPolicyRules(ctx, ListPolicyRulesInput{
+		OperatorTenantID: "tenant-admin",
+		OperatorActorID:  "actor-admin",
+		TenantID:         "tenant-a",
+		CommandPrefix:    "masterdata.",
+	})
+	if err != nil {
+		t.Fatalf("list filtered rules: %v", err)
+	}
+	if len(masterdataRules) != 2 {
+		t.Fatalf("expected 2 masterdata rules, got %d", len(masterdataRules))
+	}
+	for _, rule := range masterdataRules {
+		if rule.CommandPrefix != "masterdata.products." && rule.CommandPrefix != "masterdata.suppliers." {
+			t.Fatalf("unexpected filtered rule: %s", rule.CommandPrefix)
+		}
+	}
+
+	pagedRules, err := svc.ListPolicyRules(ctx, ListPolicyRulesInput{
+		OperatorTenantID: "tenant-admin",
+		OperatorActorID:  "actor-admin",
+		TenantID:         "tenant-a",
+		Offset:           1,
+		Limit:            1,
+	})
+	if err != nil {
+		t.Fatalf("list paged rules: %v", err)
+	}
+	if len(pagedRules) != 1 {
+		t.Fatalf("expected 1 paged rule, got %d", len(pagedRules))
+	}
+	if pagedRules[0].CommandPrefix != "masterdata.suppliers." {
+		t.Fatalf("expected paged rule masterdata.suppliers., got %s", pagedRules[0].CommandPrefix)
+	}
+}
+
 type recordingWorkspaceEventSink struct {
 	events []platformruntime.WorkspaceEvent
 }

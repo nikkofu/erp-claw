@@ -759,6 +759,9 @@ type ListPolicyRulesInput struct {
 	OperatorTenantID string
 	OperatorActorID  string
 	TenantID         string
+	CommandPrefix    string
+	Offset           int
+	Limit            int
 }
 
 func (s *Service) ListPolicyRules(ctx context.Context, input ListPolicyRulesInput) ([]policy.Rule, error) {
@@ -782,7 +785,30 @@ func (s *Service) ListPolicyRules(ctx context.Context, input ListPolicyRulesInpu
 		if err != nil {
 			return err
 		}
-		rules = append([]policy.Rule(nil), listed...)
+
+		targetPrefix := strings.TrimSpace(input.CommandPrefix)
+		filtered := make([]policy.Rule, 0, len(listed))
+		for _, rule := range listed {
+			if targetPrefix != "" && !strings.HasPrefix(rule.CommandPrefix, targetPrefix) {
+				continue
+			}
+			filtered = append(filtered, rule)
+		}
+
+		start := input.Offset
+		if start < 0 {
+			start = 0
+		}
+		if start >= len(filtered) {
+			rules = []policy.Rule{}
+			return nil
+		}
+
+		end := len(filtered)
+		if input.Limit > 0 && start+input.Limit < end {
+			end = start + input.Limit
+		}
+		rules = append([]policy.Rule(nil), filtered[start:end]...)
 		return nil
 	})
 	return rules, err

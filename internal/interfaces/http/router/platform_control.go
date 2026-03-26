@@ -183,10 +183,24 @@ func registerControlPlaneRoutes(rg *gin.RouterGroup, container *bootstrap.Contai
 	})
 
 	controlGroup.GET("/policy/rules", func(c *gin.Context) {
+		limit, err := parseLimit(c.Query("limit"), 20)
+		if err != nil {
+			presenter.Error(c, http.StatusBadRequest, err.Error())
+			return
+		}
+		offset, err := parseOffset(c.Query("offset"))
+		if err != nil {
+			presenter.Error(c, http.StatusBadRequest, err.Error())
+			return
+		}
+
 		rules, err := container.ControlPlane.ListPolicyRules(c.Request.Context(), controlplane.ListPolicyRulesInput{
 			OperatorTenantID: tenantIDFromContext(c),
 			OperatorActorID:  actorIDFromContext(c),
 			TenantID:         c.Query("tenant_id"),
+			CommandPrefix:    c.Query("command_prefix"),
+			Offset:           offset,
+			Limit:            limit,
 		})
 		if err != nil {
 			renderControlPlaneError(c, err)
