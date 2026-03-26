@@ -556,6 +556,8 @@ func renderControlPlaneError(c *gin.Context, err error) {
 		presenter.Error(c, http.StatusForbidden, err.Error())
 	case errors.Is(err, shared.ErrApprovalRequired):
 		presenter.Error(c, http.StatusConflict, err.Error())
+	case errors.Is(err, platformruntime.ErrTaskRetryLimitExceeded):
+		presenter.Error(c, http.StatusConflict, err.Error())
 	case errors.Is(err, tenant.ErrTenantNotFound),
 		errors.Is(err, iam.ErrActorNotFound),
 		errors.Is(err, policy.ErrRuleNotFound),

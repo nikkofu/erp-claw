@@ -276,6 +276,75 @@ func TestServiceRetryTaskRequeuesFailedTaskAndEmitsEvent(t *testing.T) {
 	assertWorkspaceEvent(t, got[5], "runtime.task.running", "tenant-a", session.ID, task.ID)
 }
 
+func TestServiceRetryTaskRejectsWhenRetryLimitExceeded(t *testing.T) {
+	store := memory.NewControlPlaneStore()
+	svc := NewService(ServiceDeps{
+		TenantCatalog: store.TenantCatalog(),
+		IAMDirectory:  store.IAMDirectory(),
+		Sessions:      store.SessionRepository(),
+		Tasks:         store.TaskRepository(),
+		Pipeline: shared.NewPipeline(shared.PipelineDeps{
+			Policy: policy.StaticEvaluator(policy.DecisionAllow),
+		}),
+	})
+
+	ctx := context.Background()
+	session, err := svc.OpenSession(ctx, OpenSessionInput{
+		TenantID:  "tenant-a",
+		ActorID:   "actor-a",
+		SessionID: "sess-001",
+	})
+	if err != nil {
+		t.Fatalf("open session: %v", err)
+	}
+	task, err := svc.EnqueueTask(ctx, EnqueueTaskInput{
+		TenantID:  "tenant-a",
+		ActorID:   "actor-a",
+		SessionID: session.ID,
+		TaskID:    "task-001",
+		TaskType:  "tool.call",
+	})
+	if err != nil {
+		t.Fatalf("enqueue task: %v", err)
+	}
+
+	for i := 0; i < platformruntime.MaxTaskAttempts; i++ {
+		if _, err := svc.StartTask(ctx, AdvanceTaskInput{
+			TenantID: "tenant-a",
+			ActorID:  "actor-a",
+			TaskID:   task.ID,
+		}); err != nil {
+			t.Fatalf("start attempt %d: %v", i+1, err)
+		}
+		if _, err := svc.FailTask(ctx, AdvanceTaskInput{
+			TenantID: "tenant-a",
+			ActorID:  "actor-a",
+			TaskID:   task.ID,
+			Reason:   "tool timeout",
+		}); err != nil {
+			t.Fatalf("fail attempt %d: %v", i+1, err)
+		}
+		if i < platformruntime.MaxTaskAttempts-1 {
+			if _, err := svc.RetryTask(ctx, AdvanceTaskInput{
+				TenantID: "tenant-a",
+				ActorID:  "actor-a",
+				TaskID:   task.ID,
+			}); err != nil {
+				t.Fatalf("retry attempt %d: %v", i+1, err)
+			}
+		}
+	}
+
+	_, err = svc.RetryTask(ctx, AdvanceTaskInput{
+		TenantID: "tenant-a",
+		ActorID:  "actor-a",
+		TaskID:   task.ID,
+	})
+	if !errors.Is(err, platformruntime.ErrTaskRetryLimitExceeded) {
+		t.Fatalf("expected ErrTaskRetryLimitExceeded, got %v", err)
+	}
+}
+
 func TestServiceCloseSessionEmitsWorkspaceEventAndRejectsEnqueueOnClosedSession(t *testing.T) {
 	store := memory.NewControlPlaneStore()
 	sink := &recordingWorkspaceEventSink{}

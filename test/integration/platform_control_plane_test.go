@@ -245,6 +245,49 @@ func TestPlatformControlPlaneTaskRetryFlow(t *testing.T) {
 	}
 }
 
+func TestPlatformControlPlaneTaskRetryRejectsWhenLimitExceeded(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	container := bootstrap.NewContainer(bootstrap.DefaultConfig())
+	h := router.New(router.WithContainer(container))
+
+	postJSONData(t, h, "/api/platform/v1/agent/sessions", map[string]any{
+		"session_id": "sess-retry-limit-001",
+		"metadata": map[string]any{
+			"channel": "workspace",
+		},
+	})
+	postJSONData(t, h, "/api/platform/v1/agent/sessions/sess-retry-limit-001/tasks", map[string]any{
+		"task_id":   "task-retry-limit-001",
+		"task_type": "tool.call",
+		"input": map[string]any{
+			"tool": "search",
+		},
+	})
+
+	for i := 0; i < 3; i++ {
+		postJSONData(t, h, "/api/platform/v1/agent/tasks/task-retry-limit-001/start", map[string]any{})
+		postJSONData(t, h, "/api/platform/v1/agent/tasks/task-retry-limit-001/fail", map[string]any{
+			"reason": "tool timeout",
+		})
+		if i < 2 {
+			postJSONData(t, h, "/api/platform/v1/agent/tasks/task-retry-limit-001/retry", map[string]any{})
+		}
+	}
+
+	rejected := doJSONWithHeaders(
+		t,
+		h,
+		http.MethodPost,
+		"/api/platform/v1/agent/tasks/task-retry-limit-001/retry",
+		map[string]any{},
+		http.StatusConflict,
+		nil,
+	)
+	if rejected.Error["message"] == "" {
+		t.Fatal("expected retry limit rejection message")
+	}
+}
+
 func TestPlatformControlPlaneCloseSessionRejectedWhenTaskActive(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	container := bootstrap.NewContainer(bootstrap.DefaultConfig())

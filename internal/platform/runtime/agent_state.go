@@ -11,6 +11,7 @@ var (
 	ErrInvalidSessionTransition = errors.New("invalid session transition")
 	ErrInvalidTask              = errors.New("invalid agent task")
 	ErrInvalidTaskTransition    = errors.New("invalid task transition")
+	ErrTaskRetryLimitExceeded   = errors.New("task retry limit exceeded")
 )
 
 type SessionStatus string
@@ -29,6 +30,8 @@ const (
 	TaskStatusFailed    TaskStatus = "failed"
 	TaskStatusCanceled  TaskStatus = "canceled"
 )
+
+const MaxTaskAttempts = 3
 
 // AgentSession describes a workspace session for command/task streaming.
 type Session struct {
@@ -148,6 +151,9 @@ func (t *Task) Cancel(reason string, at time.Time) error {
 func (t *Task) Retry(at time.Time) error {
 	if t.Status != TaskStatusFailed && t.Status != TaskStatusCanceled {
 		return ErrInvalidTaskTransition
+	}
+	if t.Attempts >= MaxTaskAttempts {
+		return ErrTaskRetryLimitExceeded
 	}
 	t.Status = TaskStatusPending
 	t.Output = map[string]any{}
