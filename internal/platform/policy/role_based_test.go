@@ -78,3 +78,33 @@ func TestRoleEvaluatorReturnsErrorWhenLookupFails(t *testing.T) {
 		t.Fatalf("expected lookup error, got %v", err)
 	}
 }
+
+func TestRoleEvaluatorAllowsTenantOverrideRule(t *testing.T) {
+	evaluator := NewRoleEvaluatorWithTenantRules(
+		func(_ context.Context, _, _ string) ([]string, error) {
+			return []string{"viewer"}, nil
+		},
+		[]Rule{{
+			CommandPrefix: "masterdata.",
+			AnyOfRoles:    []string{"platform_admin"},
+		}},
+		func(_ context.Context, _ string) ([]Rule, error) {
+			return []Rule{{
+				CommandPrefix: "masterdata.",
+				AnyOfRoles:    []string{"viewer"},
+			}}, nil
+		},
+	)
+
+	decision, err := evaluator.Evaluate(context.Background(), Input{
+		CommandName: "masterdata.suppliers.create",
+		TenantID:    "tenant-a",
+		ActorID:     "actor-viewer",
+	})
+	if err != nil {
+		t.Fatalf("evaluate role policy: %v", err)
+	}
+	if decision != DecisionAllow {
+		t.Fatalf("expected decision allow from tenant override, got %s", decision)
+	}
+}

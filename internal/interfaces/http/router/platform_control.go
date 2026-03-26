@@ -14,6 +14,7 @@ import (
 	"github.com/nikkofu/erp-claw/internal/interfaces/http/presenter"
 	"github.com/nikkofu/erp-claw/internal/platform/audit"
 	"github.com/nikkofu/erp-claw/internal/platform/iam"
+	"github.com/nikkofu/erp-claw/internal/platform/policy"
 	platformruntime "github.com/nikkofu/erp-claw/internal/platform/runtime"
 	"github.com/nikkofu/erp-claw/internal/platform/tenant"
 )
@@ -64,6 +65,40 @@ func registerControlPlaneRoutes(rg *gin.RouterGroup, container *bootstrap.Contai
 			return
 		}
 		presenter.OK(c, actorResponse(actor))
+	})
+
+	controlGroup.POST("/policy/rules", func(c *gin.Context) {
+		var req upsertPolicyRuleRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			presenter.Error(c, http.StatusBadRequest, err.Error())
+			return
+		}
+
+		rule, err := container.ControlPlane.UpsertPolicyRule(c.Request.Context(), controlplane.UpsertPolicyRuleInput{
+			OperatorTenantID: tenantIDFromContext(c),
+			OperatorActorID:  actorIDFromContext(c),
+			TenantID:         req.TenantID,
+			CommandPrefix:    req.CommandPrefix,
+			AnyOfRoles:       req.AnyOfRoles,
+		})
+		if err != nil {
+			renderControlPlaneError(c, err)
+			return
+		}
+		presenter.OK(c, policyRuleResponse(rule))
+	})
+
+	controlGroup.GET("/policy/rules", func(c *gin.Context) {
+		rules, err := container.ControlPlane.ListPolicyRules(c.Request.Context(), controlplane.ListPolicyRulesInput{
+			OperatorTenantID: tenantIDFromContext(c),
+			OperatorActorID:  actorIDFromContext(c),
+			TenantID:         c.Query("tenant_id"),
+		})
+		if err != nil {
+			renderControlPlaneError(c, err)
+			return
+		}
+		presenter.OK(c, gin.H{"rules": policyRuleListResponse(rules)})
 	})
 
 	agentGroup := rg.Group("/agent")
@@ -254,6 +289,12 @@ type failTaskRequest struct {
 	Reason string `json:"reason"`
 }
 
+type upsertPolicyRuleRequest struct {
+	TenantID      string   `json:"tenant_id"`
+	CommandPrefix string   `json:"command_prefix"`
+	AnyOfRoles    []string `json:"any_of_roles"`
+}
+
 func renderControlPlaneError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, shared.ErrPolicyDenied):
@@ -267,11 +308,14 @@ func renderControlPlaneError(c *gin.Context, err error) {
 		presenter.Error(c, http.StatusNotFound, err.Error())
 	case errors.Is(err, tenant.ErrInvalidTenant),
 		errors.Is(err, iam.ErrInvalidActor),
+		errors.Is(err, policy.ErrInvalidRule),
 		errors.Is(err, platformruntime.ErrInvalidSession),
 		errors.Is(err, platformruntime.ErrInvalidTask),
 		errors.Is(err, platformruntime.ErrInvalidSessionTransition),
 		errors.Is(err, platformruntime.ErrInvalidTaskTransition):
 		presenter.Error(c, http.StatusBadRequest, err.Error())
+	case errors.Is(err, controlplane.ErrPolicyRuleStoreUnavailable):
+		presenter.Error(c, http.StatusServiceUnavailable, err.Error())
 	default:
 		presenter.Error(c, http.StatusInternalServerError, err.Error())
 	}
@@ -335,6 +379,21 @@ func auditRecordsResponse(records []audit.Record) []gin.H {
 			"error":        record.Error,
 			"occurred_at":  formatTime(record.OccurredAt),
 		})
+	}
+	return out
+}
+
+func policyRuleResponse(value policy.Rule) gin.H {
+	return gin.H{
+		"command_prefix": value.CommandPrefix,
+		"any_of_roles":   append([]string(nil), value.AnyOfRoles...),
+	}
+}
+
+func policyRuleListResponse(rules []policy.Rule) []gin.H {
+	out := make([]gin.H, 0, len(rules))
+	for _, rule := range rules {
+		out = append(out, policyRuleResponse(rule))
 	}
 	return out
 }

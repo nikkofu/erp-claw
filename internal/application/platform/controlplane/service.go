@@ -2,6 +2,7 @@ package controlplane
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync/atomic"
@@ -10,9 +11,12 @@ import (
 	"github.com/nikkofu/erp-claw/internal/application/shared"
 	"github.com/nikkofu/erp-claw/internal/platform/audit"
 	"github.com/nikkofu/erp-claw/internal/platform/iam"
+	"github.com/nikkofu/erp-claw/internal/platform/policy"
 	platformruntime "github.com/nikkofu/erp-claw/internal/platform/runtime"
 	"github.com/nikkofu/erp-claw/internal/platform/tenant"
 )
+
+var ErrPolicyRuleStoreUnavailable = errors.New("policy rule store is unavailable")
 
 type ServiceDeps struct {
 	TenantCatalog   tenant.Catalog
@@ -20,6 +24,7 @@ type ServiceDeps struct {
 	Sessions        platformruntime.SessionRepository
 	Tasks           platformruntime.TaskRepository
 	AuditReader     audit.Reader
+	PolicyRules     policy.RuleStore
 	WorkspaceEvents platformruntime.WorkspaceEventSink
 	Pipeline        *shared.Pipeline
 }
@@ -30,6 +35,7 @@ type Service struct {
 	sessions        platformruntime.SessionRepository
 	tasks           platformruntime.TaskRepository
 	auditReader     audit.Reader
+	policyRules     policy.RuleStore
 	workspaceEvents platformruntime.WorkspaceEventSink
 	pipeline        *shared.Pipeline
 }
@@ -46,6 +52,7 @@ func NewService(deps ServiceDeps) *Service {
 		sessions:        deps.Sessions,
 		tasks:           deps.Tasks,
 		auditReader:     deps.AuditReader,
+		policyRules:     deps.PolicyRules,
 		workspaceEvents: deps.WorkspaceEvents,
 		pipeline:        deps.Pipeline,
 	}
@@ -316,6 +323,87 @@ func (s *Service) ListSessionTasks(ctx context.Context, input ListSessionTasksIn
 		return nil
 	})
 	return tasks, err
+}
+
+type UpsertPolicyRuleInput struct {
+	OperatorTenantID string
+	OperatorActorID  string
+	TenantID         string
+	CommandPrefix    string
+	AnyOfRoles       []string
+}
+
+func (s *Service) UpsertPolicyRule(ctx context.Context, input UpsertPolicyRuleInput) (policy.Rule, error) {
+	if s.policyRules == nil {
+		return policy.Rule{}, ErrPolicyRuleStoreUnavailable
+	}
+
+	var rule policy.Rule
+	err := s.pipeline.Execute(ctx, shared.Command{
+		Name:     "controlplane.policy_rules.upsert",
+		TenantID: input.OperatorTenantID,
+		ActorID:  input.OperatorActorID,
+		Payload:  input,
+	}, func(txCtx context.Context, _ shared.Command) error {
+		targetTenantID := strings.TrimSpace(input.TenantID)
+		if targetTenantID == "" {
+			targetTenantID = strings.TrimSpace(input.OperatorTenantID)
+		}
+
+		rule = policy.Rule{
+			CommandPrefix: strings.TrimSpace(input.CommandPrefix),
+			AnyOfRoles:    append([]string(nil), input.AnyOfRoles...),
+		}
+		if err := s.policyRules.Upsert(txCtx, targetTenantID, rule); err != nil {
+			return err
+		}
+
+		listed, err := s.policyRules.List(txCtx, targetTenantID)
+		if err != nil {
+			return err
+		}
+		for _, candidate := range listed {
+			if candidate.CommandPrefix == rule.CommandPrefix {
+				rule = candidate
+				break
+			}
+		}
+		return nil
+	})
+	return rule, err
+}
+
+type ListPolicyRulesInput struct {
+	OperatorTenantID string
+	OperatorActorID  string
+	TenantID         string
+}
+
+func (s *Service) ListPolicyRules(ctx context.Context, input ListPolicyRulesInput) ([]policy.Rule, error) {
+	if s.policyRules == nil {
+		return nil, ErrPolicyRuleStoreUnavailable
+	}
+
+	var rules []policy.Rule
+	err := s.pipeline.Execute(ctx, shared.Command{
+		Name:     "controlplane.policy_rules.list",
+		TenantID: input.OperatorTenantID,
+		ActorID:  input.OperatorActorID,
+		Payload:  input,
+	}, func(txCtx context.Context, _ shared.Command) error {
+		targetTenantID := strings.TrimSpace(input.TenantID)
+		if targetTenantID == "" {
+			targetTenantID = strings.TrimSpace(input.OperatorTenantID)
+		}
+
+		listed, err := s.policyRules.List(txCtx, targetTenantID)
+		if err != nil {
+			return err
+		}
+		rules = append([]policy.Rule(nil), listed...)
+		return nil
+	})
+	return rules, err
 }
 
 type ListAuditInput struct {
