@@ -214,6 +214,24 @@ func (r taskRepository) ListBySession(_ context.Context, tenantID, sessionID str
 	return out, nil
 }
 
+func (r taskRepository) ListByTenant(_ context.Context, tenantID string) ([]platformruntime.Task, error) {
+	r.store.mu.RLock()
+	defer r.store.mu.RUnlock()
+
+	prefix := tenantID + "/"
+	out := make([]platformruntime.Task, 0)
+	for taskKey, task := range r.store.tasks {
+		if !strings.HasPrefix(taskKey, prefix) {
+			continue
+		}
+		out = append(out, cloneTask(task))
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].ID < out[j].ID
+	})
+	return out, nil
+}
+
 func cloneActor(actor iam.Actor) iam.Actor {
 	actor.Roles = append([]string(nil), actor.Roles...)
 	return actor

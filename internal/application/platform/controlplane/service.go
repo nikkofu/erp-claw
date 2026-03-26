@@ -512,6 +512,44 @@ func (s *Service) ListSessionTasks(ctx context.Context, input ListSessionTasksIn
 	return tasks, err
 }
 
+type ListTasksInput struct {
+	TenantID  string
+	ActorID   string
+	SessionID string
+	Status    platformruntime.TaskStatus
+}
+
+func (s *Service) ListTasks(ctx context.Context, input ListTasksInput) ([]platformruntime.Task, error) {
+	var tasks []platformruntime.Task
+	err := s.pipeline.Execute(ctx, shared.Command{
+		Name:     "runtime.tasks.list",
+		TenantID: input.TenantID,
+		ActorID:  input.ActorID,
+		Payload:  input,
+	}, func(txCtx context.Context, _ shared.Command) error {
+		current, err := s.tasks.ListByTenant(txCtx, strings.TrimSpace(input.TenantID))
+		if err != nil {
+			return err
+		}
+
+		targetSessionID := strings.TrimSpace(input.SessionID)
+		targetStatus := input.Status
+		filtered := make([]platformruntime.Task, 0, len(current))
+		for _, task := range current {
+			if targetSessionID != "" && task.SessionID != targetSessionID {
+				continue
+			}
+			if targetStatus != "" && task.Status != targetStatus {
+				continue
+			}
+			filtered = append(filtered, task)
+		}
+		tasks = filtered
+		return nil
+	})
+	return tasks, err
+}
+
 type UpsertPolicyRuleInput struct {
 	OperatorTenantID string
 	OperatorActorID  string

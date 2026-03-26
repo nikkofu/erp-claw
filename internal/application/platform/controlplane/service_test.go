@@ -401,6 +401,106 @@ func TestServiceListSessionsReturnsTenantScopedSessions(t *testing.T) {
 	}
 }
 
+func TestServiceListTasksReturnsTenantScopedAndFilteredTasks(t *testing.T) {
+	store := memory.NewControlPlaneStore()
+	svc := NewService(ServiceDeps{
+		TenantCatalog: store.TenantCatalog(),
+		IAMDirectory:  store.IAMDirectory(),
+		Sessions:      store.SessionRepository(),
+		Tasks:         store.TaskRepository(),
+		Pipeline: shared.NewPipeline(shared.PipelineDeps{
+			Policy: policy.StaticEvaluator(policy.DecisionAllow),
+		}),
+	})
+
+	ctx := context.Background()
+	mustOpen := func(tenantID, actorID, sessionID string) {
+		t.Helper()
+		if _, err := svc.OpenSession(ctx, OpenSessionInput{
+			TenantID:  tenantID,
+			ActorID:   actorID,
+			SessionID: sessionID,
+		}); err != nil {
+			t.Fatalf("open session %s: %v", sessionID, err)
+		}
+	}
+	mustOpen("tenant-a", "actor-a", "sess-001")
+	mustOpen("tenant-a", "actor-a", "sess-002")
+	mustOpen("tenant-b", "actor-b", "sess-003")
+
+	taskPending, err := svc.EnqueueTask(ctx, EnqueueTaskInput{
+		TenantID:  "tenant-a",
+		ActorID:   "actor-a",
+		SessionID: "sess-001",
+		TaskID:    "task-pending-001",
+		TaskType:  "tool.call",
+	})
+	if err != nil {
+		t.Fatalf("enqueue task-pending-001: %v", err)
+	}
+	taskRunning, err := svc.EnqueueTask(ctx, EnqueueTaskInput{
+		TenantID:  "tenant-a",
+		ActorID:   "actor-a",
+		SessionID: "sess-002",
+		TaskID:    "task-running-001",
+		TaskType:  "tool.call",
+	})
+	if err != nil {
+		t.Fatalf("enqueue task-running-001: %v", err)
+	}
+	if _, err := svc.StartTask(ctx, AdvanceTaskInput{
+		TenantID: "tenant-a",
+		ActorID:  "actor-a",
+		TaskID:   taskRunning.ID,
+	}); err != nil {
+		t.Fatalf("start task-running-001: %v", err)
+	}
+	if _, err := svc.EnqueueTask(ctx, EnqueueTaskInput{
+		TenantID:  "tenant-b",
+		ActorID:   "actor-b",
+		SessionID: "sess-003",
+		TaskID:    "task-other-tenant",
+		TaskType:  "tool.call",
+	}); err != nil {
+		t.Fatalf("enqueue task-other-tenant: %v", err)
+	}
+
+	allTenantTasks, err := svc.ListTasks(ctx, ListTasksInput{
+		TenantID: "tenant-a",
+		ActorID:  "actor-a",
+	})
+	if err != nil {
+		t.Fatalf("list tenant tasks: %v", err)
+	}
+	if len(allTenantTasks) != 2 {
+		t.Fatalf("expected 2 tenant-a tasks, got %d", len(allTenantTasks))
+	}
+
+	sessionFiltered, err := svc.ListTasks(ctx, ListTasksInput{
+		TenantID:  "tenant-a",
+		ActorID:   "actor-a",
+		SessionID: "sess-001",
+	})
+	if err != nil {
+		t.Fatalf("list session tasks: %v", err)
+	}
+	if len(sessionFiltered) != 1 || sessionFiltered[0].ID != taskPending.ID {
+		t.Fatalf("expected only %s, got %#v", taskPending.ID, sessionFiltered)
+	}
+
+	statusFiltered, err := svc.ListTasks(ctx, ListTasksInput{
+		TenantID: "tenant-a",
+		ActorID:  "actor-a",
+		Status:   platformruntime.TaskStatusRunning,
+	})
+	if err != nil {
+		t.Fatalf("list running tasks: %v", err)
+	}
+	if len(statusFiltered) != 1 || statusFiltered[0].ID != taskRunning.ID {
+		t.Fatalf("expected only %s, got %#v", taskRunning.ID, statusFiltered)
+	}
+}
+
 type recordingWorkspaceEventSink struct {
 	events []platformruntime.WorkspaceEvent
 }

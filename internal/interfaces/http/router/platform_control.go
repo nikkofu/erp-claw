@@ -261,6 +261,26 @@ func registerControlPlaneRoutes(rg *gin.RouterGroup, container *bootstrap.Contai
 		presenter.OK(c, gin.H{"tasks": taskListResponse(tasks)})
 	})
 
+	agentGroup.GET("/tasks", func(c *gin.Context) {
+		status, err := parseTaskStatus(c.Query("status"))
+		if err != nil {
+			renderControlPlaneError(c, err)
+			return
+		}
+
+		tasks, err := container.ControlPlane.ListTasks(c.Request.Context(), controlplane.ListTasksInput{
+			TenantID:  tenantIDFromContext(c),
+			ActorID:   actorIDFromContext(c),
+			SessionID: c.Query("session_id"),
+			Status:    status,
+		})
+		if err != nil {
+			renderControlPlaneError(c, err)
+			return
+		}
+		presenter.OK(c, gin.H{"tasks": taskListResponse(tasks)})
+	})
+
 	agentGroup.GET("/tasks/:id", func(c *gin.Context) {
 		task, err := container.ControlPlane.GetTask(c.Request.Context(), controlplane.GetTaskInput{
 			TenantID: tenantIDFromContext(c),
@@ -609,5 +629,24 @@ func parseDecision(raw string) (policy.Decision, error) {
 		return decision, nil
 	default:
 		return "", errors.New("invalid decision filter")
+	}
+}
+
+func parseTaskStatus(raw string) (platformruntime.TaskStatus, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", nil
+	}
+
+	status := platformruntime.TaskStatus(raw)
+	switch status {
+	case platformruntime.TaskStatusPending,
+		platformruntime.TaskStatusRunning,
+		platformruntime.TaskStatusSucceeded,
+		platformruntime.TaskStatusFailed,
+		platformruntime.TaskStatusCanceled:
+		return status, nil
+	default:
+		return "", platformruntime.ErrInvalidTask
 	}
 }

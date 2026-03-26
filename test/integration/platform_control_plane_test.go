@@ -235,6 +235,73 @@ func TestPlatformControlPlaneCloseSessionRejectedWhenTaskActive(t *testing.T) {
 	}
 }
 
+func TestPlatformControlPlaneListTasksSupportsSessionAndStatusFilters(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	container := bootstrap.NewContainer(bootstrap.DefaultConfig())
+	h := router.New(router.WithContainer(container))
+
+	postJSONData(t, h, "/api/platform/v1/agent/sessions", map[string]any{
+		"session_id": "sess-list-001",
+		"metadata": map[string]any{
+			"channel": "workspace",
+		},
+	})
+	postJSONData(t, h, "/api/platform/v1/agent/sessions", map[string]any{
+		"session_id": "sess-list-002",
+		"metadata": map[string]any{
+			"channel": "workspace",
+		},
+	})
+
+	postJSONData(t, h, "/api/platform/v1/agent/sessions/sess-list-001/tasks", map[string]any{
+		"task_id":   "task-pending-001",
+		"task_type": "tool.call",
+		"input": map[string]any{
+			"tool": "search",
+		},
+	})
+	postJSONData(t, h, "/api/platform/v1/agent/sessions/sess-list-002/tasks", map[string]any{
+		"task_id":   "task-running-001",
+		"task_type": "tool.call",
+		"input": map[string]any{
+			"tool": "search",
+		},
+	})
+	postJSONData(t, h, "/api/platform/v1/agent/tasks/task-running-001/start", map[string]any{})
+
+	runningList := getJSONData(t, h, "/api/platform/v1/agent/tasks?status=running")
+	runningItems, ok := runningList["tasks"].([]any)
+	if !ok {
+		t.Fatalf("expected tasks array, got %#v", runningList["tasks"])
+	}
+	if len(runningItems) != 1 {
+		t.Fatalf("expected 1 running task, got %d", len(runningItems))
+	}
+	runningTask, ok := runningItems[0].(map[string]any)
+	if !ok {
+		t.Fatalf("expected task object, got %#v", runningItems[0])
+	}
+	if got := stringField(t, runningTask, "id"); got != "task-running-001" {
+		t.Fatalf("expected running task id task-running-001, got %s", got)
+	}
+
+	sessionList := getJSONData(t, h, "/api/platform/v1/agent/tasks?session_id=sess-list-001")
+	sessionItems, ok := sessionList["tasks"].([]any)
+	if !ok {
+		t.Fatalf("expected tasks array, got %#v", sessionList["tasks"])
+	}
+	if len(sessionItems) != 1 {
+		t.Fatalf("expected 1 session-filtered task, got %d", len(sessionItems))
+	}
+	sessionTask, ok := sessionItems[0].(map[string]any)
+	if !ok {
+		t.Fatalf("expected task object, got %#v", sessionItems[0])
+	}
+	if got := stringField(t, sessionTask, "id"); got != "task-pending-001" {
+		t.Fatalf("expected session task id task-pending-001, got %s", got)
+	}
+}
+
 func doJSONWithHeaders(
 	t *testing.T,
 	h http.Handler,
