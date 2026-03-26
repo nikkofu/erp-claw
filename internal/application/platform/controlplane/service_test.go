@@ -753,6 +753,105 @@ func TestServiceDeleteActorRemovesActorFromDirectory(t *testing.T) {
 	}
 }
 
+func TestServiceListActorsSupportsRoleDepartmentAndPagination(t *testing.T) {
+	store := memory.NewControlPlaneStore()
+	svc := NewService(ServiceDeps{
+		TenantCatalog: store.TenantCatalog(),
+		IAMDirectory:  store.IAMDirectory(),
+		Sessions:      store.SessionRepository(),
+		Tasks:         store.TaskRepository(),
+		Pipeline: shared.NewPipeline(shared.PipelineDeps{
+			Policy: policy.StaticEvaluator(policy.DecisionAllow),
+		}),
+	})
+
+	ctx := context.Background()
+	for _, input := range []UpsertActorInput{
+		{
+			OperatorTenantID: "tenant-admin",
+			OperatorActorID:  "actor-admin",
+			TenantID:         "tenant-a",
+			ActorID:          "actor-alpha",
+			Roles:            []string{"viewer"},
+			DepartmentID:     "ops",
+		},
+		{
+			OperatorTenantID: "tenant-admin",
+			OperatorActorID:  "actor-admin",
+			TenantID:         "tenant-a",
+			ActorID:          "actor-beta",
+			Roles:            []string{"supplychain_operator"},
+			DepartmentID:     "ops",
+		},
+		{
+			OperatorTenantID: "tenant-admin",
+			OperatorActorID:  "actor-admin",
+			TenantID:         "tenant-a",
+			ActorID:          "actor-gamma",
+			Roles:            []string{"viewer"},
+			DepartmentID:     "finance",
+		},
+	} {
+		if _, err := svc.UpsertActor(ctx, input); err != nil {
+			t.Fatalf("upsert actor %s: %v", input.ActorID, err)
+		}
+	}
+
+	viewers, err := svc.ListActors(ctx, ListActorsInput{
+		OperatorTenantID: "tenant-admin",
+		OperatorActorID:  "actor-admin",
+		TenantID:         "tenant-a",
+		Role:             "viewer",
+	})
+	if err != nil {
+		t.Fatalf("list viewer actors: %v", err)
+	}
+	if len(viewers) != 2 || viewers[0].ID != "actor-alpha" || viewers[1].ID != "actor-gamma" {
+		t.Fatalf("expected viewer actors [actor-alpha actor-gamma], got %#v", viewers)
+	}
+
+	opsDepartment, err := svc.ListActors(ctx, ListActorsInput{
+		OperatorTenantID: "tenant-admin",
+		OperatorActorID:  "actor-admin",
+		TenantID:         "tenant-a",
+		DepartmentID:     "ops",
+	})
+	if err != nil {
+		t.Fatalf("list ops actors: %v", err)
+	}
+	if len(opsDepartment) != 2 || opsDepartment[0].ID != "actor-alpha" || opsDepartment[1].ID != "actor-beta" {
+		t.Fatalf("expected ops actors [actor-alpha actor-beta], got %#v", opsDepartment)
+	}
+
+	filtered, err := svc.ListActors(ctx, ListActorsInput{
+		OperatorTenantID: "tenant-admin",
+		OperatorActorID:  "actor-admin",
+		TenantID:         "tenant-a",
+		Role:             "viewer",
+		DepartmentID:     "ops",
+	})
+	if err != nil {
+		t.Fatalf("list filtered actors: %v", err)
+	}
+	if len(filtered) != 1 || filtered[0].ID != "actor-alpha" {
+		t.Fatalf("expected filtered actor actor-alpha, got %#v", filtered)
+	}
+
+	paged, err := svc.ListActors(ctx, ListActorsInput{
+		OperatorTenantID: "tenant-admin",
+		OperatorActorID:  "actor-admin",
+		TenantID:         "tenant-a",
+		Offset:           1,
+		Limit:            1,
+	})
+	if err != nil {
+		t.Fatalf("list paged actors: %v", err)
+	}
+	if len(paged) != 1 || paged[0].ID != "actor-beta" {
+		t.Fatalf("expected paged actor actor-beta, got %#v", paged)
+	}
+}
+
 type recordingWorkspaceEventSink struct {
 	events []platformruntime.WorkspaceEvent
 }

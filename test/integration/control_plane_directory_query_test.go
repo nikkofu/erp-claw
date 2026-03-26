@@ -90,3 +90,82 @@ func TestControlPlaneCanListTenantsAndActors(t *testing.T) {
 		nil,
 	)
 }
+
+func TestControlPlaneCanFilterAndPaginateActors(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	container := bootstrap.NewContainer(bootstrap.DefaultConfig())
+	h := router.New(router.WithContainer(container))
+
+	for _, payload := range []map[string]any{
+		{
+			"tenant_id":     "tenant-directory-filter",
+			"actor_id":      "actor-alpha",
+			"roles":         []string{"viewer"},
+			"department_id": "ops",
+		},
+		{
+			"tenant_id":     "tenant-directory-filter",
+			"actor_id":      "actor-beta",
+			"roles":         []string{"supplychain_operator"},
+			"department_id": "ops",
+		},
+		{
+			"tenant_id":     "tenant-directory-filter",
+			"actor_id":      "actor-gamma",
+			"roles":         []string{"viewer"},
+			"department_id": "finance",
+		},
+	} {
+		postJSONData(t, h, "/api/platform/v1/control/actors", payload)
+	}
+
+	viewers := getJSONData(t, h, "/api/platform/v1/control/actors?tenant_id=tenant-directory-filter&role=viewer")
+	viewerItems, ok := viewers["actors"].([]any)
+	if !ok {
+		t.Fatalf("expected actors array, got %#v", viewers["actors"])
+	}
+	if len(viewerItems) != 2 {
+		t.Fatalf("expected 2 viewer actors, got %d", len(viewerItems))
+	}
+
+	opsDept := getJSONData(t, h, "/api/platform/v1/control/actors?tenant_id=tenant-directory-filter&department_id=ops")
+	opsItems, ok := opsDept["actors"].([]any)
+	if !ok {
+		t.Fatalf("expected actors array, got %#v", opsDept["actors"])
+	}
+	if len(opsItems) != 2 {
+		t.Fatalf("expected 2 ops actors, got %d", len(opsItems))
+	}
+
+	paged := getJSONData(t, h, "/api/platform/v1/control/actors?tenant_id=tenant-directory-filter&offset=1&limit=1")
+	pagedItems, ok := paged["actors"].([]any)
+	if !ok {
+		t.Fatalf("expected actors array, got %#v", paged["actors"])
+	}
+	if len(pagedItems) != 1 {
+		t.Fatalf("expected 1 paged actor, got %d", len(pagedItems))
+	}
+	pagedActor, ok := pagedItems[0].(map[string]any)
+	if !ok {
+		t.Fatalf("expected actor object, got %#v", pagedItems[0])
+	}
+	if got := stringField(t, pagedActor, "id"); got != "actor-beta" {
+		t.Fatalf("expected actor-beta in paged result, got %s", got)
+	}
+
+	filtered := getJSONData(t, h, "/api/platform/v1/control/actors?tenant_id=tenant-directory-filter&role=viewer&department_id=ops")
+	filteredItems, ok := filtered["actors"].([]any)
+	if !ok {
+		t.Fatalf("expected actors array, got %#v", filtered["actors"])
+	}
+	if len(filteredItems) != 1 {
+		t.Fatalf("expected 1 filtered actor, got %d", len(filteredItems))
+	}
+	filteredActor, ok := filteredItems[0].(map[string]any)
+	if !ok {
+		t.Fatalf("expected actor object, got %#v", filteredItems[0])
+	}
+	if got := stringField(t, filteredActor, "id"); got != "actor-alpha" {
+		t.Fatalf("expected actor-alpha after role+department filter, got %s", got)
+	}
+}

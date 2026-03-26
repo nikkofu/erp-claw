@@ -93,10 +93,25 @@ func registerControlPlaneRoutes(rg *gin.RouterGroup, container *bootstrap.Contai
 	})
 
 	controlGroup.GET("/actors", func(c *gin.Context) {
+		limit, err := parseLimit(c.Query("limit"), 20)
+		if err != nil {
+			presenter.Error(c, http.StatusBadRequest, err.Error())
+			return
+		}
+		offset, err := parseOffset(c.Query("offset"))
+		if err != nil {
+			presenter.Error(c, http.StatusBadRequest, err.Error())
+			return
+		}
+
 		actors, err := container.ControlPlane.ListActors(c.Request.Context(), controlplane.ListActorsInput{
 			OperatorTenantID: tenantIDFromContext(c),
 			OperatorActorID:  actorIDFromContext(c),
 			TenantID:         c.Query("tenant_id"),
+			Role:             c.Query("role"),
+			DepartmentID:     c.Query("department_id"),
+			Offset:           offset,
+			Limit:            limit,
 		})
 		if err != nil {
 			renderControlPlaneError(c, err)

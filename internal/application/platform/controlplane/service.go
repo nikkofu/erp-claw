@@ -201,6 +201,10 @@ type ListActorsInput struct {
 	OperatorTenantID string
 	OperatorActorID  string
 	TenantID         string
+	Role             string
+	DepartmentID     string
+	Offset           int
+	Limit            int
 }
 
 func (s *Service) ListActors(ctx context.Context, input ListActorsInput) ([]iam.Actor, error) {
@@ -219,7 +223,33 @@ func (s *Service) ListActors(ctx context.Context, input ListActorsInput) ([]iam.
 		if err != nil {
 			return err
 		}
-		actors = append([]iam.Actor(nil), listed...)
+		targetRole := strings.TrimSpace(input.Role)
+		targetDepartmentID := strings.TrimSpace(input.DepartmentID)
+		filtered := make([]iam.Actor, 0, len(listed))
+		for _, actor := range listed {
+			if targetRole != "" && !hasRole(actor.Roles, targetRole) {
+				continue
+			}
+			if targetDepartmentID != "" && strings.TrimSpace(actor.DepartmentID) != targetDepartmentID {
+				continue
+			}
+			filtered = append(filtered, actor)
+		}
+
+		start := input.Offset
+		if start < 0 {
+			start = 0
+		}
+		if start >= len(filtered) {
+			actors = []iam.Actor{}
+			return nil
+		}
+
+		end := len(filtered)
+		if input.Limit > 0 && start+input.Limit < end {
+			end = start + input.Limit
+		}
+		actors = append([]iam.Actor(nil), filtered[start:end]...)
 		return nil
 	})
 	return actors, err
@@ -850,6 +880,19 @@ func normalizeRoles(roles []string) []string {
 		out = append(out, role)
 	}
 	return out
+}
+
+func hasRole(roles []string, targetRole string) bool {
+	targetRole = strings.TrimSpace(targetRole)
+	if targetRole == "" {
+		return false
+	}
+	for _, role := range roles {
+		if strings.TrimSpace(role) == targetRole {
+			return true
+		}
+	}
+	return false
 }
 
 func nextID(prefix string) string {
