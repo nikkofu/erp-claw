@@ -2,6 +2,7 @@ package bootstrap
 
 import (
 	appagentruntime "github.com/nikkofu/erp-claw/internal/application/agentruntime"
+	sharedoutbox "github.com/nikkofu/erp-claw/internal/application/shared/outbox"
 	domainagentruntime "github.com/nikkofu/erp-claw/internal/domain/agentruntime"
 	domainapproval "github.com/nikkofu/erp-claw/internal/domain/approval"
 	domaincap "github.com/nikkofu/erp-claw/internal/domain/capability"
@@ -45,6 +46,11 @@ type GovernanceCatalog interface {
 	audit.EventStore
 }
 
+type OutboxCatalog interface {
+	sharedoutbox.RecoveryRepository
+	sharedoutbox.MessageReader
+}
+
 type Container struct {
 	Config              Config
 	Health              *health.Service
@@ -53,6 +59,7 @@ type Container struct {
 	ApprovalCatalog     ApprovalCatalog
 	CapabilityCatalog   CapabilityCatalog
 	GovernanceCatalog   GovernanceCatalog
+	OutboxCatalog       OutboxCatalog
 	WorkspaceGateway    *ws.WorkspaceGateway
 }
 
@@ -65,6 +72,7 @@ func NewContainer(cfg Config) *Container {
 		ApprovalCatalog:     newApprovalCatalog(cfg),
 		CapabilityCatalog:   newCapabilityCatalog(cfg),
 		GovernanceCatalog:   newGovernanceCatalog(cfg),
+		OutboxCatalog:       newOutboxCatalog(cfg),
 		WorkspaceGateway:    ws.NewWorkspaceGateway(),
 	}
 }

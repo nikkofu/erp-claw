@@ -96,3 +96,22 @@ func TestNewGovernanceCatalogPanicsWhenDatabaseInitFailsOutsideTest(t *testing.T
 		},
 	})
 }
+
+func TestNewOutboxCatalogPanicsWhenDatabaseInitFailsOutsideTest(t *testing.T) {
+	t.Parallel()
+
+	defer func() {
+		if recover() == nil {
+			t.Fatal("expected outbox catalog bootstrap to panic on invalid runtime database")
+		}
+	}()
+
+	_ = newOutboxCatalog(Config{
+		Env: "local",
+		Database: DatabaseConfig{
+			DSN:          "postgres://invalid:invalid@127.0.0.1:1/erp_claw?sslmode=disable",
+			MaxOpenConns: 1,
+			MaxIdleConns: 1,
+		},
+	})
+}

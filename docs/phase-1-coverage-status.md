@@ -29,7 +29,7 @@
 - 控制面已经落地 tenant/user/role/department/agent profile 目录、user-role/user-department 绑定、policy/audit 持久化查询与最小 Admin 管理面，以及 capability 的 model/tool catalog 基线与最小 Admin 管理面
 - Agent 执行与工作台入口已经具备 session/task 仓储、状态机、workspace event seam，以及最小 write/read side/replay query
 - Approval baseline 已经具备 definition / instance / task 模型、start / approve / reject 闭环、最小 Admin HTTP 管理面，以及 `REQUIRE_APPROVAL` 的最小接线
-- Outbox 已经具备 dispatcher、重试、终态失败与人工 recovery 基线
+- Outbox 已经具备 dispatcher、重试、终态失败、人工 recovery 基线，以及最小 Admin operator list/requeue 管理面
 - 供应链交易闭环仍处于设计完成、代码未开始阶段
 
 因此，本文对“实现情况”的判断分为两层：
@@ -68,7 +68,7 @@
 - 治理核心第一批切片：policy rule 持久化、生命周期、audit query，以及最小 Admin create/list/activate/deactivate 管理面
 - Agent runtime 第一批切片：session/task 仓储、状态流转、workspace event
 - Capability governance 第一批切片：tenant-scoped model catalog 与 tool catalog baseline，以及最小 Admin create/list 管理面
-- Outbox reliability 第一批切片：dispatcher、retry、failed recovery、poll observability seam
+- Outbox reliability 第一批切片：dispatcher、retry、failed recovery、tenant-scoped Admin operator list/requeue，以及 poll observability seam
 - Agent Gateway 的 workspace 事件入口骨架
 - 本地 smoke 脚本与 live 健康验证流程
 
@@ -114,7 +114,7 @@
 | 领域 | 模块 | 功能清单 | 优先级 | 当前实现情况 | 代码锚点 |
 | --- | --- | --- | --- | --- | --- |
 | Experience Plane | API Server 运行时 | 加载配置、装配容器、启动 Gin HTTP 服务 | P0 | 已实现 | `cmd/api-server/main.go` |
-| Experience Plane | HTTP 路由分组 | `Admin API`、`Workspace API`、`Platform API`、`Integration API` 的分组入口 | P0 | 部分实现 | `internal/interfaces/http/router/router.go`、`admin.go`、`workspace.go`、`platform.go`、`integration.go`；当前 `Platform API` 已提供健康检查，`Admin API` 已提供控制面目录、policy rule / audit、审批定义/实例/任务，以及 model/tool catalog 的最小写入/查询接口，`Workspace API` 已提供 sessions/tasks/events 的最小写入/查询接口，`Integration API` 仍是占位 |
+| Experience Plane | HTTP 路由分组 | `Admin API`、`Workspace API`、`Platform API`、`Integration API` 的分组入口 | P0 | 部分实现 | `internal/interfaces/http/router/router.go`、`admin.go`、`workspace.go`、`platform.go`、`integration.go`；当前 `Platform API` 已提供健康检查，`Admin API` 已提供控制面目录、policy rule / audit、审批定义/实例/任务、model/tool catalog，以及 outbox message operator 的最小写入/查询接口，`Workspace API` 已提供 sessions/tasks/events 的最小写入/查询接口，`Integration API` 仍是占位 |
 | Experience Plane | 健康检查接口 | `/api/platform/v1/health/livez`、`/readyz` | P0 | 已实现 | `internal/interfaces/http/router/health.go`、`internal/platform/health/service.go` |
 | Experience Plane | 中间件链 | request ID、logging、tenant、auth、audit | P0 | 已实现 | `internal/interfaces/http/middleware/*` |
 | Experience Plane | Workspace Gateway seam | 工作台会话注册、事件广播骨架 | P1 | 部分实现 | `internal/interfaces/ws/workspace_gateway.go`；已经具备 session channel 注册、广播和最小事件 replay/query seam，并已通过 `internal/interfaces/http/router/workspace.go` 暴露最小写入/查询 HTTP surface；但仍未实现真实 WebSocket 协议和跨进程回放。 |
@@ -138,7 +138,7 @@
 | --- | --- | --- | --- | --- | --- |
 | Execution Plane | Command Pipeline | 命令进入应用处理器、策略前置、事务边界、审计记录 | P0 | 部分实现 | `internal/application/shared/pipeline.go`、`command.go`、`transaction.go`；当前已经具备 policy decision、transaction boundary、audit record 与 `REQUIRE_APPROVAL` starter seam，但仍未扩展为更完整的 workflow orchestration pipeline |
 | Execution Plane | Event Bus | 内存总线、NATS JetStream 总线 | P0 | 已实现 | `internal/platform/eventbus/*` |
-| Execution Plane | Worker Runtime | 装配依赖、轮询 outbox 的后台进程骨架 | P0 | 部分实现 | `cmd/worker/main.go`、`internal/application/shared/outbox/*`；当前已接入 dispatcher、重试与失败恢复 seam，但仍缺少更完整的运行治理和操作面 |
+| Execution Plane | Worker Runtime | 装配依赖、轮询 outbox 的后台进程骨架 | P0 | 部分实现 | `cmd/worker/main.go`、`internal/application/shared/outbox/*`；当前已接入 dispatcher、重试、失败恢复与最小 Admin operator seam，但仍缺少更完整的运行治理和操作面 |
 | Execution Plane | Scheduler Runtime | 定时 tick 产生时间驱动事件 | P0 | 部分实现 | `cmd/scheduler/main.go`；当前只发送 `platform.scheduler.tick` 骨架事件 |
 | Execution Plane | Agent Gateway Runtime | 工作台事件入口、会话 channel 注册、进程生命周期 | P1 | 部分实现 | `cmd/agent-gateway/main.go`、`internal/interfaces/ws/workspace_gateway.go` |
 | Execution Plane | Session Context Assembler | tenant/actor/business/policy/knowledge/execution context 组装 | P1 | 部分实现 | `internal/platform/runtime/request_context.go` 只覆盖 request 级元数据，没有完整 session context assembler |
@@ -154,7 +154,7 @@
 | Data Plane | Redis seam | 客户端配置校验与构建 | P0 | 已实现 | `internal/infrastructure/cache/redis/client.go` |
 | Data Plane | NATS seam | 连接配置校验与构建 | P0 | 已实现 | `internal/infrastructure/messaging/nats/client.go` |
 | Data Plane | MinIO seam | 对象存储客户端配置校验与构建 | P0 | 已实现 | `internal/infrastructure/storage/minio/client.go` |
-| Data Plane | Outbox Pattern 基础 | 表结构、worker 轮询、总线发布、失败重试与恢复 | P1 | 部分实现 | `internal/application/shared/outbox/*`、`internal/infrastructure/persistence/postgres/outbox_repository.go`、`migrations/000006_phase1_reliability_hardening.*`；已具备 dispatcher、retry、failed terminal state、stale `publishing` reclaim、operator recovery 与 poll observability seam，但仍缺少 consumer-side idempotency、DLQ 与 live DB contention 验证 |
+| Data Plane | Outbox Pattern 基础 | 表结构、worker 轮询、总线发布、失败重试与恢复 | P1 | 部分实现 | `internal/application/shared/outbox/*`、`internal/infrastructure/persistence/postgres/outbox_repository.go`、`migrations/000006_phase1_reliability_hardening.*`；已具备 dispatcher、retry、failed terminal state、stale `publishing` reclaim、tenant-scoped Admin operator list/requeue、cross-tenant requeue rejection 与 poll observability seam，但仍缺少 consumer-side idempotency、DLQ 与 live DB contention 验证 |
 | Data Plane | CQRS Read Models | Backoffice、Workspace、Monitoring、Analytics 读模型 | P1 | 仅设计 | 当前没有 projection、read service 或读模型表 |
 | Data Plane | Search / Vector Retrieval | PostgreSQL FTS、trigram、`pgvector` | P2 | 仅设计 | 设计已定义，当前迁移中没有相关扩展与索引结构 |
 | Integration Plane | 外部系统连接器 | webhook、ERP 外部系统、插件式连接器 | P2 | 仅设计 | 只有 `Integration API` 路由分组占位，没有 connector/runtime 实现 |

@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.5] - 2026-03-26
+
+### Added
+
+- Outbox catalog bootstrap with Postgres runtime wiring and in-memory test fallback for tenant-scoped operator reads and failed-message recovery.
+- Admin API routes for listing tenant-scoped outbox messages by status and requeueing failed messages from the control plane.
+- Integration coverage for the outbox operator surface, including a cross-tenant requeue rejection check.
+
+### Changed
+
+- Phase 1 docs and README now reflect that the reliability baseline includes an Admin outbox operator surface in addition to dispatcher, retry, and recovery seams.
+
 ## [0.2.4] - 2026-03-26
 
 ### Added

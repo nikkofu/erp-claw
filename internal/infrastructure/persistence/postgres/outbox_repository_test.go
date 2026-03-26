@@ -10,6 +10,7 @@ import (
 
 var _ outbox.Repository = (*OutboxRepository)(nil)
 var _ outbox.RecoveryRepository = (*OutboxRepository)(nil)
+var _ outbox.MessageReader = (*OutboxRepository)(nil)
 
 func TestNewOutboxRepositoryRejectsNilDB(t *testing.T) {
 	t.Parallel()

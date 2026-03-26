@@ -41,6 +41,7 @@ Catalog entities in this slice:
 - Approval Definitions / Instances / Tasks (tenant-scoped governance workflow baseline)
 - Model Catalog Entries / Tool Catalog Entries (tenant-scoped capability governance baseline)
 - Policy Rules / Audit Events (tenant-scoped governance control baseline)
+- Outbox Messages (tenant-scoped operator list/requeue surface for failed delivery recovery)
 
 Bootstrap behavior for `bootstrap.NewContainer(cfg)`:
 
@@ -48,6 +49,7 @@ Bootstrap behavior for `bootstrap.NewContainer(cfg)`:
 - Uses a Postgres-backed approval catalog repository for approval definitions, instances, and tasks when the configured database is reachable.
 - Uses a Postgres-backed capability catalog repository for model catalog and tool catalog entries when the configured database is reachable.
 - Uses a Postgres-backed governance catalog repository for policy rules and audit events when the configured database is reachable.
+- Uses a Postgres-backed outbox catalog repository for tenant-scoped message inspection and failed-message requeue operations when the configured database is reachable.
 - Fails fast when a runtime Postgres catalog cannot be initialized, so control-plane and workspace state do not silently degrade into ephemeral storage.
 - Uses in-memory catalogs only for explicit test bootstrap paths such as `bootstrap.NewTestContainer()` or configurations with an empty database DSN.
 
@@ -62,6 +64,16 @@ The Workspace API now exposes a minimal command surface in addition to the exist
 - List sessions / tasks / replay events
 
 This is still not a full real-time workspace protocol. It is the smallest write-side seam needed to let the Phase 1 agent runtime contracts be exercised end-to-end over HTTP.
+
+## Outbox Operator Slice (Phase 1)
+
+The Admin API also exposes a minimal operator surface for outbox recovery.
+
+- List tenant-scoped outbox messages filtered by status
+- Requeue failed outbox messages by ID
+- Reject cross-tenant requeue attempts before recovery is executed
+
+This keeps the reliability baseline operable without expanding into a full dead-letter, replay, or idempotency management console yet.
 
 ## Dependencies
 

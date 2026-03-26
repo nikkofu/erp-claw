@@ -11,6 +11,7 @@ import (
 	"time"
 
 	controlcommand "github.com/nikkofu/erp-claw/internal/application/controlplane/command"
+	sharedoutbox "github.com/nikkofu/erp-claw/internal/application/shared/outbox"
 	"github.com/nikkofu/erp-claw/internal/bootstrap"
 	"github.com/nikkofu/erp-claw/internal/interfaces/http/router"
 	"github.com/nikkofu/erp-claw/internal/platform/audit"
@@ -447,6 +448,94 @@ func TestAdminGovernanceRoutes(t *testing.T) {
 	}
 	if !strings.Contains(eventsRec.Body.String(), "pending_approval") {
 		t.Fatalf("expected audit events response to contain pending_approval, got %s", eventsRec.Body.String())
+	}
+}
+
+func TestAdminOutboxOperatorRoutes(t *testing.T) {
+	container := bootstrap.NewTestContainer()
+	outboxCatalog := bootstrap.NewInMemoryOutboxCatalogForTest()
+	outboxCatalog.StoreMessage(sharedoutbox.Message{
+		ID:          1001,
+		TenantID:    "tenant-outbox",
+		Topic:       "orders.created",
+		EventType:   "orders.created",
+		Attempts:    3,
+		Status:      "failed",
+		LastError:   "nats unavailable",
+		AvailableAt: time.Date(2026, 3, 26, 11, 0, 0, 0, time.UTC),
+	})
+	outboxCatalog.StoreMessage(sharedoutbox.Message{
+		ID:          1002,
+		TenantID:    "tenant-outbox",
+		Topic:       "orders.updated",
+		EventType:   "orders.updated",
+		Attempts:    1,
+		Status:      "pending",
+		AvailableAt: time.Date(2026, 3, 26, 11, 1, 0, 0, time.UTC),
+	})
+	container.OutboxCatalog = outboxCatalog
+
+	h := router.New(router.WithContainer(container))
+
+	listFailedReq := httptest.NewRequest(http.MethodGet, "/api/admin/v1/outbox/messages?tenant_id=tenant-outbox&status=failed&limit=10", nil)
+	listFailedReq.Header.Set("X-Tenant-ID", "tenant-outbox")
+	listFailedRec := httptest.NewRecorder()
+	h.ServeHTTP(listFailedRec, listFailedReq)
+	if listFailedRec.Code != http.StatusOK {
+		t.Fatalf("expected outbox messages 200, got %d: %s", listFailedRec.Code, listFailedRec.Body.String())
+	}
+	if !strings.Contains(listFailedRec.Body.String(), "nats unavailable") {
+		t.Fatalf("expected outbox messages to contain last_error, got %s", listFailedRec.Body.String())
+	}
+
+	requeueReq := httptest.NewRequest(http.MethodPost, "/api/admin/v1/outbox/messages/requeue-failed", strings.NewReader(`{"tenant_id":"tenant-outbox","ids":[1001]}`))
+	requeueReq.Header.Set("Content-Type", "application/json")
+	requeueReq.Header.Set("X-Tenant-ID", "tenant-outbox")
+	requeueRec := httptest.NewRecorder()
+	h.ServeHTTP(requeueRec, requeueReq)
+	if requeueRec.Code != http.StatusCreated {
+		t.Fatalf("expected outbox requeue 201, got %d: %s", requeueRec.Code, requeueRec.Body.String())
+	}
+	if !strings.Contains(requeueRec.Body.String(), `"requeued_count":1`) {
+		t.Fatalf("expected outbox requeue count to be 1, got %s", requeueRec.Body.String())
+	}
+
+	listPendingReq := httptest.NewRequest(http.MethodGet, "/api/admin/v1/outbox/messages?tenant_id=tenant-outbox&status=pending&limit=10", nil)
+	listPendingReq.Header.Set("X-Tenant-ID", "tenant-outbox")
+	listPendingRec := httptest.NewRecorder()
+	h.ServeHTTP(listPendingRec, listPendingReq)
+	if listPendingRec.Code != http.StatusOK {
+		t.Fatalf("expected pending outbox messages 200, got %d: %s", listPendingRec.Code, listPendingRec.Body.String())
+	}
+	if !strings.Contains(listPendingRec.Body.String(), `"ID":1001`) {
+		t.Fatalf("expected pending outbox messages to contain requeued id, got %s", listPendingRec.Body.String())
+	}
+}
+
+func TestAdminOutboxRequeueRejectsCrossTenantMessage(t *testing.T) {
+	container := bootstrap.NewTestContainer()
+	outboxCatalog := bootstrap.NewInMemoryOutboxCatalogForTest()
+	outboxCatalog.StoreMessage(sharedoutbox.Message{
+		ID:          2001,
+		TenantID:    "tenant-a",
+		Topic:       "orders.created",
+		EventType:   "orders.created",
+		Attempts:    2,
+		Status:      "failed",
+		LastError:   "broker timeout",
+		AvailableAt: time.Date(2026, 3, 26, 11, 5, 0, 0, time.UTC),
+	})
+	container.OutboxCatalog = outboxCatalog
+
+	h := router.New(router.WithContainer(container))
+
+	requeueReq := httptest.NewRequest(http.MethodPost, "/api/admin/v1/outbox/messages/requeue-failed", strings.NewReader(`{"tenant_id":"tenant-b","ids":[2001]}`))
+	requeueReq.Header.Set("Content-Type", "application/json")
+	requeueReq.Header.Set("X-Tenant-ID", "tenant-b")
+	requeueRec := httptest.NewRecorder()
+	h.ServeHTTP(requeueRec, requeueReq)
+	if requeueRec.Code != http.StatusBadRequest {
+		t.Fatalf("expected cross-tenant outbox requeue 400, got %d: %s", requeueRec.Code, requeueRec.Body.String())
 	}
 }
 

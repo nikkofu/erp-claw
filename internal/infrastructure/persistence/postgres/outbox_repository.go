@@ -54,6 +54,81 @@ func (r *OutboxRepository) RequeueStuck(ctx context.Context, cutoff, availableAt
 	return int(affected), nil
 }
 
+func (r *OutboxRepository) ListMessages(ctx context.Context, tenantID, status string, limit int) ([]outbox.Message, error) {
+	parsedTenantID, err := parseInt64ID(tenantID)
+	if err != nil {
+		return nil, err
+	}
+
+	query := strings.Builder{}
+	query.WriteString(
+		`select id, tenant_id, topic, event_type, payload, status, attempts,
+		        coalesce(last_error, ''), available_at, published_at, processing_at, created_at
+		   from outbox
+		  where tenant_id = $1`,
+	)
+	args := []any{parsedTenantID}
+
+	trimmedStatus := strings.TrimSpace(status)
+	if trimmedStatus != "" {
+		args = append(args, trimmedStatus)
+		query.WriteString(fmt.Sprintf(" and status = $%d", len(args)))
+	}
+
+	query.WriteString(" order by created_at desc, id desc")
+	if limit > 0 {
+		args = append(args, limit)
+		query.WriteString(fmt.Sprintf(" limit $%d", len(args)))
+	}
+
+	rows, err := r.db.QueryContext(ctx, query.String(), args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	messages := make([]outbox.Message, 0)
+	for rows.Next() {
+		var message outbox.Message
+		var tenantDBID int64
+		var publishedAt sql.NullTime
+		var processingAt sql.NullTime
+		if err := rows.Scan(
+			&message.ID,
+			&tenantDBID,
+			&message.Topic,
+			&message.EventType,
+			&message.Payload,
+			&message.Status,
+			&message.Attempts,
+			&message.LastError,
+			&message.AvailableAt,
+			&publishedAt,
+			&processingAt,
+			&message.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+
+		message.TenantID = strconv.FormatInt(tenantDBID, 10)
+		if publishedAt.Valid {
+			publishedAtValue := publishedAt.Time
+			message.PublishedAt = &publishedAtValue
+		}
+		if processingAt.Valid {
+			processingAtValue := processingAt.Time
+			message.ProcessingAt = &processingAtValue
+		}
+		messages = append(messages, message)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return messages, nil
+}
+
 func (r *OutboxRepository) FetchPublishable(ctx context.Context, limit int, now time.Time) ([]outbox.Message, error) {
 	if limit <= 0 {
 		limit = defaultOutboxFetchLimit

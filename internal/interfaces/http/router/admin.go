@@ -1,6 +1,8 @@
 package router
 
 import (
+	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -13,6 +15,7 @@ import (
 	controlquery "github.com/nikkofu/erp-claw/internal/application/controlplane/query"
 	governancecommand "github.com/nikkofu/erp-claw/internal/application/governance/command"
 	governancequery "github.com/nikkofu/erp-claw/internal/application/governance/query"
+	sharedoutbox "github.com/nikkofu/erp-claw/internal/application/shared/outbox"
 	"github.com/nikkofu/erp-claw/internal/bootstrap"
 	"github.com/nikkofu/erp-claw/internal/interfaces/http/presenter"
 	"github.com/nikkofu/erp-claw/internal/platform/audit"
@@ -112,6 +115,11 @@ type setPolicyRuleActiveRequest struct {
 	TenantID string `json:"tenant_id"`
 }
 
+type requeueOutboxMessagesRequest struct {
+	TenantID string  `json:"tenant_id"`
+	IDs      []int64 `json:"ids"`
+}
+
 func registerAdminRoutes(rg *gin.RouterGroup, container *bootstrap.Container) {
 	if container == nil {
 		panic("router: container must not be nil")
@@ -128,11 +136,15 @@ func registerAdminRoutes(rg *gin.RouterGroup, container *bootstrap.Container) {
 	if container.GovernanceCatalog == nil {
 		panic("router: governance catalog must not be nil")
 	}
+	if container.OutboxCatalog == nil {
+		panic("router: outbox catalog must not be nil")
+	}
 
 	catalog := container.ControlPlaneCatalog
 	approvalCatalog := container.ApprovalCatalog
 	capabilityCatalog := container.CapabilityCatalog
 	governanceCatalog := container.GovernanceCatalog
+	outboxCatalog := container.OutboxCatalog
 	createTenantHandler := controlcommand.CreateTenantHandler{Tenants: catalog}
 	listTenantsHandler := controlquery.ListTenantsHandler{Tenants: catalog}
 	createUserHandler := controlcommand.CreateUserHandler{Users: catalog}
@@ -190,6 +202,9 @@ func registerAdminRoutes(rg *gin.RouterGroup, container *bootstrap.Container) {
 	listPolicyRulesHandler := governancequery.ListPolicyRulesHandler{Rules: ruleService}
 	setPolicyRuleActiveHandler := governancecommand.SetPolicyRuleActiveHandler{Rules: ruleService}
 	listAuditEventsHandler := governancequery.ListAuditEventsHandler{AuditEvents: auditService}
+	listOutboxMessagesHandler := sharedoutbox.ListMessagesHandler{Messages: outboxCatalog}
+	recoveryService := sharedoutbox.NewRecoveryService(outboxCatalog, sharedoutbox.RecoveryConfig{})
+	requeueOutboxMessagesHandler := sharedoutbox.RequeueFailedMessagesHandler{Recovery: recoveryService}
 
 	rg.POST("/tenants", func(c *gin.Context) {
 		var req createTenantRequest
@@ -687,6 +702,82 @@ func registerAdminRoutes(rg *gin.RouterGroup, container *bootstrap.Container) {
 		}
 
 		adminCreated(c, updated)
+	})
+
+	rg.GET("/outbox/messages", func(c *gin.Context) {
+		tenantID := tenantIDFromQueryOrHeader(c)
+		if tenantID == "" {
+			adminError(c, http.StatusBadRequest, errors.New("tenant_id is required"))
+			return
+		}
+
+		limit, err := parseIntQuery(c.Query("limit"))
+		if err != nil {
+			adminError(c, http.StatusBadRequest, err)
+			return
+		}
+		if limit < 0 {
+			adminError(c, http.StatusBadRequest, errors.New("limit must be non-negative"))
+			return
+		}
+
+		messages, err := listOutboxMessagesHandler.Handle(c.Request.Context(), sharedoutbox.ListMessages{
+			TenantID: tenantID,
+			Status:   strings.TrimSpace(c.Query("status")),
+			Limit:    limit,
+		})
+		if err != nil {
+			adminError(c, http.StatusBadRequest, err)
+			return
+		}
+
+		presenter.OK(c, messages)
+	})
+
+	rg.POST("/outbox/messages/requeue-failed", func(c *gin.Context) {
+		var req requeueOutboxMessagesRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			adminError(c, http.StatusBadRequest, err)
+			return
+		}
+
+		tenantID := tenantIDFromValueOrHeader(req.TenantID, c)
+		if tenantID == "" {
+			adminError(c, http.StatusBadRequest, errors.New("tenant_id is required"))
+			return
+		}
+
+		failedMessages, err := listOutboxMessagesHandler.Handle(c.Request.Context(), sharedoutbox.ListMessages{
+			TenantID: tenantID,
+			Status:   "failed",
+		})
+		if err != nil {
+			adminError(c, http.StatusBadRequest, err)
+			return
+		}
+
+		failedIDs := make(map[int64]struct{}, len(failedMessages))
+		for _, message := range failedMessages {
+			failedIDs[message.ID] = struct{}{}
+		}
+		for _, id := range req.IDs {
+			if _, ok := failedIDs[id]; !ok {
+				adminError(c, http.StatusBadRequest, fmt.Errorf("outbox message %d is not a failed message for tenant %s", id, tenantID))
+				return
+			}
+		}
+
+		requeuedCount, err := requeueOutboxMessagesHandler.Handle(c.Request.Context(), sharedoutbox.RequeueFailedMessages{
+			IDs: req.IDs,
+		})
+		if err != nil {
+			adminError(c, http.StatusBadRequest, err)
+			return
+		}
+
+		adminCreated(c, gin.H{
+			"requeued_count": requeuedCount,
+		})
 	})
 
 	rg.GET("/audit-events", func(c *gin.Context) {

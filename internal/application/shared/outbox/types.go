@@ -6,12 +6,18 @@ import (
 )
 
 type Message struct {
-	ID        int64
-	TenantID  string
-	Topic     string
-	EventType string
-	Payload   []byte
-	Attempts  int
+	ID           int64
+	TenantID     string
+	Topic        string
+	EventType    string
+	Payload      []byte
+	Status       string
+	Attempts     int
+	LastError    string
+	AvailableAt  time.Time
+	PublishedAt  *time.Time
+	ProcessingAt *time.Time
+	CreatedAt    time.Time
 }
 
 type Repository interface {
@@ -24,6 +30,10 @@ type Repository interface {
 
 type RecoveryRepository interface {
 	RequeueFailed(ctx context.Context, ids []int64, availableAt time.Time) (int, error)
+}
+
+type MessageReader interface {
+	ListMessages(ctx context.Context, tenantID, status string, limit int) ([]Message, error)
 }
 
 type Publisher interface {
