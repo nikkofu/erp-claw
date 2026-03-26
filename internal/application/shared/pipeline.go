@@ -11,23 +11,29 @@ import (
 )
 
 var (
-	ErrPolicyDenied      = errors.New("policy denied command")
-	ErrApprovalRequired  = errors.New("policy requires approval")
+	ErrPolicyDenied     = errors.New("policy denied command")
+	ErrApprovalRequired = errors.New("policy requires approval")
 )
 
 // Handler executes a command inside the transaction boundary.
 type Handler func(context.Context, Command) error
 
+type ApprovalStarter interface {
+	StartApprovalForCommand(context.Context, Command) error
+}
+
 type PipelineDeps struct {
 	Policy       policy.Evaluator
 	Transactions TransactionManager
 	Audit        audit.Recorder
+	Approvals    ApprovalStarter
 }
 
 type Pipeline struct {
 	policy       policy.Evaluator
 	transactions TransactionManager
 	audit        audit.Recorder
+	approvals    ApprovalStarter
 }
 
 func NewPipeline(deps PipelineDeps) *Pipeline {
@@ -45,6 +51,7 @@ func NewPipeline(deps PipelineDeps) *Pipeline {
 		policy:       deps.Policy,
 		transactions: deps.Transactions,
 		audit:        deps.Audit,
+		approvals:    deps.Approvals,
 	}
 }
 
@@ -64,6 +71,11 @@ func (p *Pipeline) Execute(ctx context.Context, cmd Command, handlers ...Handler
 		err = ErrPolicyDenied
 		return p.recordAndReturn(ctx, cmd, decision, "rejected", err)
 	case policy.DecisionRequireApproval:
+		if p.approvals != nil {
+			if err := p.approvals.StartApprovalForCommand(ctx, cmd); err != nil {
+				return p.recordAndReturn(ctx, cmd, decision, "failed", err)
+			}
+		}
 		err = ErrApprovalRequired
 		return p.recordAndReturn(ctx, cmd, decision, "pending_approval", err)
 	}

@@ -8,6 +8,7 @@ import (
 
 // Record captures command pipeline audit metadata.
 type Record struct {
+	ID          string
 	CommandName string
 	TenantID    string
 	ActorID     string
@@ -15,4 +16,5 @@ type Record struct {
 	Outcome     string
 	Error       string
 	OccurredAt  time.Time
+	RecordedAt  time.Time
 }
