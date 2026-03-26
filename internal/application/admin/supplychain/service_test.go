@@ -656,6 +656,140 @@ func TestServiceTransferInventoryFailsWhenQuantityExceedsAvailable(t *testing.T)
 	}
 }
 
+func TestServiceCreatesAndExecutesTransferOrder(t *testing.T) {
+	ctx := context.Background()
+	svc := newTestService()
+	receivedOrder := createReceivedOrder(t, ctx, svc)
+
+	targetWarehouse, err := svc.CreateWarehouse(ctx, CreateWarehouseInput{
+		TenantID: "tenant-a",
+		ActorID:  "actor-a",
+		Code:     "WH-BJ-ORDER",
+		Name:     "Beijing Warehouse Transfer",
+	})
+	if err != nil {
+		t.Fatalf("create target warehouse: %v", err)
+	}
+
+	order, err := svc.CreateTransferOrder(ctx, CreateTransferOrderInput{
+		TenantID:        "tenant-a",
+		ActorID:         "planner-a",
+		ProductID:       receivedOrder.Lines[0].ProductID,
+		FromWarehouseID: receivedOrder.WarehouseID,
+		ToWarehouseID:   targetWarehouse.ID,
+		Quantity:        2,
+	})
+	if err != nil {
+		t.Fatalf("create transfer order: %v", err)
+	}
+	if order.Status != inventory.TransferOrderStatusPlanned {
+		t.Fatalf("expected planned transfer order, got %s", order.Status)
+	}
+
+	executed, entries, err := svc.ExecuteTransferOrder(ctx, ExecuteTransferOrderInput{
+		TenantID:        "tenant-a",
+		ActorID:         "warehouse-a",
+		TransferOrderID: order.ID,
+	})
+	if err != nil {
+		t.Fatalf("execute transfer order: %v", err)
+	}
+	if executed.Status != inventory.TransferOrderStatusExecuted {
+		t.Fatalf("expected executed transfer order, got %s", executed.Status)
+	}
+	if executed.ExecutedBy != "warehouse-a" {
+		t.Fatalf("expected executed_by warehouse-a, got %s", executed.ExecutedBy)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("expected 2 transfer order ledger entries, got %d", len(entries))
+	}
+	if entries[0].ReferenceType != "transfer_order" || entries[0].ReferenceID != order.ID {
+		t.Fatalf("expected outbound reference transfer_order/%s, got %s/%s", order.ID, entries[0].ReferenceType, entries[0].ReferenceID)
+	}
+	if entries[1].ReferenceType != "transfer_order" || entries[1].ReferenceID != order.ID {
+		t.Fatalf("expected inbound reference transfer_order/%s, got %s/%s", order.ID, entries[1].ReferenceType, entries[1].ReferenceID)
+	}
+
+	storedOrder, err := svc.GetTransferOrder(ctx, GetTransferOrderInput{
+		TenantID:        "tenant-a",
+		TransferOrderID: order.ID,
+	})
+	if err != nil {
+		t.Fatalf("get transfer order: %v", err)
+	}
+	if storedOrder.Status != inventory.TransferOrderStatusExecuted {
+		t.Fatalf("expected stored transfer order status executed, got %s", storedOrder.Status)
+	}
+
+	sourceBalance, err := svc.GetInventoryBalance(ctx, GetInventoryBalanceInput{
+		TenantID:    "tenant-a",
+		ProductID:   receivedOrder.Lines[0].ProductID,
+		WarehouseID: receivedOrder.WarehouseID,
+	})
+	if err != nil {
+		t.Fatalf("get source inventory balance: %v", err)
+	}
+	if sourceBalance.OnHand != receivedOrder.Lines[0].Quantity-2 {
+		t.Fatalf("expected source on hand %d, got %d", receivedOrder.Lines[0].Quantity-2, sourceBalance.OnHand)
+	}
+
+	targetBalance, err := svc.GetInventoryBalance(ctx, GetInventoryBalanceInput{
+		TenantID:    "tenant-a",
+		ProductID:   receivedOrder.Lines[0].ProductID,
+		WarehouseID: targetWarehouse.ID,
+	})
+	if err != nil {
+		t.Fatalf("get target inventory balance: %v", err)
+	}
+	if targetBalance.OnHand != 2 {
+		t.Fatalf("expected target on hand 2, got %d", targetBalance.OnHand)
+	}
+}
+
+func TestServiceExecuteTransferOrderFailsWhenAlreadyExecuted(t *testing.T) {
+	ctx := context.Background()
+	svc := newTestService()
+	receivedOrder := createReceivedOrder(t, ctx, svc)
+
+	targetWarehouse, err := svc.CreateWarehouse(ctx, CreateWarehouseInput{
+		TenantID: "tenant-a",
+		ActorID:  "actor-a",
+		Code:     "WH-BJ-REPLAY",
+		Name:     "Beijing Warehouse Replay",
+	})
+	if err != nil {
+		t.Fatalf("create target warehouse: %v", err)
+	}
+
+	order, err := svc.CreateTransferOrder(ctx, CreateTransferOrderInput{
+		TenantID:        "tenant-a",
+		ActorID:         "planner-a",
+		ProductID:       receivedOrder.Lines[0].ProductID,
+		FromWarehouseID: receivedOrder.WarehouseID,
+		ToWarehouseID:   targetWarehouse.ID,
+		Quantity:        1,
+	})
+	if err != nil {
+		t.Fatalf("create transfer order: %v", err)
+	}
+	if _, _, err := svc.ExecuteTransferOrder(ctx, ExecuteTransferOrderInput{
+		TenantID:        "tenant-a",
+		ActorID:         "warehouse-a",
+		TransferOrderID: order.ID,
+	}); err != nil {
+		t.Fatalf("first execute transfer order: %v", err)
+	}
+
+	_, _, err = svc.ExecuteTransferOrder(ctx, ExecuteTransferOrderInput{
+		TenantID:        "tenant-a",
+		ActorID:         "warehouse-a",
+		TransferOrderID: order.ID,
+	})
+	if !errors.Is(err, inventory.ErrTransferOrderNotExecutable) {
+		t.Fatalf("expected transfer order not executable, got %v", err)
+	}
+}
+
 func TestServiceListsInventoryLedgerEntriesForWarehouseProduct(t *testing.T) {
 	ctx := context.Background()
 	svc := newTestService()

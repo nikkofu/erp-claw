@@ -419,6 +419,126 @@ func (s *Service) IssueInventory(ctx context.Context, input IssueInventoryInput)
 	return outbound, err
 }
 
+func (s *Service) CreateTransferOrder(ctx context.Context, input CreateTransferOrderInput) (inventory.TransferOrder, error) {
+	var order inventory.TransferOrder
+	err := s.pipeline.Execute(ctx, shared.Command{
+		Name:     "inventory.transfer_orders.create",
+		TenantID: input.TenantID,
+		ActorID:  input.ActorID,
+		Payload:  input,
+	}, func(txCtx context.Context, _ shared.Command) error {
+		if _, err := s.masterData.GetProduct(txCtx, input.TenantID, input.ProductID); err != nil {
+			return err
+		}
+		if _, err := s.masterData.GetWarehouse(txCtx, input.TenantID, input.FromWarehouseID); err != nil {
+			return err
+		}
+		if _, err := s.masterData.GetWarehouse(txCtx, input.TenantID, input.ToWarehouseID); err != nil {
+			return err
+		}
+
+		created, err := inventory.NewTransferOrder(
+			nextID("tro"),
+			input.TenantID,
+			input.ProductID,
+			input.FromWarehouseID,
+			input.ToWarehouseID,
+			input.ActorID,
+			input.Quantity,
+		)
+		if err != nil {
+			return err
+		}
+		if err := s.inventory.SaveTransferOrder(txCtx, created); err != nil {
+			return err
+		}
+		order = created
+		return nil
+	})
+	return order, err
+}
+
+func (s *Service) GetTransferOrder(ctx context.Context, input GetTransferOrderInput) (inventory.TransferOrder, error) {
+	return s.inventory.GetTransferOrder(ctx, input.TenantID, input.TransferOrderID)
+}
+
+func (s *Service) ListTransferOrders(ctx context.Context, input ListTransferOrdersInput) ([]inventory.TransferOrder, error) {
+	return s.inventory.ListTransferOrdersByTenant(ctx, input.TenantID)
+}
+
+func (s *Service) ExecuteTransferOrder(ctx context.Context, input ExecuteTransferOrderInput) (inventory.TransferOrder, []inventory.LedgerEntry, error) {
+	var (
+		order   inventory.TransferOrder
+		entries []inventory.LedgerEntry
+	)
+	err := s.pipeline.Execute(ctx, shared.Command{
+		Name:     "inventory.transfer_orders.execute",
+		TenantID: input.TenantID,
+		ActorID:  input.ActorID,
+		Payload:  input,
+	}, func(txCtx context.Context, _ shared.Command) error {
+		current, err := s.inventory.GetTransferOrder(txCtx, input.TenantID, input.TransferOrderID)
+		if err != nil {
+			return err
+		}
+		if current.Status != inventory.TransferOrderStatusPlanned {
+			return inventory.ErrTransferOrderNotExecutable
+		}
+
+		sourceBalance, err := s.GetInventoryBalance(txCtx, GetInventoryBalanceInput{
+			TenantID:    input.TenantID,
+			ProductID:   current.ProductID,
+			WarehouseID: current.FromWarehouseID,
+		})
+		if err != nil {
+			return err
+		}
+		if current.Quantity > sourceBalance.Available {
+			return inventory.ErrInsufficientAvailableInventory
+		}
+		if err := current.MarkExecuted(input.ActorID); err != nil {
+			return err
+		}
+
+		outbound, err := inventory.NewOutboundLedgerEntry(
+			nextID("led"),
+			input.TenantID,
+			current.ProductID,
+			current.FromWarehouseID,
+			"transfer_order",
+			current.ID,
+			current.Quantity,
+		)
+		if err != nil {
+			return err
+		}
+		inbound, err := inventory.NewInboundLedgerEntry(
+			nextID("led"),
+			input.TenantID,
+			current.ProductID,
+			current.ToWarehouseID,
+			"transfer_order",
+			current.ID,
+			current.Quantity,
+		)
+		if err != nil {
+			return err
+		}
+		created := []inventory.LedgerEntry{outbound, inbound}
+		if err := s.inventory.AppendLedgerEntries(txCtx, created); err != nil {
+			return err
+		}
+		if err := s.inventory.SaveTransferOrder(txCtx, current); err != nil {
+			return err
+		}
+
+		order = current
+		entries = created
+		return nil
+	})
+	return order, entries, err
+}
+
 func (s *Service) TransferInventory(ctx context.Context, input TransferInventoryInput) ([]inventory.LedgerEntry, error) {
 	var entries []inventory.LedgerEntry
 	err := s.pipeline.Execute(ctx, shared.Command{

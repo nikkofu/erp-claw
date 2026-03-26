@@ -96,6 +96,30 @@ type TransferInventoryInput struct {
 	ReferenceID     string
 }
 
+type CreateTransferOrderInput struct {
+	TenantID        string
+	ActorID         string
+	ProductID       string
+	FromWarehouseID string
+	ToWarehouseID   string
+	Quantity        int
+}
+
+type GetTransferOrderInput struct {
+	TenantID        string
+	TransferOrderID string
+}
+
+type ListTransferOrdersInput struct {
+	TenantID string
+}
+
+type ExecuteTransferOrderInput struct {
+	TenantID        string
+	ActorID         string
+	TransferOrderID string
+}
+
 type ListInventoryLedgerInput struct {
 	TenantID    string
 	ProductID   string

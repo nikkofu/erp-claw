@@ -297,6 +297,60 @@ func registerAdminRoutes(rg *gin.RouterGroup, container *bootstrap.Container) {
 		}
 		presenter.OK(c, inventoryTransferResponse(entries))
 	})
+	inventoryGroup.POST("/transfer-orders", func(c *gin.Context) {
+		var req createInventoryTransferOrderRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			presenter.Error(c, http.StatusBadRequest, err.Error())
+			return
+		}
+
+		order, err := container.SupplyChain.CreateTransferOrder(c.Request.Context(), supplychain.CreateTransferOrderInput{
+			TenantID:        tenantIDFromContext(c),
+			ActorID:         actorIDFromContext(c),
+			ProductID:       req.ProductID,
+			FromWarehouseID: req.FromWarehouseID,
+			ToWarehouseID:   req.ToWarehouseID,
+			Quantity:        req.Quantity,
+		})
+		if err != nil {
+			renderSupplyChainError(c, err)
+			return
+		}
+		presenter.OK(c, transferOrderResponse(order))
+	})
+	inventoryGroup.GET("/transfer-orders", func(c *gin.Context) {
+		orders, err := container.SupplyChain.ListTransferOrders(c.Request.Context(), supplychain.ListTransferOrdersInput{
+			TenantID: tenantIDFromContext(c),
+		})
+		if err != nil {
+			renderSupplyChainError(c, err)
+			return
+		}
+		presenter.OK(c, transferOrdersResponse(orders))
+	})
+	inventoryGroup.GET("/transfer-orders/:id", func(c *gin.Context) {
+		order, err := container.SupplyChain.GetTransferOrder(c.Request.Context(), supplychain.GetTransferOrderInput{
+			TenantID:        tenantIDFromContext(c),
+			TransferOrderID: c.Param("id"),
+		})
+		if err != nil {
+			renderSupplyChainError(c, err)
+			return
+		}
+		presenter.OK(c, transferOrderResponse(order))
+	})
+	inventoryGroup.POST("/transfer-orders/:id/execute", func(c *gin.Context) {
+		order, entries, err := container.SupplyChain.ExecuteTransferOrder(c.Request.Context(), supplychain.ExecuteTransferOrderInput{
+			TenantID:        tenantIDFromContext(c),
+			ActorID:         actorIDFromContext(c),
+			TransferOrderID: c.Param("id"),
+		})
+		if err != nil {
+			renderSupplyChainError(c, err)
+			return
+		}
+		presenter.OK(c, transferOrderExecuteResponse(order, entries))
+	})
 
 	readModelGroup := rg.Group("/read-models")
 	readModelGroup.GET("/overview", func(c *gin.Context) {
@@ -527,6 +581,13 @@ type createInventoryTransferRequest struct {
 	ReferenceID     string `json:"reference_id"`
 }
 
+type createInventoryTransferOrderRequest struct {
+	ProductID       string `json:"product_id"`
+	FromWarehouseID string `json:"from_warehouse_id"`
+	ToWarehouseID   string `json:"to_warehouse_id"`
+	Quantity        int    `json:"quantity"`
+}
+
 type createPayablePaymentPlanRequest struct {
 	DueDate string `json:"due_date"`
 }
@@ -561,6 +622,7 @@ func renderSupplyChainError(c *gin.Context, err error) {
 		errors.Is(err, masterdata.ErrWarehouseNotFound),
 		errors.Is(err, procurement.ErrPurchaseOrderNotFound),
 		errors.Is(err, approval.ErrRequestNotFound),
+		errors.Is(err, inventory.ErrTransferOrderNotFound),
 		errors.Is(err, payable.ErrBillNotFound),
 		errors.Is(err, receivable.ErrBillNotFound),
 		errors.Is(err, sales.ErrOrderNotFound):
@@ -570,6 +632,8 @@ func renderSupplyChainError(c *gin.Context, err error) {
 		errors.Is(err, masterdata.ErrInvalidWarehouse),
 		errors.Is(err, inventory.ErrInvalidReceipt),
 		errors.Is(err, inventory.ErrInvalidReservation),
+		errors.Is(err, inventory.ErrInvalidTransferOrder),
+		errors.Is(err, inventory.ErrTransferOrderNotExecutable),
 		errors.Is(err, inventory.ErrInsufficientAvailableInventory),
 		errors.Is(err, procurement.ErrInvalidPurchaseOrder),
 		errors.Is(err, procurement.ErrPurchaseOrderAlreadySubmitted),
@@ -746,6 +810,35 @@ func inventoryOutboundResponse(entry inventory.LedgerEntry) gin.H {
 
 func inventoryTransferResponse(entries []inventory.LedgerEntry) gin.H {
 	return gin.H{
+		"ledger_entries": ledgerEntriesResponse(entries),
+	}
+}
+
+func transferOrderResponse(order inventory.TransferOrder) gin.H {
+	return gin.H{
+		"id":                order.ID,
+		"tenant_id":         order.TenantID,
+		"product_id":        order.ProductID,
+		"from_warehouse_id": order.FromWarehouseID,
+		"to_warehouse_id":   order.ToWarehouseID,
+		"quantity":          order.Quantity,
+		"status":            order.Status,
+		"created_by":        order.CreatedBy,
+		"executed_by":       order.ExecutedBy,
+	}
+}
+
+func transferOrdersResponse(orders []inventory.TransferOrder) []gin.H {
+	out := make([]gin.H, 0, len(orders))
+	for _, order := range orders {
+		out = append(out, transferOrderResponse(order))
+	}
+	return out
+}
+
+func transferOrderExecuteResponse(order inventory.TransferOrder, entries []inventory.LedgerEntry) gin.H {
+	return gin.H{
+		"order":          transferOrderResponse(order),
 		"ledger_entries": ledgerEntriesResponse(entries),
 	}
 }

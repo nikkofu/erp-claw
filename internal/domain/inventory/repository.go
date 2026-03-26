@@ -8,4 +8,7 @@ type Repository interface {
 	ListLedgerEntries(ctx context.Context, tenantID, productID, warehouseID string) ([]LedgerEntry, error)
 	SaveReservation(ctx context.Context, reservation Reservation) error
 	ListReservations(ctx context.Context, tenantID, productID, warehouseID string) ([]Reservation, error)
+	SaveTransferOrder(ctx context.Context, order TransferOrder) error
+	GetTransferOrder(ctx context.Context, tenantID, transferOrderID string) (TransferOrder, error)
+	ListTransferOrdersByTenant(ctx context.Context, tenantID string) ([]TransferOrder, error)
 }
