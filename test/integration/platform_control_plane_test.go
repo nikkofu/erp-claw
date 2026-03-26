@@ -302,6 +302,42 @@ func TestPlatformControlPlaneListTasksSupportsSessionAndStatusFilters(t *testing
 	}
 }
 
+func TestPlatformControlPlaneListSessionsSupportsStatusFilter(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	container := bootstrap.NewContainer(bootstrap.DefaultConfig())
+	h := router.New(router.WithContainer(container))
+
+	postJSONData(t, h, "/api/platform/v1/agent/sessions", map[string]any{
+		"session_id": "sess-filter-open",
+		"metadata": map[string]any{
+			"channel": "workspace",
+		},
+	})
+	postJSONData(t, h, "/api/platform/v1/agent/sessions", map[string]any{
+		"session_id": "sess-filter-closed",
+		"metadata": map[string]any{
+			"channel": "workspace",
+		},
+	})
+	postJSONData(t, h, "/api/platform/v1/agent/sessions/sess-filter-closed/close", map[string]any{})
+
+	filtered := getJSONData(t, h, "/api/platform/v1/agent/sessions?status=closed")
+	items, ok := filtered["sessions"].([]any)
+	if !ok {
+		t.Fatalf("expected sessions array, got %#v", filtered["sessions"])
+	}
+	if len(items) != 1 {
+		t.Fatalf("expected 1 closed session, got %d", len(items))
+	}
+	session, ok := items[0].(map[string]any)
+	if !ok {
+		t.Fatalf("expected session object, got %#v", items[0])
+	}
+	if got := stringField(t, session, "id"); got != "sess-filter-closed" {
+		t.Fatalf("expected sess-filter-closed, got %s", got)
+	}
+}
+
 func doJSONWithHeaders(
 	t *testing.T,
 	h http.Handler,

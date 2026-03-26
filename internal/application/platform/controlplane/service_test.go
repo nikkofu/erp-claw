@@ -501,6 +501,57 @@ func TestServiceListTasksReturnsTenantScopedAndFilteredTasks(t *testing.T) {
 	}
 }
 
+func TestServiceListSessionsSupportsStatusFilter(t *testing.T) {
+	store := memory.NewControlPlaneStore()
+	svc := NewService(ServiceDeps{
+		TenantCatalog: store.TenantCatalog(),
+		IAMDirectory:  store.IAMDirectory(),
+		Sessions:      store.SessionRepository(),
+		Tasks:         store.TaskRepository(),
+		Pipeline: shared.NewPipeline(shared.PipelineDeps{
+			Policy: policy.StaticEvaluator(policy.DecisionAllow),
+		}),
+	})
+
+	ctx := context.Background()
+	if _, err := svc.OpenSession(ctx, OpenSessionInput{
+		TenantID:  "tenant-a",
+		ActorID:   "actor-a",
+		SessionID: "sess-open",
+	}); err != nil {
+		t.Fatalf("open sess-open: %v", err)
+	}
+	if _, err := svc.OpenSession(ctx, OpenSessionInput{
+		TenantID:  "tenant-a",
+		ActorID:   "actor-a",
+		SessionID: "sess-closed",
+	}); err != nil {
+		t.Fatalf("open sess-closed: %v", err)
+	}
+	if _, err := svc.CloseSession(ctx, CloseSessionInput{
+		TenantID:  "tenant-a",
+		ActorID:   "actor-a",
+		SessionID: "sess-closed",
+	}); err != nil {
+		t.Fatalf("close sess-closed: %v", err)
+	}
+
+	closedSessions, err := svc.ListSessions(ctx, ListSessionsInput{
+		TenantID: "tenant-a",
+		ActorID:  "actor-a",
+		Status:   platformruntime.SessionStatusClosed,
+	})
+	if err != nil {
+		t.Fatalf("list closed sessions: %v", err)
+	}
+	if len(closedSessions) != 1 {
+		t.Fatalf("expected 1 closed session, got %d", len(closedSessions))
+	}
+	if closedSessions[0].ID != "sess-closed" {
+		t.Fatalf("expected sess-closed, got %s", closedSessions[0].ID)
+	}
+}
+
 type recordingWorkspaceEventSink struct {
 	events []platformruntime.WorkspaceEvent
 }

@@ -189,9 +189,16 @@ func registerControlPlaneRoutes(rg *gin.RouterGroup, container *bootstrap.Contai
 	})
 
 	agentGroup.GET("/sessions", func(c *gin.Context) {
+		status, err := parseSessionStatus(c.Query("status"))
+		if err != nil {
+			renderControlPlaneError(c, err)
+			return
+		}
+
 		sessions, err := container.ControlPlane.ListSessions(c.Request.Context(), controlplane.ListSessionsInput{
 			TenantID: tenantIDFromContext(c),
 			ActorID:  actorIDFromContext(c),
+			Status:   status,
 		})
 		if err != nil {
 			renderControlPlaneError(c, err)
@@ -629,6 +636,21 @@ func parseDecision(raw string) (policy.Decision, error) {
 		return decision, nil
 	default:
 		return "", errors.New("invalid decision filter")
+	}
+}
+
+func parseSessionStatus(raw string) (platformruntime.SessionStatus, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", nil
+	}
+
+	status := platformruntime.SessionStatus(raw)
+	switch status {
+	case platformruntime.SessionStatusOpen, platformruntime.SessionStatusClosed:
+		return status, nil
+	default:
+		return "", platformruntime.ErrInvalidSession
 	}
 }
 
