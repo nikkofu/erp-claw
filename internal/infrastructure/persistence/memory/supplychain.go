@@ -7,6 +7,7 @@ import (
 	"github.com/nikkofu/erp-claw/internal/domain/approval"
 	"github.com/nikkofu/erp-claw/internal/domain/inventory"
 	"github.com/nikkofu/erp-claw/internal/domain/masterdata"
+	"github.com/nikkofu/erp-claw/internal/domain/payable"
 	"github.com/nikkofu/erp-claw/internal/domain/procurement"
 )
 
@@ -23,6 +24,8 @@ type SupplyChainStore struct {
 	requests   map[string]approval.Request
 	receipts   map[string]inventory.Receipt
 	ledger     map[string][]inventory.LedgerEntry
+	bills      map[string]payable.Bill
+	billsByPO  map[string]string
 }
 
 func NewSupplyChainStore() *SupplyChainStore {
@@ -34,6 +37,8 @@ func NewSupplyChainStore() *SupplyChainStore {
 		requests:   make(map[string]approval.Request),
 		receipts:   make(map[string]inventory.Receipt),
 		ledger:     make(map[string][]inventory.LedgerEntry),
+		bills:      make(map[string]payable.Bill),
+		billsByPO:  make(map[string]string),
 	}
 }
 
@@ -194,6 +199,58 @@ func (r *inventoryRepository) ListLedgerEntries(_ context.Context, tenantID, pro
 	return out, nil
 }
 
+type payableRepository struct {
+	store *SupplyChainStore
+}
+
+func NewPayableRepository() payable.Repository {
+	return NewSupplyChainStore().PayableRepository()
+}
+
+func (s *SupplyChainStore) PayableRepository() payable.Repository {
+	return &payableRepository{store: s}
+}
+
+func (r *payableRepository) Save(_ context.Context, bill payable.Bill) error {
+	r.store.mu.Lock()
+	defer r.store.mu.Unlock()
+
+	orderKey := key(bill.TenantID, bill.PurchaseOrderID)
+	if existingID, exists := r.store.billsByPO[orderKey]; exists && existingID != bill.ID {
+		return payable.ErrBillAlreadyExists
+	}
+
+	r.store.bills[key(bill.TenantID, bill.ID)] = clonePayableBill(bill)
+	r.store.billsByPO[orderKey] = bill.ID
+	return nil
+}
+
+func (r *payableRepository) Get(_ context.Context, tenantID, billID string) (payable.Bill, error) {
+	r.store.mu.RLock()
+	defer r.store.mu.RUnlock()
+
+	bill, ok := r.store.bills[key(tenantID, billID)]
+	if !ok {
+		return payable.Bill{}, payable.ErrBillNotFound
+	}
+	return clonePayableBill(bill), nil
+}
+
+func (r *payableRepository) GetByPurchaseOrder(_ context.Context, tenantID, purchaseOrderID string) (payable.Bill, error) {
+	r.store.mu.RLock()
+	defer r.store.mu.RUnlock()
+
+	billID, ok := r.store.billsByPO[key(tenantID, purchaseOrderID)]
+	if !ok {
+		return payable.Bill{}, payable.ErrBillNotFound
+	}
+	bill, ok := r.store.bills[key(tenantID, billID)]
+	if !ok {
+		return payable.Bill{}, payable.ErrBillNotFound
+	}
+	return clonePayableBill(bill), nil
+}
+
 func key(tenantID, id string) string {
 	return tenantID + "/" + id
 }
@@ -214,4 +271,8 @@ func cloneReceipt(receipt inventory.Receipt) inventory.Receipt {
 
 func cloneLedgerEntry(entry inventory.LedgerEntry) inventory.LedgerEntry {
 	return entry
+}
+
+func clonePayableBill(bill payable.Bill) payable.Bill {
+	return bill
 }

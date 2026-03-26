@@ -11,6 +11,7 @@ import (
 	"github.com/nikkofu/erp-claw/internal/domain/approval"
 	"github.com/nikkofu/erp-claw/internal/domain/inventory"
 	"github.com/nikkofu/erp-claw/internal/domain/masterdata"
+	"github.com/nikkofu/erp-claw/internal/domain/payable"
 	"github.com/nikkofu/erp-claw/internal/domain/procurement"
 	"github.com/nikkofu/erp-claw/internal/interfaces/http/presenter"
 )
@@ -162,6 +163,19 @@ func registerAdminRoutes(rg *gin.RouterGroup, container *bootstrap.Container) {
 		presenter.OK(c, purchaseOrderReceiptResponse(receipt, ledgerEntries, order))
 	})
 
+	procurementGroup.POST("/:id/payable-bills", func(c *gin.Context) {
+		bill, err := container.SupplyChain.CreatePayableBill(c.Request.Context(), supplychain.CreatePayableBillInput{
+			TenantID:        tenantIDFromContext(c),
+			ActorID:         actorIDFromContext(c),
+			PurchaseOrderID: c.Param("id"),
+		})
+		if err != nil {
+			renderSupplyChainError(c, err)
+			return
+		}
+		presenter.OK(c, payableBillResponse(bill))
+	})
+
 	approvalGroup := rg.Group("/approvals")
 	approvalGroup.POST("/:id/approve", func(c *gin.Context) {
 		order, request, err := container.SupplyChain.ApproveRequest(c.Request.Context(), supplychain.ResolveApprovalInput{
@@ -201,6 +215,19 @@ func registerAdminRoutes(rg *gin.RouterGroup, container *bootstrap.Container) {
 			return
 		}
 		presenter.OK(c, inventoryBalanceResponse(balance))
+	})
+
+	payableGroup := rg.Group("/payables")
+	payableGroup.GET("/:id", func(c *gin.Context) {
+		bill, err := container.SupplyChain.GetPayableBill(c.Request.Context(), supplychain.GetPayableBillInput{
+			TenantID: tenantIDFromContext(c),
+			BillID:   c.Param("id"),
+		})
+		if err != nil {
+			renderSupplyChainError(c, err)
+			return
+		}
+		presenter.OK(c, payableBillResponse(bill))
 	})
 }
 
@@ -254,7 +281,8 @@ func renderSupplyChainError(c *gin.Context, err error) {
 		errors.Is(err, masterdata.ErrProductNotFound),
 		errors.Is(err, masterdata.ErrWarehouseNotFound),
 		errors.Is(err, procurement.ErrPurchaseOrderNotFound),
-		errors.Is(err, approval.ErrRequestNotFound):
+		errors.Is(err, approval.ErrRequestNotFound),
+		errors.Is(err, payable.ErrBillNotFound):
 		presenter.Error(c, http.StatusNotFound, err.Error())
 	case errors.Is(err, masterdata.ErrInvalidSupplier),
 		errors.Is(err, masterdata.ErrInvalidProduct),
@@ -263,6 +291,9 @@ func renderSupplyChainError(c *gin.Context, err error) {
 		errors.Is(err, procurement.ErrInvalidPurchaseOrder),
 		errors.Is(err, procurement.ErrPurchaseOrderAlreadySubmitted),
 		errors.Is(err, procurement.ErrPurchaseOrderNotReceivable),
+		errors.Is(err, payable.ErrInvalidBill),
+		errors.Is(err, payable.ErrBillAlreadyExists),
+		errors.Is(err, payable.ErrOrderNotBillable),
 		errors.Is(err, approval.ErrInvalidRequest),
 		errors.Is(err, approval.ErrApprovalNotPending):
 		presenter.Error(c, http.StatusBadRequest, err.Error())
@@ -394,5 +425,15 @@ func inventoryBalanceResponse(balance inventory.Balance) gin.H {
 		"product_id":   balance.ProductID,
 		"warehouse_id": balance.WarehouseID,
 		"on_hand":      balance.OnHand,
+	}
+}
+
+func payableBillResponse(bill payable.Bill) gin.H {
+	return gin.H{
+		"id":                bill.ID,
+		"tenant_id":         bill.TenantID,
+		"purchase_order_id": bill.PurchaseOrderID,
+		"status":            bill.Status,
+		"created_by":        bill.CreatedBy,
 	}
 }

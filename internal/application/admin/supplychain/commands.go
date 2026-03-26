@@ -64,3 +64,14 @@ type GetInventoryBalanceInput struct {
 	ProductID   string
 	WarehouseID string
 }
+
+type CreatePayableBillInput struct {
+	TenantID        string
+	ActorID         string
+	PurchaseOrderID string
+}
+
+type GetPayableBillInput struct {
+	TenantID string
+	BillID   string
+}

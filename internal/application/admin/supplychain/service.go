@@ -2,6 +2,7 @@ package supplychain
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync/atomic"
 
@@ -9,6 +10,7 @@ import (
 	"github.com/nikkofu/erp-claw/internal/domain/approval"
 	"github.com/nikkofu/erp-claw/internal/domain/inventory"
 	"github.com/nikkofu/erp-claw/internal/domain/masterdata"
+	"github.com/nikkofu/erp-claw/internal/domain/payable"
 	"github.com/nikkofu/erp-claw/internal/domain/procurement"
 )
 
@@ -17,6 +19,7 @@ type ServiceDeps struct {
 	PurchaseOrders procurement.Repository
 	Approvals      approval.Repository
 	Inventory      inventory.Repository
+	Payables       payable.Repository
 	Pipeline       *shared.Pipeline
 }
 
@@ -25,6 +28,7 @@ type Service struct {
 	purchaseOrders procurement.Repository
 	approvals      approval.Repository
 	inventory      inventory.Repository
+	payables       payable.Repository
 	pipeline       *shared.Pipeline
 }
 
@@ -39,6 +43,7 @@ func NewService(deps ServiceDeps) *Service {
 		purchaseOrders: deps.PurchaseOrders,
 		approvals:      deps.Approvals,
 		inventory:      deps.Inventory,
+		payables:       deps.Payables,
 		pipeline:       deps.Pipeline,
 	}
 }
@@ -292,6 +297,45 @@ func (s *Service) GetInventoryBalance(ctx context.Context, input GetInventoryBal
 		balance.OnHand += entry.QuantityDelta
 	}
 	return balance, nil
+}
+
+func (s *Service) CreatePayableBill(ctx context.Context, input CreatePayableBillInput) (payable.Bill, error) {
+	var bill payable.Bill
+	err := s.pipeline.Execute(ctx, shared.Command{
+		Name:     "payable.bills.create",
+		TenantID: input.TenantID,
+		ActorID:  input.ActorID,
+		Payload:  input,
+	}, func(txCtx context.Context, _ shared.Command) error {
+		order, err := s.purchaseOrders.Get(txCtx, input.TenantID, input.PurchaseOrderID)
+		if err != nil {
+			return err
+		}
+		if order.Status != procurement.PurchaseOrderStatusReceived {
+			return payable.ErrOrderNotBillable
+		}
+		if _, err := s.payables.GetByPurchaseOrder(txCtx, input.TenantID, order.ID); err == nil {
+			return payable.ErrBillAlreadyExists
+		} else if !errors.Is(err, payable.ErrBillNotFound) {
+			return err
+		}
+
+		created, err := payable.NewBill(nextID("pab"), input.TenantID, order.ID, input.ActorID)
+		if err != nil {
+			return err
+		}
+		if err := s.payables.Save(txCtx, created); err != nil {
+			return err
+		}
+
+		bill = created
+		return nil
+	})
+	return bill, err
+}
+
+func (s *Service) GetPayableBill(ctx context.Context, input GetPayableBillInput) (payable.Bill, error) {
+	return s.payables.Get(ctx, input.TenantID, input.BillID)
 }
 
 func (s *Service) resolveRequest(

@@ -2,9 +2,11 @@ package memory
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/nikkofu/erp-claw/internal/domain/inventory"
+	"github.com/nikkofu/erp-claw/internal/domain/payable"
 	"github.com/nikkofu/erp-claw/internal/domain/procurement"
 )
 
@@ -97,5 +99,54 @@ func TestInventoryRepositoryListLedgerEntriesReturnsDetachedCopy(t *testing.T) {
 	}
 	if reloaded[0].QuantityDelta != 5 {
 		t.Fatalf("expected stored quantity delta 5, got %d", reloaded[0].QuantityDelta)
+	}
+}
+
+func TestPayableRepositoryGetReturnsDetachedCopy(t *testing.T) {
+	ctx := context.Background()
+	repo := NewSupplyChainStore().PayableRepository()
+
+	bill, err := payable.NewBill("pab-001", "tenant-a", "po-001", "finance-a")
+	if err != nil {
+		t.Fatalf("new bill: %v", err)
+	}
+	if err := repo.Save(ctx, bill); err != nil {
+		t.Fatalf("save bill: %v", err)
+	}
+
+	got, err := repo.Get(ctx, bill.TenantID, bill.ID)
+	if err != nil {
+		t.Fatalf("get bill: %v", err)
+	}
+	got.CreatedBy = "tampered"
+
+	reloaded, err := repo.Get(ctx, bill.TenantID, bill.ID)
+	if err != nil {
+		t.Fatalf("reload bill: %v", err)
+	}
+	if reloaded.CreatedBy != "finance-a" {
+		t.Fatalf("expected stored created_by finance-a, got %s", reloaded.CreatedBy)
+	}
+}
+
+func TestPayableRepositoryRejectsDuplicateBillPerPurchaseOrder(t *testing.T) {
+	ctx := context.Background()
+	repo := NewSupplyChainStore().PayableRepository()
+
+	first, err := payable.NewBill("pab-001", "tenant-a", "po-001", "finance-a")
+	if err != nil {
+		t.Fatalf("new first bill: %v", err)
+	}
+	if err := repo.Save(ctx, first); err != nil {
+		t.Fatalf("save first bill: %v", err)
+	}
+
+	second, err := payable.NewBill("pab-002", "tenant-a", "po-001", "finance-a")
+	if err != nil {
+		t.Fatalf("new second bill: %v", err)
+	}
+	err = repo.Save(ctx, second)
+	if !errors.Is(err, payable.ErrBillAlreadyExists) {
+		t.Fatalf("expected bill already exists, got %v", err)
 	}
 }

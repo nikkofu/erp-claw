@@ -23,6 +23,7 @@ func NewContainer(cfg Config) *Container {
 			PurchaseOrders: store.PurchaseOrderRepository(),
 			Approvals:      store.ApprovalRepository(),
 			Inventory:      store.InventoryRepository(),
+			Payables:       store.PayableRepository(),
 			Pipeline:       shared.NewPipeline(shared.PipelineDeps{}),
 		}),
 	}

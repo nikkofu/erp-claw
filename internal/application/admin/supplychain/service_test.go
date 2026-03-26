@@ -9,6 +9,7 @@ import (
 	"github.com/nikkofu/erp-claw/internal/domain/approval"
 	"github.com/nikkofu/erp-claw/internal/domain/inventory"
 	"github.com/nikkofu/erp-claw/internal/domain/masterdata"
+	"github.com/nikkofu/erp-claw/internal/domain/payable"
 	"github.com/nikkofu/erp-claw/internal/domain/procurement"
 	"github.com/nikkofu/erp-claw/internal/infrastructure/persistence/memory"
 )
@@ -370,12 +371,74 @@ func TestServiceReceivePurchaseOrderFailsForEmptyLines(t *testing.T) {
 	}
 }
 
+func TestServiceCreatesPayableBillForReceivedPurchaseOrder(t *testing.T) {
+	ctx := context.Background()
+	svc := newTestService()
+	receivedOrder := createReceivedOrder(t, ctx, svc)
+
+	bill, err := svc.CreatePayableBill(ctx, CreatePayableBillInput{
+		TenantID:        "tenant-a",
+		ActorID:         "finance-a",
+		PurchaseOrderID: receivedOrder.ID,
+	})
+	if err != nil {
+		t.Fatalf("create payable bill: %v", err)
+	}
+
+	if bill.Status != payable.BillStatusOpen {
+		t.Fatalf("expected open payable bill, got %s", bill.Status)
+	}
+	if bill.PurchaseOrderID != receivedOrder.ID {
+		t.Fatalf("expected purchase order id %s, got %s", receivedOrder.ID, bill.PurchaseOrderID)
+	}
+}
+
+func TestServiceCreatePayableBillFailsWhenOrderNotReceived(t *testing.T) {
+	ctx := context.Background()
+	svc := newTestService()
+	approvedOrder := createApprovedOrder(t, ctx, svc)
+
+	_, err := svc.CreatePayableBill(ctx, CreatePayableBillInput{
+		TenantID:        "tenant-a",
+		ActorID:         "finance-a",
+		PurchaseOrderID: approvedOrder.ID,
+	})
+	if !errors.Is(err, payable.ErrOrderNotBillable) {
+		t.Fatalf("expected order not billable, got %v", err)
+	}
+}
+
+func TestServiceCreatePayableBillFailsWhenBillAlreadyExists(t *testing.T) {
+	ctx := context.Background()
+	svc := newTestService()
+	receivedOrder := createReceivedOrder(t, ctx, svc)
+
+	_, err := svc.CreatePayableBill(ctx, CreatePayableBillInput{
+		TenantID:        "tenant-a",
+		ActorID:         "finance-a",
+		PurchaseOrderID: receivedOrder.ID,
+	})
+	if err != nil {
+		t.Fatalf("create first payable bill: %v", err)
+	}
+
+	_, err = svc.CreatePayableBill(ctx, CreatePayableBillInput{
+		TenantID:        "tenant-a",
+		ActorID:         "finance-a",
+		PurchaseOrderID: receivedOrder.ID,
+	})
+	if !errors.Is(err, payable.ErrBillAlreadyExists) {
+		t.Fatalf("expected bill already exists, got %v", err)
+	}
+}
+
 func newTestService() *Service {
 	return NewService(ServiceDeps{
 		MasterData:     memory.NewMasterDataRepository(),
 		PurchaseOrders: memory.NewPurchaseOrderRepository(),
 		Approvals:      memory.NewApprovalRepository(),
 		Inventory:      memory.NewInventoryRepository(),
+		Payables:       memory.NewPayableRepository(),
 		Pipeline:       shared.NewPipeline(shared.PipelineDeps{}),
 	})
 }
@@ -424,6 +487,25 @@ func createApprovedOrder(t *testing.T, ctx context.Context, svc *Service) procur
 		t.Fatalf("approve request: %v", err)
 	}
 	return approvedOrder
+}
+
+func createReceivedOrder(t *testing.T, ctx context.Context, svc *Service) procurement.PurchaseOrder {
+	t.Helper()
+
+	approvedOrder := createApprovedOrder(t, ctx, svc)
+	_, _, receivedOrder, err := svc.ReceivePurchaseOrder(ctx, ReceivePurchaseOrderInput{
+		TenantID:        "tenant-a",
+		ActorID:         "receiver-a",
+		PurchaseOrderID: approvedOrder.ID,
+		Lines: []ReceivePurchaseOrderLine{{
+			ProductID: approvedOrder.Lines[0].ProductID,
+			Quantity:  approvedOrder.Lines[0].Quantity,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("receive order: %v", err)
+	}
+	return receivedOrder
 }
 
 func createMasterData(t *testing.T, ctx context.Context, svc *Service) (masterdata.Supplier, masterdata.Product, masterdata.Warehouse) {
