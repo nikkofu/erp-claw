@@ -5,6 +5,7 @@ import (
 	"sync"
 
 	"github.com/nikkofu/erp-claw/internal/domain/approval"
+	"github.com/nikkofu/erp-claw/internal/domain/inventory"
 	"github.com/nikkofu/erp-claw/internal/domain/masterdata"
 	"github.com/nikkofu/erp-claw/internal/domain/procurement"
 )
@@ -20,6 +21,8 @@ type SupplyChainStore struct {
 	warehouses map[string]masterdata.Warehouse
 	orders     map[string]procurement.PurchaseOrder
 	requests   map[string]approval.Request
+	receipts   map[string]inventory.Receipt
+	ledger     map[string][]inventory.LedgerEntry
 }
 
 func NewSupplyChainStore() *SupplyChainStore {
@@ -29,6 +32,8 @@ func NewSupplyChainStore() *SupplyChainStore {
 		warehouses: make(map[string]masterdata.Warehouse),
 		orders:     make(map[string]procurement.PurchaseOrder),
 		requests:   make(map[string]approval.Request),
+		receipts:   make(map[string]inventory.Receipt),
+		ledger:     make(map[string][]inventory.LedgerEntry),
 	}
 }
 
@@ -149,11 +154,64 @@ func (r *approvalRepository) Get(_ context.Context, tenantID, requestID string) 
 	return request, nil
 }
 
+type inventoryRepository struct {
+	store *SupplyChainStore
+}
+
+func NewInventoryRepository() inventory.Repository {
+	return NewSupplyChainStore().InventoryRepository()
+}
+
+func (s *SupplyChainStore) InventoryRepository() inventory.Repository {
+	return &inventoryRepository{store: s}
+}
+
+func (r *inventoryRepository) SaveReceipt(_ context.Context, receipt inventory.Receipt) error {
+	r.store.mu.Lock()
+	defer r.store.mu.Unlock()
+	r.store.receipts[key(receipt.TenantID, receipt.ID)] = cloneReceipt(receipt)
+	return nil
+}
+
+func (r *inventoryRepository) AppendLedgerEntries(_ context.Context, entries []inventory.LedgerEntry) error {
+	r.store.mu.Lock()
+	defer r.store.mu.Unlock()
+	for _, entry := range entries {
+		k := inventoryKey(entry.TenantID, entry.ProductID, entry.WarehouseID)
+		r.store.ledger[k] = append(r.store.ledger[k], cloneLedgerEntry(entry))
+	}
+	return nil
+}
+
+func (r *inventoryRepository) ListLedgerEntries(_ context.Context, tenantID, productID, warehouseID string) ([]inventory.LedgerEntry, error) {
+	r.store.mu.RLock()
+	defer r.store.mu.RUnlock()
+	stored := r.store.ledger[inventoryKey(tenantID, productID, warehouseID)]
+	out := make([]inventory.LedgerEntry, 0, len(stored))
+	for _, entry := range stored {
+		out = append(out, cloneLedgerEntry(entry))
+	}
+	return out, nil
+}
+
 func key(tenantID, id string) string {
 	return tenantID + "/" + id
+}
+
+func inventoryKey(tenantID, productID, warehouseID string) string {
+	return tenantID + "/" + warehouseID + "/" + productID
 }
 
 func clonePurchaseOrder(order procurement.PurchaseOrder) procurement.PurchaseOrder {
 	order.Lines = append([]procurement.Line(nil), order.Lines...)
 	return order
+}
+
+func cloneReceipt(receipt inventory.Receipt) inventory.Receipt {
+	receipt.Lines = append([]inventory.ReceiptLine(nil), receipt.Lines...)
+	return receipt
+}
+
+func cloneLedgerEntry(entry inventory.LedgerEntry) inventory.LedgerEntry {
+	return entry
 }

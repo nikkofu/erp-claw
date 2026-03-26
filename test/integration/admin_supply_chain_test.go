@@ -228,3 +228,16 @@ func stringField(t *testing.T, payload map[string]any, field string) string {
 	}
 	return str
 }
+
+func intField(t *testing.T, payload map[string]any, field string) int {
+	t.Helper()
+	value, ok := payload[field]
+	if !ok {
+		t.Fatalf("missing field %q in payload %#v", field, payload)
+	}
+	number, ok := value.(float64)
+	if !ok {
+		t.Fatalf("expected field %q to be a number, got %#v", field, value)
+	}
+	return int(number)
+}

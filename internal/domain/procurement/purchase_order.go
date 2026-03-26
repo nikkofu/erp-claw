@@ -8,6 +8,7 @@ import (
 var (
 	ErrInvalidPurchaseOrder          = errors.New("invalid purchase order")
 	ErrPurchaseOrderAlreadySubmitted = errors.New("purchase order is not in draft status")
+	ErrPurchaseOrderNotReceivable    = errors.New("purchase order is not receivable")
 )
 
 type PurchaseOrderStatus string
@@ -17,6 +18,7 @@ const (
 	PurchaseOrderStatusPendingApproval PurchaseOrderStatus = "pending_approval"
 	PurchaseOrderStatusApproved        PurchaseOrderStatus = "approved"
 	PurchaseOrderStatusRejected        PurchaseOrderStatus = "rejected"
+	PurchaseOrderStatusReceived        PurchaseOrderStatus = "received"
 )
 
 type Line struct {
@@ -81,6 +83,14 @@ func (po *PurchaseOrder) MarkRejected() error {
 		return ErrPurchaseOrderAlreadySubmitted
 	}
 	po.Status = PurchaseOrderStatusRejected
+	return nil
+}
+
+func (po *PurchaseOrder) MarkReceived() error {
+	if po.Status != PurchaseOrderStatusApproved {
+		return ErrPurchaseOrderNotReceivable
+	}
+	po.Status = PurchaseOrderStatusReceived
 	return nil
 }
 

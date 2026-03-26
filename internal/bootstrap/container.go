@@ -22,6 +22,7 @@ func NewContainer(cfg Config) *Container {
 			MasterData:     store.MasterDataRepository(),
 			PurchaseOrders: store.PurchaseOrderRepository(),
 			Approvals:      store.ApprovalRepository(),
+			Inventory:      store.InventoryRepository(),
 			Pipeline:       shared.NewPipeline(shared.PipelineDeps{}),
 		}),
 	}

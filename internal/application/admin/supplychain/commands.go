@@ -46,3 +46,21 @@ type ResolveApprovalInput struct {
 	ActorID    string
 	ApprovalID string
 }
+
+type ReceivePurchaseOrderLine struct {
+	ProductID string
+	Quantity  int
+}
+
+type ReceivePurchaseOrderInput struct {
+	TenantID        string
+	ActorID         string
+	PurchaseOrderID string
+	Lines           []ReceivePurchaseOrderLine
+}
+
+type GetInventoryBalanceInput struct {
+	TenantID    string
+	ProductID   string
+	WarehouseID string
+}
