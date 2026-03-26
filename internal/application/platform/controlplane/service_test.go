@@ -642,6 +642,73 @@ func TestServiceListSessionsSupportsOffsetAndLimit(t *testing.T) {
 	}
 }
 
+func TestServiceListSessionTasksSupportsStatusAndPagination(t *testing.T) {
+	store := memory.NewControlPlaneStore()
+	svc := NewService(ServiceDeps{
+		TenantCatalog: store.TenantCatalog(),
+		IAMDirectory:  store.IAMDirectory(),
+		Sessions:      store.SessionRepository(),
+		Tasks:         store.TaskRepository(),
+		Pipeline: shared.NewPipeline(shared.PipelineDeps{
+			Policy: policy.StaticEvaluator(policy.DecisionAllow),
+		}),
+	})
+
+	ctx := context.Background()
+	if _, err := svc.OpenSession(ctx, OpenSessionInput{
+		TenantID:  "tenant-a",
+		ActorID:   "actor-a",
+		SessionID: "sess-filter-001",
+	}); err != nil {
+		t.Fatalf("open session: %v", err)
+	}
+	for _, taskID := range []string{"task-001", "task-002", "task-003"} {
+		if _, err := svc.EnqueueTask(ctx, EnqueueTaskInput{
+			TenantID:  "tenant-a",
+			ActorID:   "actor-a",
+			SessionID: "sess-filter-001",
+			TaskID:    taskID,
+			TaskType:  "tool.call",
+		}); err != nil {
+			t.Fatalf("enqueue %s: %v", taskID, err)
+		}
+	}
+	if _, err := svc.StartTask(ctx, AdvanceTaskInput{
+		TenantID: "tenant-a",
+		ActorID:  "actor-a",
+		TaskID:   "task-002",
+	}); err != nil {
+		t.Fatalf("start task-002: %v", err)
+	}
+
+	running, err := svc.ListSessionTasks(ctx, ListSessionTasksInput{
+		TenantID:  "tenant-a",
+		ActorID:   "actor-a",
+		SessionID: "sess-filter-001",
+		Status:    platformruntime.TaskStatusRunning,
+	})
+	if err != nil {
+		t.Fatalf("list running session tasks: %v", err)
+	}
+	if len(running) != 1 || running[0].ID != "task-002" {
+		t.Fatalf("expected only task-002, got %#v", running)
+	}
+
+	paged, err := svc.ListSessionTasks(ctx, ListSessionTasksInput{
+		TenantID:  "tenant-a",
+		ActorID:   "actor-a",
+		SessionID: "sess-filter-001",
+		Offset:    1,
+		Limit:     1,
+	})
+	if err != nil {
+		t.Fatalf("list paged session tasks: %v", err)
+	}
+	if len(paged) != 1 || paged[0].ID != "task-002" {
+		t.Fatalf("expected only task-002 in paged result, got %#v", paged)
+	}
+}
+
 type recordingWorkspaceEventSink struct {
 	events []platformruntime.WorkspaceEvent
 }

@@ -407,6 +407,61 @@ func TestPlatformControlPlaneListSessionsSupportsPagination(t *testing.T) {
 	}
 }
 
+func TestPlatformControlPlaneListSessionTasksSupportsStatusAndPagination(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	container := bootstrap.NewContainer(bootstrap.DefaultConfig())
+	h := router.New(router.WithContainer(container))
+
+	postJSONData(t, h, "/api/platform/v1/agent/sessions", map[string]any{
+		"session_id": "sess-filter-001",
+		"metadata": map[string]any{
+			"channel": "workspace",
+		},
+	})
+	for _, taskID := range []string{"task-001", "task-002", "task-003"} {
+		postJSONData(t, h, "/api/platform/v1/agent/sessions/sess-filter-001/tasks", map[string]any{
+			"task_id":   taskID,
+			"task_type": "tool.call",
+			"input": map[string]any{
+				"tool": "search",
+			},
+		})
+	}
+	postJSONData(t, h, "/api/platform/v1/agent/tasks/task-002/start", map[string]any{})
+
+	running := getJSONData(t, h, "/api/platform/v1/agent/sessions/sess-filter-001/tasks?status=running")
+	runningItems, ok := running["tasks"].([]any)
+	if !ok {
+		t.Fatalf("expected tasks array, got %#v", running["tasks"])
+	}
+	if len(runningItems) != 1 {
+		t.Fatalf("expected 1 running task, got %d", len(runningItems))
+	}
+	runningTask, ok := runningItems[0].(map[string]any)
+	if !ok {
+		t.Fatalf("expected task object, got %#v", runningItems[0])
+	}
+	if got := stringField(t, runningTask, "id"); got != "task-002" {
+		t.Fatalf("expected task-002, got %s", got)
+	}
+
+	paged := getJSONData(t, h, "/api/platform/v1/agent/sessions/sess-filter-001/tasks?offset=1&limit=1")
+	pagedItems, ok := paged["tasks"].([]any)
+	if !ok {
+		t.Fatalf("expected tasks array, got %#v", paged["tasks"])
+	}
+	if len(pagedItems) != 1 {
+		t.Fatalf("expected 1 paged task, got %d", len(pagedItems))
+	}
+	pagedTask, ok := pagedItems[0].(map[string]any)
+	if !ok {
+		t.Fatalf("expected task object, got %#v", pagedItems[0])
+	}
+	if got := stringField(t, pagedTask, "id"); got != "task-002" {
+		t.Fatalf("expected task-002 in paged result, got %s", got)
+	}
+}
+
 func doJSONWithHeaders(
 	t *testing.T,
 	h http.Handler,

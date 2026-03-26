@@ -268,10 +268,29 @@ func registerControlPlaneRoutes(rg *gin.RouterGroup, container *bootstrap.Contai
 	})
 
 	agentGroup.GET("/sessions/:id/tasks", func(c *gin.Context) {
+		status, err := parseTaskStatus(c.Query("status"))
+		if err != nil {
+			renderControlPlaneError(c, err)
+			return
+		}
+		limit, err := parseLimit(c.Query("limit"), 20)
+		if err != nil {
+			presenter.Error(c, http.StatusBadRequest, err.Error())
+			return
+		}
+		offset, err := parseOffset(c.Query("offset"))
+		if err != nil {
+			presenter.Error(c, http.StatusBadRequest, err.Error())
+			return
+		}
+
 		tasks, err := container.ControlPlane.ListSessionTasks(c.Request.Context(), controlplane.ListSessionTasksInput{
 			TenantID:  tenantIDFromContext(c),
 			ActorID:   actorIDFromContext(c),
 			SessionID: c.Param("id"),
+			Status:    status,
+			Offset:    offset,
+			Limit:     limit,
 		})
 		if err != nil {
 			renderControlPlaneError(c, err)
