@@ -1,28 +1,79 @@
 package bootstrap
 
 import (
+	"context"
+	"errors"
+
 	"github.com/nikkofu/erp-claw/internal/application/admin/supplychain"
+	"github.com/nikkofu/erp-claw/internal/application/platform/controlplane"
 	"github.com/nikkofu/erp-claw/internal/application/shared"
 	"github.com/nikkofu/erp-claw/internal/infrastructure/persistence/memory"
+	"github.com/nikkofu/erp-claw/internal/platform/audit"
 	"github.com/nikkofu/erp-claw/internal/platform/health"
+	"github.com/nikkofu/erp-claw/internal/platform/iam"
+	"github.com/nikkofu/erp-claw/internal/platform/policy"
 )
 
 type Container struct {
-	Config      Config
-	Health      *health.Service
-	SupplyChain *supplychain.Service
+	Config       Config
+	Health       *health.Service
+	SupplyChain  *supplychain.Service
+	ControlPlane *controlplane.Service
 }
 
 func NewContainer(cfg Config) *Container {
-	store := memory.NewSupplyChainStore()
+	supplyChainStore := memory.NewSupplyChainStore()
+	controlPlaneStore := memory.NewControlPlaneStore()
+	auditRecorder := audit.NewInMemoryRecorder()
+
+	lookupRoles := func(ctx context.Context, tenantID, actorID string) ([]string, error) {
+		if actorID == iam.SystemActor.ID {
+			return append([]string(nil), iam.SystemActor.Roles...), nil
+		}
+		actor, err := controlPlaneStore.IAMDirectory().Get(ctx, tenantID, actorID)
+		if err != nil {
+			if errors.Is(err, iam.ErrActorNotFound) {
+				return nil, nil
+			}
+			return nil, err
+		}
+		return append([]string(nil), actor.Roles...), nil
+	}
+
+	evaluator := policy.NewRoleEvaluator(
+		lookupRoles,
+		[]policy.Rule{
+			{CommandPrefix: "masterdata.", AnyOfRoles: []string{"platform_admin", "supplychain_operator"}},
+			{CommandPrefix: "procurement.", AnyOfRoles: []string{"platform_admin", "supplychain_operator"}},
+			{CommandPrefix: "approval.", AnyOfRoles: []string{"platform_admin", "supplychain_operator", "approver"}},
+			{CommandPrefix: "controlplane.", AnyOfRoles: []string{"platform_admin"}},
+			{CommandPrefix: "runtime.", AnyOfRoles: []string{"platform_admin", "workspace_operator"}},
+			{CommandPrefix: "platform.audit.", AnyOfRoles: []string{"platform_admin"}},
+		},
+	)
+
+	pipeline := shared.NewPipeline(shared.PipelineDeps{
+		Policy: evaluator,
+		Audit:  auditRecorder,
+	})
+
 	return &Container{
 		Config: cfg,
 		Health: health.NewService(),
 		SupplyChain: supplychain.NewService(supplychain.ServiceDeps{
-			MasterData:     store.MasterDataRepository(),
-			PurchaseOrders: store.PurchaseOrderRepository(),
-			Approvals:      store.ApprovalRepository(),
-			Pipeline:       shared.NewPipeline(shared.PipelineDeps{}),
+			MasterData:     supplyChainStore.MasterDataRepository(),
+			PurchaseOrders: supplyChainStore.PurchaseOrderRepository(),
+			Approvals:      supplyChainStore.ApprovalRepository(),
+			Inventory:      supplyChainStore.InventoryRepository(),
+			Pipeline:       pipeline,
+		}),
+		ControlPlane: controlplane.NewService(controlplane.ServiceDeps{
+			TenantCatalog: controlPlaneStore.TenantCatalog(),
+			IAMDirectory:  controlPlaneStore.IAMDirectory(),
+			Sessions:      controlPlaneStore.SessionRepository(),
+			Tasks:         controlPlaneStore.TaskRepository(),
+			AuditReader:   auditRecorder,
+			Pipeline:      pipeline,
 		}),
 	}
 }

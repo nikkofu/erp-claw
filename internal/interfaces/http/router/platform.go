@@ -7,6 +7,5 @@ import (
 
 func registerPlatformRoutes(rg *gin.RouterGroup, container *bootstrap.Container) {
 	registerHealthRoutes(rg, container)
-
-	// Additional platform routes will be hooked here in the future.
+	registerControlPlaneRoutes(rg, container)
 }
