@@ -298,6 +298,18 @@ func registerAdminRoutes(rg *gin.RouterGroup, container *bootstrap.Container) {
 		presenter.OK(c, inventoryTransferResponse(entries))
 	})
 
+	readModelGroup := rg.Group("/read-models")
+	readModelGroup.GET("/overview", func(c *gin.Context) {
+		overview, err := container.SupplyChain.GetBackofficeOverview(c.Request.Context(), supplychain.GetBackofficeOverviewInput{
+			TenantID: tenantIDFromContext(c),
+		})
+		if err != nil {
+			renderSupplyChainError(c, err)
+			return
+		}
+		presenter.OK(c, backofficeOverviewResponse(overview))
+	})
+
 	receivableGroup := rg.Group("/receivables")
 	receivableGroup.POST("", func(c *gin.Context) {
 		var req createReceivableBillRequest
@@ -830,5 +842,22 @@ func salesOrderShipResponse(order sales.Order, entries []inventory.LedgerEntry) 
 	return gin.H{
 		"order":          salesOrderResponse(order),
 		"ledger_entries": ledgerEntriesResponse(entries),
+	}
+}
+
+func backofficeOverviewResponse(overview supplychain.BackofficeOverview) gin.H {
+	return gin.H{
+		"tenant_id": overview.TenantID,
+		"payable": gin.H{
+			"open_count": overview.Payable.OpenCount,
+		},
+		"receivable": gin.H{
+			"open_count": overview.Receivable.OpenCount,
+		},
+		"sales": gin.H{
+			"draft_count":   overview.Sales.DraftCount,
+			"shipped_count": overview.Sales.ShippedCount,
+			"total_count":   overview.Sales.TotalCount,
+		},
 	}
 }

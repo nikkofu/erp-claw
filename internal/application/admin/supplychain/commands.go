@@ -171,3 +171,7 @@ type ShipSalesOrderInput struct {
 	ActorID      string
 	SalesOrderID string
 }
+
+type GetBackofficeOverviewInput struct {
+	TenantID string
+}

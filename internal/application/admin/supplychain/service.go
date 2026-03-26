@@ -695,6 +695,43 @@ func (s *Service) ShipSalesOrder(ctx context.Context, input ShipSalesOrderInput)
 	return order, entries, err
 }
 
+func (s *Service) GetBackofficeOverview(ctx context.Context, input GetBackofficeOverviewInput) (BackofficeOverview, error) {
+	payableBills, err := s.payables.ListByTenant(ctx, input.TenantID)
+	if err != nil {
+		return BackofficeOverview{}, err
+	}
+	receivableBills, err := s.receivables.ListByTenant(ctx, input.TenantID)
+	if err != nil {
+		return BackofficeOverview{}, err
+	}
+	salesOrders, err := s.salesOrders.ListByTenant(ctx, input.TenantID)
+	if err != nil {
+		return BackofficeOverview{}, err
+	}
+
+	overview := BackofficeOverview{
+		TenantID: input.TenantID,
+		Payable: PayableOverview{
+			OpenCount: len(payableBills),
+		},
+		Receivable: ReceivableOverview{
+			OpenCount: len(receivableBills),
+		},
+		Sales: SalesOverview{
+			TotalCount: len(salesOrders),
+		},
+	}
+	for _, order := range salesOrders {
+		switch order.Status {
+		case sales.OrderStatusDraft:
+			overview.Sales.DraftCount++
+		case sales.OrderStatusShipped:
+			overview.Sales.ShippedCount++
+		}
+	}
+	return overview, nil
+}
+
 func (s *Service) resolveRequest(
 	ctx context.Context,
 	input ResolveApprovalInput,

@@ -833,6 +833,82 @@ func TestServiceListsSalesOrdersByTenant(t *testing.T) {
 	}
 }
 
+func TestServiceBuildsBackofficeOverviewReadModel(t *testing.T) {
+	ctx := context.Background()
+	svc := newTestService()
+	receivedOrder := createReceivedOrder(t, ctx, svc)
+
+	if _, err := svc.CreatePayableBill(ctx, CreatePayableBillInput{
+		TenantID:        "tenant-a",
+		ActorID:         "finance-a",
+		PurchaseOrderID: receivedOrder.ID,
+	}); err != nil {
+		t.Fatalf("create payable bill: %v", err)
+	}
+	if _, err := svc.CreateReceivableBill(ctx, CreateReceivableBillInput{
+		TenantID:    "tenant-a",
+		ActorID:     "finance-a",
+		ExternalRef: "SO-OV-001",
+	}); err != nil {
+		t.Fatalf("create receivable bill: %v", err)
+	}
+
+	shipOrder, err := svc.CreateSalesOrder(ctx, CreateSalesOrderInput{
+		TenantID:    "tenant-a",
+		ActorID:     "sales-a",
+		WarehouseID: receivedOrder.WarehouseID,
+		ExternalRef: "SO-OV-002",
+		Lines: []CreateSalesOrderLine{{
+			ProductID: receivedOrder.Lines[0].ProductID,
+			Quantity:  2,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("create sales order to ship: %v", err)
+	}
+	if _, _, err := svc.ShipSalesOrder(ctx, ShipSalesOrderInput{
+		TenantID:     "tenant-a",
+		ActorID:      "warehouse-a",
+		SalesOrderID: shipOrder.ID,
+	}); err != nil {
+		t.Fatalf("ship sales order: %v", err)
+	}
+	if _, err := svc.CreateSalesOrder(ctx, CreateSalesOrderInput{
+		TenantID:    "tenant-a",
+		ActorID:     "sales-a",
+		WarehouseID: receivedOrder.WarehouseID,
+		ExternalRef: "SO-OV-003",
+		Lines: []CreateSalesOrderLine{{
+			ProductID: receivedOrder.Lines[0].ProductID,
+			Quantity:  1,
+		}},
+	}); err != nil {
+		t.Fatalf("create draft sales order: %v", err)
+	}
+
+	overview, err := svc.GetBackofficeOverview(ctx, GetBackofficeOverviewInput{
+		TenantID: "tenant-a",
+	})
+	if err != nil {
+		t.Fatalf("get backoffice overview: %v", err)
+	}
+	if overview.Payable.OpenCount != 1 {
+		t.Fatalf("expected payable open_count 1, got %d", overview.Payable.OpenCount)
+	}
+	if overview.Receivable.OpenCount != 1 {
+		t.Fatalf("expected receivable open_count 1, got %d", overview.Receivable.OpenCount)
+	}
+	if overview.Sales.DraftCount != 1 {
+		t.Fatalf("expected sales draft_count 1, got %d", overview.Sales.DraftCount)
+	}
+	if overview.Sales.ShippedCount != 1 {
+		t.Fatalf("expected sales shipped_count 1, got %d", overview.Sales.ShippedCount)
+	}
+	if overview.Sales.TotalCount != 2 {
+		t.Fatalf("expected sales total_count 2, got %d", overview.Sales.TotalCount)
+	}
+}
+
 func TestServiceReceivePurchaseOrderFailsWhenOrderNotApproved(t *testing.T) {
 	ctx := context.Background()
 	svc := newTestService()

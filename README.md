@@ -96,10 +96,11 @@ The first executable Phase 2 slice is now available through the admin surface. I
 - `GET /api/admin/v1/sales-orders`
 - `GET /api/admin/v1/sales-orders/:id`
 - `POST /api/admin/v1/sales-orders/:id/ship`
+- `GET /api/admin/v1/read-models/overview`
 - `POST /api/admin/v1/approvals/:id/approve`
 - `POST /api/admin/v1/approvals/:id/reject`
 
-Run `go test ./test/integration -run 'TestAdminSupplyChainFlow|TestAdminInventoryReceiptFlow|TestAdminInventoryReservationFlow|TestAdminInventoryReservationRejectsExcessQuantity|TestAdminInventoryOutboundFlow|TestAdminInventoryOutboundRejectsExcessQuantity|TestAdminInventoryTransferFlow|TestAdminInventoryTransferRejectsExcessQuantity|TestAdminInventoryLedgerListFlow|TestAdminPayableFlow|TestAdminReceivableFlow|TestAdminSalesOrderShipFlow|TestAdminSalesOrderShipRejectsInsufficientInventory' -v` to verify the end-to-end Phase 2 admin flow locally, including inventory reservation/outbound/transfer and ledger query, payable/receivable basics, and a minimal sales shipment loop.
+Run `go test ./test/integration -run 'TestAdminSupplyChainFlow|TestAdminInventoryReceiptFlow|TestAdminInventoryReservationFlow|TestAdminInventoryReservationRejectsExcessQuantity|TestAdminInventoryOutboundFlow|TestAdminInventoryOutboundRejectsExcessQuantity|TestAdminInventoryTransferFlow|TestAdminInventoryTransferRejectsExcessQuantity|TestAdminInventoryLedgerListFlow|TestAdminPayableFlow|TestAdminReceivableFlow|TestAdminSalesOrderShipFlow|TestAdminSalesOrderShipRejectsInsufficientInventory|TestAdminBackofficeOverviewReadModel' -v` to verify the end-to-end Phase 2 admin flow locally, including inventory reservation/outbound/transfer and ledger query, payable/receivable basics, minimal sales shipment loop, and the backoffice overview read model.
 
 ## Workspace API (Phase 2 Minimal Query Slice)
 
