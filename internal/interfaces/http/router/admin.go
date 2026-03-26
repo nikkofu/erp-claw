@@ -216,6 +216,10 @@ func registerAdminRoutes(rg *gin.RouterGroup, container *bootstrap.Container) {
 	if err != nil {
 		panic("router: agent capability policy get handler init failed: " + err.Error())
 	}
+	resolveEffectiveAgentCapabilityPolicyHandler, err := capabilityapp.NewResolveEffectiveAgentCapabilityPolicyHandler(capabilityCatalog, catalog, capabilityCatalog, capabilityCatalog)
+	if err != nil {
+		panic("router: effective agent capability policy handler init failed: " + err.Error())
+	}
 	ruleService, err := policy.NewRuleService(governanceCatalog)
 	if err != nil {
 		panic("router: governance rule service init failed: " + err.Error())
@@ -749,6 +753,18 @@ func registerAdminRoutes(rg *gin.RouterGroup, container *bootstrap.Container) {
 		tenantID := tenantIDFromQueryOrHeader(c)
 		profileID := strings.TrimSpace(c.Param("profile_id"))
 		policy, err := getAgentCapabilityPolicyHandler.Handle(c.Request.Context(), tenantID, profileID)
+		if err != nil {
+			adminError(c, http.StatusBadRequest, err)
+			return
+		}
+
+		presenter.OK(c, policy)
+	})
+
+	rg.GET("/agent-profiles/:profile_id/capability-policy/effective", func(c *gin.Context) {
+		tenantID := tenantIDFromQueryOrHeader(c)
+		profileID := strings.TrimSpace(c.Param("profile_id"))
+		policy, err := resolveEffectiveAgentCapabilityPolicyHandler.Handle(c.Request.Context(), tenantID, profileID)
 		if err != nil {
 			adminError(c, http.StatusBadRequest, err)
 			return

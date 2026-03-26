@@ -582,6 +582,60 @@ func TestAdminCapabilityTenantEnablementKeepsExistingBindingAfterDeactivation(t 
 	}
 }
 
+func TestAdminEffectiveAgentCapabilityPolicyRoute(t *testing.T) {
+	h := router.New(router.WithContainer(bootstrap.NewTestContainer()))
+
+	tenantID := createAdminEntityAndReadID(t, h, http.MethodPost, "/api/admin/v1/tenants", `{"code":"tenant-cap-effective","name":"Tenant Capability Effective"}`, "platform-root")
+	profileID := createAdminEntityAndReadID(t, h, http.MethodPost, "/api/admin/v1/agent-profiles", `{"tenant_id":"`+tenantID+`","name":"buyer-agent","model":"gpt-5.4"}`, tenantID)
+	createAdminNoID(t, h, http.MethodPost, "/api/admin/v1/model-catalog-entries", `{"entry_id":"model-1","model_key":"gpt-5.4","display_name":"GPT 5.4","provider":"openai","status":"active"}`, tenantID)
+	createAdminNoID(t, h, http.MethodPost, "/api/admin/v1/model-catalog-entries", `{"entry_id":"model-2","model_key":"gpt-4.1","display_name":"GPT 4.1","provider":"openai","status":"active"}`, tenantID)
+	createAdminNoID(t, h, http.MethodPost, "/api/admin/v1/tool-catalog-entries", `{"entry_id":"tool-1","tool_key":"purchase.submit","display_name":"Purchase Submit","risk_level":"medium","status":"active"}`, tenantID)
+
+	putReq := httptest.NewRequest(http.MethodPut, "/api/admin/v1/agent-profiles/"+profileID+"/capability-policy", strings.NewReader(`{"allowed_model_entry_ids":["model-1","model-2"],"allowed_tool_entry_ids":["tool-1","tool-stale"]}`))
+	putReq.Header.Set("Content-Type", "application/json")
+	putReq.Header.Set("X-Tenant-ID", tenantID)
+	putRec := httptest.NewRecorder()
+	h.ServeHTTP(putRec, putReq)
+	if putRec.Code != http.StatusBadRequest {
+		t.Fatalf("expected initial capability policy put 400 because tool-stale is unknown, got %d: %s", putRec.Code, putRec.Body.String())
+	}
+
+	putReq = httptest.NewRequest(http.MethodPut, "/api/admin/v1/agent-profiles/"+profileID+"/capability-policy", strings.NewReader(`{"allowed_model_entry_ids":["model-1","model-2"],"allowed_tool_entry_ids":["tool-1"]}`))
+	putReq.Header.Set("Content-Type", "application/json")
+	putReq.Header.Set("X-Tenant-ID", tenantID)
+	putRec = httptest.NewRecorder()
+	h.ServeHTTP(putRec, putReq)
+	if putRec.Code != http.StatusOK {
+		t.Fatalf("expected capability policy put 200, got %d: %s", putRec.Code, putRec.Body.String())
+	}
+
+	modelDeactivateReq := httptest.NewRequest(http.MethodPost, "/api/admin/v1/model-catalog-entries/model-2/deactivate", strings.NewReader(`{"tenant_id":"`+tenantID+`"}`))
+	modelDeactivateReq.Header.Set("Content-Type", "application/json")
+	modelDeactivateReq.Header.Set("X-Tenant-ID", tenantID)
+	modelDeactivateRec := httptest.NewRecorder()
+	h.ServeHTTP(modelDeactivateRec, modelDeactivateReq)
+	if modelDeactivateRec.Code != http.StatusCreated {
+		t.Fatalf("expected model deactivate 201, got %d: %s", modelDeactivateRec.Code, modelDeactivateRec.Body.String())
+	}
+
+	effectiveReq := httptest.NewRequest(http.MethodGet, "/api/admin/v1/agent-profiles/"+profileID+"/capability-policy/effective?tenant_id="+tenantID, nil)
+	effectiveReq.Header.Set("X-Tenant-ID", tenantID)
+	effectiveRec := httptest.NewRecorder()
+	h.ServeHTTP(effectiveRec, effectiveReq)
+	if effectiveRec.Code != http.StatusOK {
+		t.Fatalf("expected effective capability policy get 200, got %d: %s", effectiveRec.Code, effectiveRec.Body.String())
+	}
+	if !strings.Contains(effectiveRec.Body.String(), `"EffectiveModelEntryIDs":["model-1"]`) {
+		t.Fatalf("expected effective model ids to contain only active model-1, got %s", effectiveRec.Body.String())
+	}
+	if !strings.Contains(effectiveRec.Body.String(), `"StaleModelEntryIDs":["model-2"]`) {
+		t.Fatalf("expected stale model ids to contain deactivated model-2, got %s", effectiveRec.Body.String())
+	}
+	if !strings.Contains(effectiveRec.Body.String(), `"EffectiveToolEntryIDs":["tool-1"]`) {
+		t.Fatalf("expected effective tool ids to contain tool-1, got %s", effectiveRec.Body.String())
+	}
+}
+
 func TestAdminAgentCapabilityPolicyReplacesBindings(t *testing.T) {
 	h := router.New(router.WithContainer(bootstrap.NewTestContainer()))
 
