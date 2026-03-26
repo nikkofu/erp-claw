@@ -85,6 +85,17 @@ type IssueInventoryInput struct {
 	ReferenceID   string
 }
 
+type TransferInventoryInput struct {
+	TenantID        string
+	ActorID         string
+	ProductID       string
+	FromWarehouseID string
+	ToWarehouseID   string
+	Quantity        int
+	ReferenceType   string
+	ReferenceID     string
+}
+
 type CreatePayableBillInput struct {
 	TenantID        string
 	ActorID         string

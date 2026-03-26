@@ -261,6 +261,29 @@ func registerAdminRoutes(rg *gin.RouterGroup, container *bootstrap.Container) {
 		}
 		presenter.OK(c, inventoryOutboundResponse(outbound))
 	})
+	inventoryGroup.POST("/transfers", func(c *gin.Context) {
+		var req createInventoryTransferRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			presenter.Error(c, http.StatusBadRequest, err.Error())
+			return
+		}
+
+		entries, err := container.SupplyChain.TransferInventory(c.Request.Context(), supplychain.TransferInventoryInput{
+			TenantID:        tenantIDFromContext(c),
+			ActorID:         actorIDFromContext(c),
+			ProductID:       req.ProductID,
+			FromWarehouseID: req.FromWarehouseID,
+			ToWarehouseID:   req.ToWarehouseID,
+			Quantity:        req.Quantity,
+			ReferenceType:   req.ReferenceType,
+			ReferenceID:     req.ReferenceID,
+		})
+		if err != nil {
+			renderSupplyChainError(c, err)
+			return
+		}
+		presenter.OK(c, inventoryTransferResponse(entries))
+	})
 
 	receivableGroup := rg.Group("/receivables")
 	receivableGroup.POST("", func(c *gin.Context) {
@@ -405,6 +428,15 @@ type createInventoryOutboundRequest struct {
 	Quantity      int    `json:"quantity"`
 	ReferenceType string `json:"reference_type"`
 	ReferenceID   string `json:"reference_id"`
+}
+
+type createInventoryTransferRequest struct {
+	ProductID       string `json:"product_id"`
+	FromWarehouseID string `json:"from_warehouse_id"`
+	ToWarehouseID   string `json:"to_warehouse_id"`
+	Quantity        int    `json:"quantity"`
+	ReferenceType   string `json:"reference_type"`
+	ReferenceID     string `json:"reference_id"`
 }
 
 type createPayablePaymentPlanRequest struct {
@@ -607,6 +639,12 @@ func inventoryOutboundResponse(entry inventory.LedgerEntry) gin.H {
 		"quantity_delta": entry.QuantityDelta,
 		"reference_type": entry.ReferenceType,
 		"reference_id":   entry.ReferenceID,
+	}
+}
+
+func inventoryTransferResponse(entries []inventory.LedgerEntry) gin.H {
+	return gin.H{
+		"ledger_entries": ledgerEntriesResponse(entries),
 	}
 }
 

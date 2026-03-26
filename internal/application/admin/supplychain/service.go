@@ -411,6 +411,70 @@ func (s *Service) IssueInventory(ctx context.Context, input IssueInventoryInput)
 	return outbound, err
 }
 
+func (s *Service) TransferInventory(ctx context.Context, input TransferInventoryInput) ([]inventory.LedgerEntry, error) {
+	var entries []inventory.LedgerEntry
+	err := s.pipeline.Execute(ctx, shared.Command{
+		Name:     "inventory.transfers.create",
+		TenantID: input.TenantID,
+		ActorID:  input.ActorID,
+		Payload:  input,
+	}, func(txCtx context.Context, _ shared.Command) error {
+		if _, err := s.masterData.GetProduct(txCtx, input.TenantID, input.ProductID); err != nil {
+			return err
+		}
+		if _, err := s.masterData.GetWarehouse(txCtx, input.TenantID, input.FromWarehouseID); err != nil {
+			return err
+		}
+		if _, err := s.masterData.GetWarehouse(txCtx, input.TenantID, input.ToWarehouseID); err != nil {
+			return err
+		}
+
+		sourceBalance, err := s.GetInventoryBalance(txCtx, GetInventoryBalanceInput{
+			TenantID:    input.TenantID,
+			ProductID:   input.ProductID,
+			WarehouseID: input.FromWarehouseID,
+		})
+		if err != nil {
+			return err
+		}
+		if input.Quantity > sourceBalance.Available {
+			return inventory.ErrInsufficientAvailableInventory
+		}
+
+		outbound, err := inventory.NewOutboundLedgerEntry(
+			nextID("led"),
+			input.TenantID,
+			input.ProductID,
+			input.FromWarehouseID,
+			input.ReferenceType,
+			input.ReferenceID,
+			input.Quantity,
+		)
+		if err != nil {
+			return err
+		}
+		inbound, err := inventory.NewInboundLedgerEntry(
+			nextID("led"),
+			input.TenantID,
+			input.ProductID,
+			input.ToWarehouseID,
+			input.ReferenceType,
+			input.ReferenceID,
+			input.Quantity,
+		)
+		if err != nil {
+			return err
+		}
+		created := []inventory.LedgerEntry{outbound, inbound}
+		if err := s.inventory.AppendLedgerEntries(txCtx, created); err != nil {
+			return err
+		}
+		entries = created
+		return nil
+	})
+	return entries, err
+}
+
 func (s *Service) CreatePayableBill(ctx context.Context, input CreatePayableBillInput) (payable.Bill, error) {
 	var bill payable.Bill
 	err := s.pipeline.Execute(ctx, shared.Command{

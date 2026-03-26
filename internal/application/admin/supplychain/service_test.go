@@ -530,6 +530,131 @@ func TestServiceIssueInventoryFailsWhenQuantityExceedsAvailable(t *testing.T) {
 	}
 }
 
+func TestServiceTransfersInventoryBetweenWarehousesAndUpdatesBalances(t *testing.T) {
+	ctx := context.Background()
+	svc := newTestService()
+	approvedOrder := createApprovedOrder(t, ctx, svc)
+
+	targetWarehouse, err := svc.CreateWarehouse(ctx, CreateWarehouseInput{
+		TenantID: "tenant-a",
+		ActorID:  "actor-a",
+		Code:     "WH-BJ",
+		Name:     "Beijing Warehouse",
+	})
+	if err != nil {
+		t.Fatalf("create target warehouse: %v", err)
+	}
+
+	_, _, _, err = svc.ReceivePurchaseOrder(ctx, ReceivePurchaseOrderInput{
+		TenantID:        "tenant-a",
+		ActorID:         "receiver-a",
+		PurchaseOrderID: approvedOrder.ID,
+		Lines: []ReceivePurchaseOrderLine{{
+			ProductID: approvedOrder.Lines[0].ProductID,
+			Quantity:  approvedOrder.Lines[0].Quantity,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("receive purchase order: %v", err)
+	}
+
+	entries, err := svc.TransferInventory(ctx, TransferInventoryInput{
+		TenantID:        "tenant-a",
+		ActorID:         "warehouse-a",
+		ProductID:       approvedOrder.Lines[0].ProductID,
+		FromWarehouseID: approvedOrder.WarehouseID,
+		ToWarehouseID:   targetWarehouse.ID,
+		Quantity:        2,
+		ReferenceType:   "transfer_order",
+		ReferenceID:     "trf-001",
+	})
+	if err != nil {
+		t.Fatalf("transfer inventory: %v", err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("expected 2 transfer ledger entries, got %d", len(entries))
+	}
+	if entries[0].MovementType != inventory.MovementTypeOutbound || entries[0].QuantityDelta != -2 {
+		t.Fatalf("expected first entry outbound -2, got %s %d", entries[0].MovementType, entries[0].QuantityDelta)
+	}
+	if entries[1].MovementType != inventory.MovementTypeInbound || entries[1].QuantityDelta != 2 {
+		t.Fatalf("expected second entry inbound 2, got %s %d", entries[1].MovementType, entries[1].QuantityDelta)
+	}
+
+	sourceBalance, err := svc.GetInventoryBalance(ctx, GetInventoryBalanceInput{
+		TenantID:    "tenant-a",
+		ProductID:   approvedOrder.Lines[0].ProductID,
+		WarehouseID: approvedOrder.WarehouseID,
+	})
+	if err != nil {
+		t.Fatalf("get source inventory balance: %v", err)
+	}
+	if sourceBalance.OnHand != approvedOrder.Lines[0].Quantity-2 {
+		t.Fatalf("expected source on hand %d, got %d", approvedOrder.Lines[0].Quantity-2, sourceBalance.OnHand)
+	}
+	if sourceBalance.Available != approvedOrder.Lines[0].Quantity-2 {
+		t.Fatalf("expected source available %d, got %d", approvedOrder.Lines[0].Quantity-2, sourceBalance.Available)
+	}
+
+	targetBalance, err := svc.GetInventoryBalance(ctx, GetInventoryBalanceInput{
+		TenantID:    "tenant-a",
+		ProductID:   approvedOrder.Lines[0].ProductID,
+		WarehouseID: targetWarehouse.ID,
+	})
+	if err != nil {
+		t.Fatalf("get target inventory balance: %v", err)
+	}
+	if targetBalance.OnHand != 2 {
+		t.Fatalf("expected target on hand 2, got %d", targetBalance.OnHand)
+	}
+	if targetBalance.Available != 2 {
+		t.Fatalf("expected target available 2, got %d", targetBalance.Available)
+	}
+}
+
+func TestServiceTransferInventoryFailsWhenQuantityExceedsAvailable(t *testing.T) {
+	ctx := context.Background()
+	svc := newTestService()
+	approvedOrder := createApprovedOrder(t, ctx, svc)
+
+	targetWarehouse, err := svc.CreateWarehouse(ctx, CreateWarehouseInput{
+		TenantID: "tenant-a",
+		ActorID:  "actor-a",
+		Code:     "WH-BJ",
+		Name:     "Beijing Warehouse",
+	})
+	if err != nil {
+		t.Fatalf("create target warehouse: %v", err)
+	}
+
+	_, _, _, err = svc.ReceivePurchaseOrder(ctx, ReceivePurchaseOrderInput{
+		TenantID:        "tenant-a",
+		ActorID:         "receiver-a",
+		PurchaseOrderID: approvedOrder.ID,
+		Lines: []ReceivePurchaseOrderLine{{
+			ProductID: approvedOrder.Lines[0].ProductID,
+			Quantity:  approvedOrder.Lines[0].Quantity,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("receive purchase order: %v", err)
+	}
+
+	_, err = svc.TransferInventory(ctx, TransferInventoryInput{
+		TenantID:        "tenant-a",
+		ActorID:         "warehouse-a",
+		ProductID:       approvedOrder.Lines[0].ProductID,
+		FromWarehouseID: approvedOrder.WarehouseID,
+		ToWarehouseID:   targetWarehouse.ID,
+		Quantity:        approvedOrder.Lines[0].Quantity + 1,
+		ReferenceType:   "transfer_order",
+		ReferenceID:     "trf-002",
+	})
+	if !errors.Is(err, inventory.ErrInsufficientAvailableInventory) {
+		t.Fatalf("expected insufficient available inventory, got %v", err)
+	}
+}
+
 func TestServiceReceivePurchaseOrderFailsWhenOrderNotApproved(t *testing.T) {
 	ctx := context.Background()
 	svc := newTestService()
