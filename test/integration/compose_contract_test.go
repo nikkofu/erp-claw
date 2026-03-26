@@ -202,3 +202,32 @@ func TestPhase2Wave4InventoryReservationMigrationContract(t *testing.T) {
 		}
 	}
 }
+
+func TestPhase2Wave5SalesOrderMigrationContract(t *testing.T) {
+	data, err := os.ReadFile("../../migrations/000008_init_phase2_wave5_sales_tables.up.sql")
+	if err != nil {
+		t.Fatalf("read phase 2 wave 5 sales migration: %v", err)
+	}
+
+	content := string(data)
+	requiredTables := []string{
+		"sales_order",
+		"sales_order_line",
+	}
+	for _, table := range requiredTables {
+		if !strings.Contains(content, "create table if not exists "+table) {
+			t.Fatalf("expected migration to create table %q", table)
+		}
+	}
+
+	requiredConstraints := []string{
+		"unique (tenant_id, id)",
+		"foreign key (tenant_id, warehouse_id) references warehouse(tenant_id, id)",
+		"foreign key (tenant_id, product_id) references product(tenant_id, id)",
+	}
+	for _, constraint := range requiredConstraints {
+		if !strings.Contains(content, constraint) {
+			t.Fatalf("expected migration to contain tenant-aware constraint %q", constraint)
+		}
+	}
+}

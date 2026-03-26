@@ -51,6 +51,7 @@ func NewContainer(cfg Config) *Container {
 			{CommandPrefix: "masterdata.", AnyOfRoles: []string{"platform_admin", "supplychain_operator"}},
 			{CommandPrefix: "procurement.", AnyOfRoles: []string{"platform_admin", "supplychain_operator"}},
 			{CommandPrefix: "inventory.", AnyOfRoles: []string{"platform_admin", "supplychain_operator"}},
+			{CommandPrefix: "sales.", AnyOfRoles: []string{"platform_admin", "supplychain_operator"}},
 			{CommandPrefix: "approval.", AnyOfRoles: []string{"platform_admin", "supplychain_operator", "approver"}},
 			{CommandPrefix: "controlplane.", AnyOfRoles: []string{"platform_admin"}},
 			{CommandPrefix: "runtime.", AnyOfRoles: []string{"platform_admin", "workspace_operator"}},
@@ -74,6 +75,7 @@ func NewContainer(cfg Config) *Container {
 			Inventory:      supplyChainStore.InventoryRepository(),
 			Payables:       supplyChainStore.PayableRepository(),
 			Receivables:    supplyChainStore.ReceivableRepository(),
+			SalesOrders:    supplyChainStore.SalesOrderRepository(),
 			Pipeline:       pipeline,
 		}),
 		ControlPlane: controlplane.NewService(controlplane.ServiceDeps{

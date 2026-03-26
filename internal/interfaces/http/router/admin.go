@@ -14,6 +14,7 @@ import (
 	"github.com/nikkofu/erp-claw/internal/domain/payable"
 	"github.com/nikkofu/erp-claw/internal/domain/procurement"
 	"github.com/nikkofu/erp-claw/internal/domain/receivable"
+	"github.com/nikkofu/erp-claw/internal/domain/sales"
 	"github.com/nikkofu/erp-claw/internal/interfaces/http/presenter"
 )
 
@@ -388,6 +389,69 @@ func registerAdminRoutes(rg *gin.RouterGroup, container *bootstrap.Container) {
 		}
 		presenter.OK(c, payablePaymentPlanResponse(plan))
 	})
+
+	salesGroup := rg.Group("/sales-orders")
+	salesGroup.POST("", func(c *gin.Context) {
+		var req createSalesOrderRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			presenter.Error(c, http.StatusBadRequest, err.Error())
+			return
+		}
+
+		lines := make([]supplychain.CreateSalesOrderLine, 0, len(req.Lines))
+		for _, line := range req.Lines {
+			lines = append(lines, supplychain.CreateSalesOrderLine{
+				ProductID: line.ProductID,
+				Quantity:  line.Quantity,
+			})
+		}
+
+		order, err := container.SupplyChain.CreateSalesOrder(c.Request.Context(), supplychain.CreateSalesOrderInput{
+			TenantID:    tenantIDFromContext(c),
+			ActorID:     actorIDFromContext(c),
+			WarehouseID: req.WarehouseID,
+			ExternalRef: req.ExternalRef,
+			Lines:       lines,
+		})
+		if err != nil {
+			renderSupplyChainError(c, err)
+			return
+		}
+		presenter.OK(c, salesOrderResponse(order))
+	})
+	salesGroup.GET("", func(c *gin.Context) {
+		orders, err := container.SupplyChain.ListSalesOrders(c.Request.Context(), supplychain.ListSalesOrdersInput{
+			TenantID: tenantIDFromContext(c),
+		})
+		if err != nil {
+			renderSupplyChainError(c, err)
+			return
+		}
+		presenter.OK(c, salesOrdersResponse(orders))
+	})
+	salesGroup.GET("/:id", func(c *gin.Context) {
+		order, err := container.SupplyChain.GetSalesOrder(c.Request.Context(), supplychain.GetSalesOrderInput{
+			TenantID:     tenantIDFromContext(c),
+			SalesOrderID: c.Param("id"),
+		})
+		if err != nil {
+			renderSupplyChainError(c, err)
+			return
+		}
+		presenter.OK(c, salesOrderResponse(order))
+	})
+	salesGroup.POST("/:id/ship", func(c *gin.Context) {
+		order, entries, err := container.SupplyChain.ShipSalesOrder(c.Request.Context(), supplychain.ShipSalesOrderInput{
+			TenantID:     tenantIDFromContext(c),
+			ActorID:      actorIDFromContext(c),
+			SalesOrderID: c.Param("id"),
+		})
+		if err != nil {
+			renderSupplyChainError(c, err)
+			return
+		}
+		presenter.OK(c, salesOrderShipResponse(order, entries))
+	})
 }
 
 type createSupplierRequest struct {
@@ -459,6 +523,17 @@ type createReceivableBillRequest struct {
 	ExternalRef string `json:"external_ref"`
 }
 
+type createSalesOrderRequest struct {
+	WarehouseID string                        `json:"warehouse_id"`
+	ExternalRef string                        `json:"external_ref"`
+	Lines       []createSalesOrderLineRequest `json:"lines"`
+}
+
+type createSalesOrderLineRequest struct {
+	ProductID string `json:"product_id"`
+	Quantity  int    `json:"quantity"`
+}
+
 func tenantIDFromContext(c *gin.Context) string {
 	return c.GetString("tenant_id")
 }
@@ -475,7 +550,8 @@ func renderSupplyChainError(c *gin.Context, err error) {
 		errors.Is(err, procurement.ErrPurchaseOrderNotFound),
 		errors.Is(err, approval.ErrRequestNotFound),
 		errors.Is(err, payable.ErrBillNotFound),
-		errors.Is(err, receivable.ErrBillNotFound):
+		errors.Is(err, receivable.ErrBillNotFound),
+		errors.Is(err, sales.ErrOrderNotFound):
 		presenter.Error(c, http.StatusNotFound, err.Error())
 	case errors.Is(err, masterdata.ErrInvalidSupplier),
 		errors.Is(err, masterdata.ErrInvalidProduct),
@@ -491,6 +567,8 @@ func renderSupplyChainError(c *gin.Context, err error) {
 		errors.Is(err, payable.ErrOrderNotBillable),
 		errors.Is(err, payable.ErrInvalidPaymentPlan),
 		errors.Is(err, receivable.ErrInvalidBill),
+		errors.Is(err, sales.ErrInvalidOrder),
+		errors.Is(err, sales.ErrOrderNotShippable),
 		errors.Is(err, approval.ErrInvalidRequest),
 		errors.Is(err, approval.ErrApprovalNotPending):
 		presenter.Error(c, http.StatusBadRequest, err.Error())
@@ -719,4 +797,38 @@ func receivableBillsResponse(bills []receivable.Bill) []gin.H {
 		out = append(out, receivableBillResponse(bill))
 	}
 	return out
+}
+
+func salesOrderResponse(order sales.Order) gin.H {
+	lines := make([]gin.H, 0, len(order.Lines))
+	for _, line := range order.Lines {
+		lines = append(lines, gin.H{
+			"product_id": line.ProductID,
+			"quantity":   line.Quantity,
+		})
+	}
+	return gin.H{
+		"id":           order.ID,
+		"tenant_id":    order.TenantID,
+		"warehouse_id": order.WarehouseID,
+		"external_ref": order.ExternalRef,
+		"status":       order.Status,
+		"created_by":   order.CreatedBy,
+		"lines":        lines,
+	}
+}
+
+func salesOrdersResponse(orders []sales.Order) []gin.H {
+	out := make([]gin.H, 0, len(orders))
+	for _, order := range orders {
+		out = append(out, salesOrderResponse(order))
+	}
+	return out
+}
+
+func salesOrderShipResponse(order sales.Order, entries []inventory.LedgerEntry) gin.H {
+	return gin.H{
+		"order":          salesOrderResponse(order),
+		"ledger_entries": ledgerEntriesResponse(entries),
+	}
 }

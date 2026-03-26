@@ -143,3 +143,31 @@ type GetReceivableBillInput struct {
 type ListReceivableBillsInput struct {
 	TenantID string
 }
+
+type CreateSalesOrderLine struct {
+	ProductID string
+	Quantity  int
+}
+
+type CreateSalesOrderInput struct {
+	TenantID    string
+	ActorID     string
+	WarehouseID string
+	ExternalRef string
+	Lines       []CreateSalesOrderLine
+}
+
+type GetSalesOrderInput struct {
+	TenantID     string
+	SalesOrderID string
+}
+
+type ListSalesOrdersInput struct {
+	TenantID string
+}
+
+type ShipSalesOrderInput struct {
+	TenantID     string
+	ActorID      string
+	SalesOrderID string
+}

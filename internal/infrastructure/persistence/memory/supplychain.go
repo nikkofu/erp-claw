@@ -11,6 +11,7 @@ import (
 	"github.com/nikkofu/erp-claw/internal/domain/payable"
 	"github.com/nikkofu/erp-claw/internal/domain/procurement"
 	"github.com/nikkofu/erp-claw/internal/domain/receivable"
+	"github.com/nikkofu/erp-claw/internal/domain/sales"
 )
 
 type masterDataRepository struct {
@@ -32,6 +33,7 @@ type SupplyChainStore struct {
 	plansByBill  map[string][]string
 	receivables  map[string]receivable.Bill
 	reservations map[string][]inventory.Reservation
+	salesOrders  map[string]sales.Order
 }
 
 func NewSupplyChainStore() *SupplyChainStore {
@@ -49,6 +51,7 @@ func NewSupplyChainStore() *SupplyChainStore {
 		plansByBill:  make(map[string][]string),
 		receivables:  make(map[string]receivable.Bill),
 		reservations: make(map[string][]inventory.Reservation),
+		salesOrders:  make(map[string]sales.Order),
 	}
 }
 
@@ -369,6 +372,50 @@ func (r *receivableRepository) ListByTenant(_ context.Context, tenantID string) 
 	return out, nil
 }
 
+type salesOrderRepository struct {
+	store *SupplyChainStore
+}
+
+func NewSalesOrderRepository() sales.Repository {
+	return NewSupplyChainStore().SalesOrderRepository()
+}
+
+func (s *SupplyChainStore) SalesOrderRepository() sales.Repository {
+	return &salesOrderRepository{store: s}
+}
+
+func (r *salesOrderRepository) Save(_ context.Context, order sales.Order) error {
+	r.store.mu.Lock()
+	defer r.store.mu.Unlock()
+	r.store.salesOrders[key(order.TenantID, order.ID)] = cloneSalesOrder(order)
+	return nil
+}
+
+func (r *salesOrderRepository) Get(_ context.Context, tenantID, orderID string) (sales.Order, error) {
+	r.store.mu.RLock()
+	defer r.store.mu.RUnlock()
+
+	order, ok := r.store.salesOrders[key(tenantID, orderID)]
+	if !ok {
+		return sales.Order{}, sales.ErrOrderNotFound
+	}
+	return cloneSalesOrder(order), nil
+}
+
+func (r *salesOrderRepository) ListByTenant(_ context.Context, tenantID string) ([]sales.Order, error) {
+	r.store.mu.RLock()
+	defer r.store.mu.RUnlock()
+
+	out := make([]sales.Order, 0)
+	prefix := tenantID + "/"
+	for k, order := range r.store.salesOrders {
+		if strings.HasPrefix(k, prefix) {
+			out = append(out, cloneSalesOrder(order))
+		}
+	}
+	return out, nil
+}
+
 func key(tenantID, id string) string {
 	return tenantID + "/" + id
 }
@@ -405,4 +452,9 @@ func clonePayablePaymentPlan(plan payable.PaymentPlan) payable.PaymentPlan {
 
 func cloneReceivableBill(bill receivable.Bill) receivable.Bill {
 	return bill
+}
+
+func cloneSalesOrder(order sales.Order) sales.Order {
+	order.Lines = append([]sales.Line(nil), order.Lines...)
+	return order
 }

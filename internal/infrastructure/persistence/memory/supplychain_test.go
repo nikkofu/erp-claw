@@ -9,6 +9,7 @@ import (
 	"github.com/nikkofu/erp-claw/internal/domain/payable"
 	"github.com/nikkofu/erp-claw/internal/domain/procurement"
 	"github.com/nikkofu/erp-claw/internal/domain/receivable"
+	"github.com/nikkofu/erp-claw/internal/domain/sales"
 )
 
 func TestPurchaseOrderRepositoryGetReturnsDetachedCopy(t *testing.T) {
@@ -316,5 +317,73 @@ func TestInventoryRepositoryListReservationsReturnsDetachedCopy(t *testing.T) {
 	}
 	if reloaded[0].Quantity != 2 {
 		t.Fatalf("expected stored reservation quantity 2, got %d", reloaded[0].Quantity)
+	}
+}
+
+func TestSalesOrderRepositoryGetReturnsDetachedCopy(t *testing.T) {
+	ctx := context.Background()
+	repo := NewSupplyChainStore().SalesOrderRepository()
+
+	order, err := sales.NewOrder("sor-001", "tenant-a", "wh-001", "SO-001", "sales-a", []sales.Line{{
+		ProductID: "prd-001",
+		Quantity:  2,
+	}})
+	if err != nil {
+		t.Fatalf("new sales order: %v", err)
+	}
+	if err := repo.Save(ctx, order); err != nil {
+		t.Fatalf("save sales order: %v", err)
+	}
+
+	got, err := repo.Get(ctx, "tenant-a", order.ID)
+	if err != nil {
+		t.Fatalf("get sales order: %v", err)
+	}
+	got.Lines[0].Quantity = 99
+
+	reloaded, err := repo.Get(ctx, "tenant-a", order.ID)
+	if err != nil {
+		t.Fatalf("reload sales order: %v", err)
+	}
+	if reloaded.Lines[0].Quantity != 2 {
+		t.Fatalf("expected stored sales order quantity 2, got %d", reloaded.Lines[0].Quantity)
+	}
+}
+
+func TestSalesOrderRepositoryListByTenantScopesResults(t *testing.T) {
+	ctx := context.Background()
+	repo := NewSupplyChainStore().SalesOrderRepository()
+
+	orderA, err := sales.NewOrder("sor-001", "tenant-a", "wh-001", "SO-001", "sales-a", []sales.Line{{
+		ProductID: "prd-001",
+		Quantity:  1,
+	}})
+	if err != nil {
+		t.Fatalf("new tenant-a sales order: %v", err)
+	}
+	if err := repo.Save(ctx, orderA); err != nil {
+		t.Fatalf("save tenant-a sales order: %v", err)
+	}
+
+	orderB, err := sales.NewOrder("sor-002", "tenant-b", "wh-002", "SO-002", "sales-b", []sales.Line{{
+		ProductID: "prd-002",
+		Quantity:  1,
+	}})
+	if err != nil {
+		t.Fatalf("new tenant-b sales order: %v", err)
+	}
+	if err := repo.Save(ctx, orderB); err != nil {
+		t.Fatalf("save tenant-b sales order: %v", err)
+	}
+
+	got, err := repo.ListByTenant(ctx, "tenant-a")
+	if err != nil {
+		t.Fatalf("list tenant-a sales orders: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("expected 1 tenant-a sales order, got %d", len(got))
+	}
+	if got[0].ID != orderA.ID {
+		t.Fatalf("expected tenant-a sales order id %s, got %s", orderA.ID, got[0].ID)
 	}
 }
