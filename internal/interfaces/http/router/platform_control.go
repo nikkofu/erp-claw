@@ -45,6 +45,31 @@ func registerControlPlaneRoutes(rg *gin.RouterGroup, container *bootstrap.Contai
 		presenter.OK(c, tenantResponse(created))
 	})
 
+	controlGroup.GET("/tenants", func(c *gin.Context) {
+		tenants, err := container.ControlPlane.ListTenants(c.Request.Context(), controlplane.ListTenantsInput{
+			OperatorTenantID: tenantIDFromContext(c),
+			OperatorActorID:  actorIDFromContext(c),
+		})
+		if err != nil {
+			renderControlPlaneError(c, err)
+			return
+		}
+		presenter.OK(c, gin.H{"tenants": tenantListResponse(tenants)})
+	})
+
+	controlGroup.GET("/tenants/:code", func(c *gin.Context) {
+		value, err := container.ControlPlane.GetTenant(c.Request.Context(), controlplane.GetTenantInput{
+			OperatorTenantID: tenantIDFromContext(c),
+			OperatorActorID:  actorIDFromContext(c),
+			Code:             c.Param("code"),
+		})
+		if err != nil {
+			renderControlPlaneError(c, err)
+			return
+		}
+		presenter.OK(c, tenantResponse(value))
+	})
+
 	controlGroup.POST("/actors", func(c *gin.Context) {
 		var req upsertActorRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
@@ -59,6 +84,33 @@ func registerControlPlaneRoutes(rg *gin.RouterGroup, container *bootstrap.Contai
 			ActorID:          req.ActorID,
 			Roles:            req.Roles,
 			DepartmentID:     req.DepartmentID,
+		})
+		if err != nil {
+			renderControlPlaneError(c, err)
+			return
+		}
+		presenter.OK(c, actorResponse(actor))
+	})
+
+	controlGroup.GET("/actors", func(c *gin.Context) {
+		actors, err := container.ControlPlane.ListActors(c.Request.Context(), controlplane.ListActorsInput{
+			OperatorTenantID: tenantIDFromContext(c),
+			OperatorActorID:  actorIDFromContext(c),
+			TenantID:         c.Query("tenant_id"),
+		})
+		if err != nil {
+			renderControlPlaneError(c, err)
+			return
+		}
+		presenter.OK(c, gin.H{"actors": actorListResponse(actors)})
+	})
+
+	controlGroup.GET("/actors/:id", func(c *gin.Context) {
+		actor, err := container.ControlPlane.GetActor(c.Request.Context(), controlplane.GetActorInput{
+			OperatorTenantID: tenantIDFromContext(c),
+			OperatorActorID:  actorIDFromContext(c),
+			TenantID:         c.Query("tenant_id"),
+			ActorID:          c.Param("id"),
 		})
 		if err != nil {
 			renderControlPlaneError(c, err)
@@ -350,6 +402,22 @@ func actorResponse(value iam.Actor) gin.H {
 		"roles":         append([]string(nil), value.Roles...),
 		"department_id": value.DepartmentID,
 	}
+}
+
+func tenantListResponse(values []tenant.Tenant) []gin.H {
+	out := make([]gin.H, 0, len(values))
+	for _, value := range values {
+		out = append(out, tenantResponse(value))
+	}
+	return out
+}
+
+func actorListResponse(values []iam.Actor) []gin.H {
+	out := make([]gin.H, 0, len(values))
+	for _, value := range values {
+		out = append(out, actorResponse(value))
+	}
+	return out
 }
 
 func sessionResponse(value platformruntime.Session) gin.H {

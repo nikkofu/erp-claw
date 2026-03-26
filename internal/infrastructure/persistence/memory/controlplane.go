@@ -2,6 +2,8 @@ package memory
 
 import (
 	"context"
+	"sort"
+	"strings"
 	"sync"
 
 	"github.com/nikkofu/erp-claw/internal/platform/iam"
@@ -69,6 +71,20 @@ func (r tenantCatalogRepository) Get(_ context.Context, code string) (tenant.Ten
 	return value, nil
 }
 
+func (r tenantCatalogRepository) List(_ context.Context) ([]tenant.Tenant, error) {
+	r.store.mu.RLock()
+	defer r.store.mu.RUnlock()
+
+	out := make([]tenant.Tenant, 0, len(r.store.tenants))
+	for _, value := range r.store.tenants {
+		out = append(out, value)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].Code < out[j].Code
+	})
+	return out, nil
+}
+
 type iamDirectoryRepository struct {
 	store *ControlPlaneStore
 }
@@ -88,6 +104,24 @@ func (r iamDirectoryRepository) Get(_ context.Context, tenantID, actorID string)
 		return iam.Actor{}, iam.ErrActorNotFound
 	}
 	return cloneActor(actor), nil
+}
+
+func (r iamDirectoryRepository) List(_ context.Context, tenantID string) ([]iam.Actor, error) {
+	r.store.mu.RLock()
+	defer r.store.mu.RUnlock()
+
+	prefix := tenantID + "/"
+	out := make([]iam.Actor, 0)
+	for key, actor := range r.store.actors {
+		if !strings.HasPrefix(key, prefix) {
+			continue
+		}
+		out = append(out, cloneActor(actor))
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].ID < out[j].ID
+	})
+	return out, nil
 }
 
 type sessionRepository struct {

@@ -86,6 +86,53 @@ func (s *Service) RegisterTenant(ctx context.Context, input RegisterTenantInput)
 	return created, err
 }
 
+type GetTenantInput struct {
+	OperatorTenantID string
+	OperatorActorID  string
+	Code             string
+}
+
+func (s *Service) GetTenant(ctx context.Context, input GetTenantInput) (tenant.Tenant, error) {
+	var value tenant.Tenant
+	err := s.pipeline.Execute(ctx, shared.Command{
+		Name:     "controlplane.tenants.get",
+		TenantID: input.OperatorTenantID,
+		ActorID:  input.OperatorActorID,
+		Payload:  input,
+	}, func(txCtx context.Context, _ shared.Command) error {
+		current, err := s.tenantCatalog.Get(txCtx, strings.TrimSpace(input.Code))
+		if err != nil {
+			return err
+		}
+		value = current
+		return nil
+	})
+	return value, err
+}
+
+type ListTenantsInput struct {
+	OperatorTenantID string
+	OperatorActorID  string
+}
+
+func (s *Service) ListTenants(ctx context.Context, input ListTenantsInput) ([]tenant.Tenant, error) {
+	var values []tenant.Tenant
+	err := s.pipeline.Execute(ctx, shared.Command{
+		Name:     "controlplane.tenants.list",
+		TenantID: input.OperatorTenantID,
+		ActorID:  input.OperatorActorID,
+		Payload:  input,
+	}, func(txCtx context.Context, _ shared.Command) error {
+		listed, err := s.tenantCatalog.List(txCtx)
+		if err != nil {
+			return err
+		}
+		values = append([]tenant.Tenant(nil), listed...)
+		return nil
+	})
+	return values, err
+}
+
 type UpsertActorInput struct {
 	OperatorTenantID string
 	OperatorActorID  string
@@ -119,6 +166,63 @@ func (s *Service) UpsertActor(ctx context.Context, input UpsertActorInput) (iam.
 		return nil
 	})
 	return actor, err
+}
+
+type GetActorInput struct {
+	OperatorTenantID string
+	OperatorActorID  string
+	TenantID         string
+	ActorID          string
+}
+
+func (s *Service) GetActor(ctx context.Context, input GetActorInput) (iam.Actor, error) {
+	var actor iam.Actor
+	err := s.pipeline.Execute(ctx, shared.Command{
+		Name:     "controlplane.actors.get",
+		TenantID: input.OperatorTenantID,
+		ActorID:  input.OperatorActorID,
+		Payload:  input,
+	}, func(txCtx context.Context, _ shared.Command) error {
+		targetTenantID := strings.TrimSpace(input.TenantID)
+		if targetTenantID == "" {
+			targetTenantID = strings.TrimSpace(input.OperatorTenantID)
+		}
+		current, err := s.iamDirectory.Get(txCtx, targetTenantID, strings.TrimSpace(input.ActorID))
+		if err != nil {
+			return err
+		}
+		actor = current
+		return nil
+	})
+	return actor, err
+}
+
+type ListActorsInput struct {
+	OperatorTenantID string
+	OperatorActorID  string
+	TenantID         string
+}
+
+func (s *Service) ListActors(ctx context.Context, input ListActorsInput) ([]iam.Actor, error) {
+	var actors []iam.Actor
+	err := s.pipeline.Execute(ctx, shared.Command{
+		Name:     "controlplane.actors.list",
+		TenantID: input.OperatorTenantID,
+		ActorID:  input.OperatorActorID,
+		Payload:  input,
+	}, func(txCtx context.Context, _ shared.Command) error {
+		targetTenantID := strings.TrimSpace(input.TenantID)
+		if targetTenantID == "" {
+			targetTenantID = strings.TrimSpace(input.OperatorTenantID)
+		}
+		listed, err := s.iamDirectory.List(txCtx, targetTenantID)
+		if err != nil {
+			return err
+		}
+		actors = append([]iam.Actor(nil), listed...)
+		return nil
+	})
+	return actors, err
 }
 
 type OpenSessionInput struct {

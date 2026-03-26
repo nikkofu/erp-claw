@@ -3,6 +3,7 @@ package iam
 import (
 	"context"
 	"errors"
+	"sort"
 	"strings"
 	"sync"
 )
@@ -16,6 +17,7 @@ var (
 type Directory interface {
 	Save(ctx context.Context, tenantID string, actor Actor) error
 	Get(ctx context.Context, tenantID, actorID string) (Actor, error)
+	List(ctx context.Context, tenantID string) ([]Actor, error)
 }
 
 type InMemoryDirectory struct {
@@ -58,6 +60,29 @@ func (d *InMemoryDirectory) Get(_ context.Context, tenantID, actorID string) (Ac
 		return Actor{}, ErrActorNotFound
 	}
 	return cloneActor(actor), nil
+}
+
+func (d *InMemoryDirectory) List(_ context.Context, tenantID string) ([]Actor, error) {
+	tenantID = strings.TrimSpace(tenantID)
+	if tenantID == "" {
+		return nil, ErrActorNotFound
+	}
+
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+
+	out := make([]Actor, 0)
+	prefix := tenantID + "/"
+	for key, actor := range d.actors {
+		if !strings.HasPrefix(key, prefix) {
+			continue
+		}
+		out = append(out, cloneActor(actor))
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].ID < out[j].ID
+	})
+	return out, nil
 }
 
 func (d *InMemoryDirectory) key(tenantID, actorID string) string {
