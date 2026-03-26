@@ -244,6 +244,99 @@ func TestServiceCloseSessionEmitsWorkspaceEventAndRejectsEnqueueOnClosedSession(
 	assertWorkspaceEvent(t, got[1], "runtime.session.closed", "tenant-a", session.ID, "")
 }
 
+func TestServiceCloseSessionRejectsWhenSessionHasActiveTasks(t *testing.T) {
+	cases := []struct {
+		name          string
+		prepareActive func(t *testing.T, svc *Service, taskID string)
+	}{
+		{
+			name: "pending task",
+			prepareActive: func(t *testing.T, svc *Service, taskID string) {
+				t.Helper()
+			},
+		},
+		{
+			name: "running task",
+			prepareActive: func(t *testing.T, svc *Service, taskID string) {
+				t.Helper()
+				if _, err := svc.StartTask(context.Background(), AdvanceTaskInput{
+					TenantID: "tenant-a",
+					ActorID:  "actor-a",
+					TaskID:   taskID,
+				}); err != nil {
+					t.Fatalf("start task: %v", err)
+				}
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			store := memory.NewControlPlaneStore()
+			sink := &recordingWorkspaceEventSink{}
+			svc := NewService(ServiceDeps{
+				TenantCatalog:   store.TenantCatalog(),
+				IAMDirectory:    store.IAMDirectory(),
+				Sessions:        store.SessionRepository(),
+				Tasks:           store.TaskRepository(),
+				WorkspaceEvents: sink,
+				Pipeline: shared.NewPipeline(shared.PipelineDeps{
+					Policy: policy.StaticEvaluator(policy.DecisionAllow),
+				}),
+			})
+
+			ctx := context.Background()
+			session, err := svc.OpenSession(ctx, OpenSessionInput{
+				TenantID:  "tenant-a",
+				ActorID:   "actor-a",
+				SessionID: "sess-001",
+			})
+			if err != nil {
+				t.Fatalf("open session: %v", err)
+			}
+			task, err := svc.EnqueueTask(ctx, EnqueueTaskInput{
+				TenantID:  "tenant-a",
+				ActorID:   "actor-a",
+				SessionID: session.ID,
+				TaskID:    "task-001",
+				TaskType:  "tool.call",
+			})
+			if err != nil {
+				t.Fatalf("enqueue task: %v", err)
+			}
+			tc.prepareActive(t, svc, task.ID)
+
+			_, err = svc.CloseSession(ctx, CloseSessionInput{
+				TenantID:  "tenant-a",
+				ActorID:   "actor-a",
+				SessionID: session.ID,
+			})
+			if !errors.Is(err, platformruntime.ErrInvalidSessionTransition) {
+				t.Fatalf("expected ErrInvalidSessionTransition, got %v", err)
+			}
+
+			current, err := svc.GetSession(ctx, GetSessionInput{
+				TenantID:  "tenant-a",
+				ActorID:   "actor-a",
+				SessionID: session.ID,
+			})
+			if err != nil {
+				t.Fatalf("get session: %v", err)
+			}
+			if current.Status != platformruntime.SessionStatusOpen {
+				t.Fatalf("expected session to remain open, got %s", current.Status)
+			}
+
+			for _, evt := range sink.Events() {
+				if evt.Type == "runtime.session.closed" {
+					t.Fatalf("unexpected session closed event in %s case", tc.name)
+				}
+			}
+		})
+	}
+}
+
 func TestServiceListSessionsReturnsTenantScopedSessions(t *testing.T) {
 	store := memory.NewControlPlaneStore()
 	svc := NewService(ServiceDeps{

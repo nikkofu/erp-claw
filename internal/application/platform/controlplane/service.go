@@ -292,6 +292,15 @@ func (s *Service) CloseSession(ctx context.Context, input CloseSessionInput) (pl
 		if err != nil {
 			return err
 		}
+		tasks, err := s.tasks.ListBySession(txCtx, current.TenantID, current.ID)
+		if err != nil {
+			return err
+		}
+		for _, task := range tasks {
+			if task.Status == platformruntime.TaskStatusPending || task.Status == platformruntime.TaskStatusRunning {
+				return platformruntime.ErrInvalidSessionTransition
+			}
+		}
 		if err := current.Close(time.Now().UTC()); err != nil {
 			return err
 		}

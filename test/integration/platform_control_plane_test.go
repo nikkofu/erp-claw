@@ -205,6 +205,36 @@ func TestPlatformControlPlaneTaskCancelFlow(t *testing.T) {
 	}
 }
 
+func TestPlatformControlPlaneCloseSessionRejectedWhenTaskActive(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	container := bootstrap.NewContainer(bootstrap.DefaultConfig())
+	h := router.New(router.WithContainer(container))
+
+	postJSONData(t, h, "/api/platform/v1/agent/sessions", map[string]any{
+		"session_id": "sess-active-001",
+		"metadata": map[string]any{
+			"channel": "workspace",
+		},
+	})
+	postJSONData(t, h, "/api/platform/v1/agent/sessions/sess-active-001/tasks", map[string]any{
+		"task_id":   "task-active-001",
+		"task_type": "tool.call",
+		"input": map[string]any{
+			"tool": "search",
+		},
+	})
+
+	rejected := doJSONWithHeaders(t, h, http.MethodPost, "/api/platform/v1/agent/sessions/sess-active-001/close", nil, http.StatusBadRequest, nil)
+	if rejected.Error["message"] == "" {
+		t.Fatal("expected session close rejection message")
+	}
+
+	current := getJSONData(t, h, "/api/platform/v1/agent/sessions/sess-active-001")
+	if got := stringField(t, current, "status"); got != "open" {
+		t.Fatalf("expected session to remain open, got %s", got)
+	}
+}
+
 func doJSONWithHeaders(
 	t *testing.T,
 	h http.Handler,
