@@ -106,7 +106,7 @@ func (s *SupplyChainStore) PurchaseOrderRepository() procurement.Repository {
 func (r *purchaseOrderRepository) Save(_ context.Context, order procurement.PurchaseOrder) error {
 	r.store.mu.Lock()
 	defer r.store.mu.Unlock()
-	r.store.orders[key(order.TenantID, order.ID)] = order
+	r.store.orders[key(order.TenantID, order.ID)] = clonePurchaseOrder(order)
 	return nil
 }
 
@@ -117,7 +117,7 @@ func (r *purchaseOrderRepository) Get(_ context.Context, tenantID, orderID strin
 	if !ok {
 		return procurement.PurchaseOrder{}, procurement.ErrPurchaseOrderNotFound
 	}
-	return order, nil
+	return clonePurchaseOrder(order), nil
 }
 
 type approvalRepository struct {
@@ -151,4 +151,9 @@ func (r *approvalRepository) Get(_ context.Context, tenantID, requestID string) 
 
 func key(tenantID, id string) string {
 	return tenantID + "/" + id
+}
+
+func clonePurchaseOrder(order procurement.PurchaseOrder) procurement.PurchaseOrder {
+	order.Lines = append([]procurement.Line(nil), order.Lines...)
+	return order
 }

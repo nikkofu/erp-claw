@@ -45,4 +45,18 @@ func TestPhase2Wave1MigrationContract(t *testing.T) {
 			t.Fatalf("expected migration to create table %q", table)
 		}
 	}
+
+	requiredConstraints := []string{
+		"unique (tenant_id, id)",
+		"foreign key (tenant_id, supplier_id) references supplier(tenant_id, id)",
+		"foreign key (tenant_id, warehouse_id) references warehouse(tenant_id, id)",
+		"foreign key (tenant_id, approval_id) references approval_request(tenant_id, id)",
+		"foreign key (tenant_id, purchase_order_id) references purchase_order(tenant_id, id) on delete cascade",
+		"foreign key (tenant_id, product_id) references product(tenant_id, id)",
+	}
+	for _, constraint := range requiredConstraints {
+		if !strings.Contains(content, constraint) {
+			t.Fatalf("expected migration to contain tenant-aware constraint %q", constraint)
+		}
+	}
 }

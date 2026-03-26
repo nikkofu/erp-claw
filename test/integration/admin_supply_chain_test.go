@@ -108,6 +108,50 @@ func TestAdminSupplyChainCreateOrderUnknownSupplierReturnsNotFound(t *testing.T)
 	}
 }
 
+func TestAdminSupplyChainRejectFlow(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	container := bootstrap.NewContainer(bootstrap.DefaultConfig())
+	h := router.New(router.WithContainer(container))
+
+	supplierID := stringField(t, postJSONData(t, h, "/api/admin/v1/master-data/suppliers", map[string]any{
+		"code": "SUP-001",
+		"name": "Acme Supply",
+	}), "id")
+
+	productID := stringField(t, postJSONData(t, h, "/api/admin/v1/master-data/products", map[string]any{
+		"sku":  "SKU-001",
+		"name": "Copper Wire",
+		"unit": "roll",
+	}), "id")
+
+	warehouseID := stringField(t, postJSONData(t, h, "/api/admin/v1/master-data/warehouses", map[string]any{
+		"code": "WH-SH",
+		"name": "Shanghai Warehouse",
+	}), "id")
+
+	orderResp := postJSONData(t, h, "/api/admin/v1/procurement/purchase-orders", map[string]any{
+		"supplier_id":  supplierID,
+		"warehouse_id": warehouseID,
+		"lines": []map[string]any{{
+			"product_id": productID,
+			"quantity":   5,
+		}},
+	})
+
+	submitResp := postJSONData(t, h, "/api/admin/v1/procurement/purchase-orders/"+stringField(t, orderResp, "id")+"/submit", map[string]any{})
+	approvalID := stringField(t, nestedMap(t, submitResp, "approval"), "id")
+
+	rejectResp := postJSONData(t, h, "/api/admin/v1/approvals/"+approvalID+"/reject", map[string]any{})
+	rejectedOrder := nestedMap(t, rejectResp, "order")
+	if got := stringField(t, rejectedOrder, "status"); got != "rejected" {
+		t.Fatalf("expected rejected order, got %s", got)
+	}
+	rejectedRequest := nestedMap(t, rejectResp, "approval")
+	if got := stringField(t, rejectedRequest, "status"); got != "rejected" {
+		t.Fatalf("expected rejected request, got %s", got)
+	}
+}
+
 type envelope struct {
 	Data  map[string]any `json:"data"`
 	Error map[string]any `json:"error"`
