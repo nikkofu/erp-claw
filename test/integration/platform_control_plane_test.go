@@ -383,6 +383,67 @@ func TestPlatformControlPlaneListTasksSupportsSessionAndStatusFilters(t *testing
 	if got := stringField(t, sessionTask, "id"); got != "task-pending-001" {
 		t.Fatalf("expected session task id task-pending-001, got %s", got)
 	}
+
+	postJSONData(t, h, "/api/platform/v1/control/actors", map[string]any{
+		"tenant_id": "tenant-admin",
+		"actor_id":  "actor-alice",
+		"roles":     []string{"workspace_operator"},
+	})
+	postJSONData(t, h, "/api/platform/v1/control/actors", map[string]any{
+		"tenant_id": "tenant-admin",
+		"actor_id":  "actor-bob",
+		"roles":     []string{"workspace_operator"},
+	})
+
+	doJSONWithHeaders(t, h, http.MethodPost, "/api/platform/v1/agent/sessions", map[string]any{
+		"session_id": "sess-actor-filter-001",
+		"metadata": map[string]any{
+			"channel": "workspace",
+		},
+	}, http.StatusOK, map[string]string{
+		"X-Tenant-ID": "tenant-admin",
+		"X-Actor-ID":  "actor-alice",
+	})
+	doJSONWithHeaders(t, h, http.MethodPost, "/api/platform/v1/agent/sessions", map[string]any{
+		"session_id": "sess-actor-filter-002",
+		"metadata": map[string]any{
+			"channel": "workspace",
+		},
+	}, http.StatusOK, map[string]string{
+		"X-Tenant-ID": "tenant-admin",
+		"X-Actor-ID":  "actor-bob",
+	})
+
+	postJSONData(t, h, "/api/platform/v1/agent/sessions/sess-actor-filter-001/tasks", map[string]any{
+		"task_id":   "task-actor-001",
+		"task_type": "tool.call",
+		"input": map[string]any{
+			"tool": "search",
+		},
+	})
+	postJSONData(t, h, "/api/platform/v1/agent/sessions/sess-actor-filter-002/tasks", map[string]any{
+		"task_id":   "task-actor-002",
+		"task_type": "tool.call",
+		"input": map[string]any{
+			"tool": "search",
+		},
+	})
+
+	actorFiltered := getJSONData(t, h, "/api/platform/v1/agent/tasks?actor_id=actor-alice")
+	actorItems, ok := actorFiltered["tasks"].([]any)
+	if !ok {
+		t.Fatalf("expected tasks array, got %#v", actorFiltered["tasks"])
+	}
+	if len(actorItems) != 1 {
+		t.Fatalf("expected 1 actor-filtered task, got %d", len(actorItems))
+	}
+	actorTask, ok := actorItems[0].(map[string]any)
+	if !ok {
+		t.Fatalf("expected task object, got %#v", actorItems[0])
+	}
+	if got := stringField(t, actorTask, "id"); got != "task-actor-001" {
+		t.Fatalf("expected actor-filtered task task-actor-001, got %s", got)
+	}
 }
 
 func TestPlatformControlPlaneListSessionsSupportsStatusFilter(t *testing.T) {

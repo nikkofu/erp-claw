@@ -626,6 +626,7 @@ func TestServiceListTasksReturnsTenantScopedAndFilteredTasks(t *testing.T) {
 	}
 	mustOpen("tenant-a", "actor-a", "sess-001")
 	mustOpen("tenant-a", "actor-a", "sess-002")
+	mustOpen("tenant-a", "actor-b", "sess-004")
 	mustOpen("tenant-b", "actor-b", "sess-003")
 
 	taskPending, err := svc.EnqueueTask(ctx, EnqueueTaskInput{
@@ -664,6 +665,16 @@ func TestServiceListTasksReturnsTenantScopedAndFilteredTasks(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("enqueue task-other-tenant: %v", err)
 	}
+	taskActorB, err := svc.EnqueueTask(ctx, EnqueueTaskInput{
+		TenantID:  "tenant-a",
+		ActorID:   "actor-b",
+		SessionID: "sess-004",
+		TaskID:    "task-actor-b-001",
+		TaskType:  "tool.call",
+	})
+	if err != nil {
+		t.Fatalf("enqueue task-actor-b-001: %v", err)
+	}
 
 	allTenantTasks, err := svc.ListTasks(ctx, ListTasksInput{
 		TenantID: "tenant-a",
@@ -672,8 +683,8 @@ func TestServiceListTasksReturnsTenantScopedAndFilteredTasks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list tenant tasks: %v", err)
 	}
-	if len(allTenantTasks) != 2 {
-		t.Fatalf("expected 2 tenant-a tasks, got %d", len(allTenantTasks))
+	if len(allTenantTasks) != 3 {
+		t.Fatalf("expected 3 tenant-a tasks, got %d", len(allTenantTasks))
 	}
 
 	sessionFiltered, err := svc.ListTasks(ctx, ListTasksInput{
@@ -698,6 +709,18 @@ func TestServiceListTasksReturnsTenantScopedAndFilteredTasks(t *testing.T) {
 	}
 	if len(statusFiltered) != 1 || statusFiltered[0].ID != taskRunning.ID {
 		t.Fatalf("expected only %s, got %#v", taskRunning.ID, statusFiltered)
+	}
+
+	actorFiltered, err := svc.ListTasks(ctx, ListTasksInput{
+		TenantID:     "tenant-a",
+		ActorID:      "actor-a",
+		QueryActorID: "actor-b",
+	})
+	if err != nil {
+		t.Fatalf("list actor-filtered tasks: %v", err)
+	}
+	if len(actorFiltered) != 1 || actorFiltered[0].ID != taskActorB.ID {
+		t.Fatalf("expected only %s, got %#v", taskActorB.ID, actorFiltered)
 	}
 }
 

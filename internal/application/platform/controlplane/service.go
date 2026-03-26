@@ -643,12 +643,13 @@ func (s *Service) ListSessionTasks(ctx context.Context, input ListSessionTasksIn
 }
 
 type ListTasksInput struct {
-	TenantID  string
-	ActorID   string
-	SessionID string
-	Status    platformruntime.TaskStatus
-	Offset    int
-	Limit     int
+	TenantID      string
+	ActorID       string
+	SessionID     string
+	QueryActorID  string
+	Status        platformruntime.TaskStatus
+	Offset        int
+	Limit         int
 }
 
 func (s *Service) ListTasks(ctx context.Context, input ListTasksInput) ([]platformruntime.Task, error) {
@@ -665,11 +666,21 @@ func (s *Service) ListTasks(ctx context.Context, input ListTasksInput) ([]platfo
 		}
 
 		targetSessionID := strings.TrimSpace(input.SessionID)
+		targetQueryActorID := strings.TrimSpace(input.QueryActorID)
 		targetStatus := input.Status
 		filtered := make([]platformruntime.Task, 0, len(current))
 		for _, task := range current {
 			if targetSessionID != "" && task.SessionID != targetSessionID {
 				continue
+			}
+			if targetQueryActorID != "" {
+				session, err := s.sessions.Get(txCtx, task.TenantID, task.SessionID)
+				if err != nil {
+					return err
+				}
+				if session.ActorID != targetQueryActorID {
+					continue
+				}
 			}
 			if targetStatus != "" && task.Status != targetStatus {
 				continue

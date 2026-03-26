@@ -360,12 +360,13 @@ func registerControlPlaneRoutes(rg *gin.RouterGroup, container *bootstrap.Contai
 		}
 
 		tasks, err := container.ControlPlane.ListTasks(c.Request.Context(), controlplane.ListTasksInput{
-			TenantID:  tenantIDFromContext(c),
-			ActorID:   actorIDFromContext(c),
-			SessionID: c.Query("session_id"),
-			Status:    status,
-			Offset:    offset,
-			Limit:     limit,
+			TenantID:     tenantIDFromContext(c),
+			ActorID:      actorIDFromContext(c),
+			SessionID:    c.Query("session_id"),
+			QueryActorID: c.Query("actor_id"),
+			Status:       status,
+			Offset:       offset,
+			Limit:        limit,
 		})
 		if err != nil {
 			renderControlPlaneError(c, err)
