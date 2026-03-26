@@ -27,7 +27,7 @@
 
 - 平台底座已经具备可运行骨架
 - 控制面已经落地 tenant/user/role/department/agent profile 目录、user-role/user-department 绑定、policy/audit 持久化查询与最小 Admin 管理面，以及 capability 的 model/tool catalog 基线与最小 Admin 管理面
-- Agent 执行与工作台入口已经具备 session/task 仓储、状态机、workspace event seam，以及最小 write/read side/replay query
+- Agent 执行与工作台入口已经具备 session/task 仓储、状态机、workspace event seam，以及最小 write/read side/replay query/SSE stream
 - Approval baseline 已经具备 definition / instance / task 模型、start / approve / reject 闭环、最小 Admin HTTP 管理面，以及 `REQUIRE_APPROVAL` 的最小接线
 - Outbox 已经具备 dispatcher、重试、终态失败、人工 recovery 基线，以及最小 Admin operator list/requeue 管理面
 - 供应链交易闭环仍处于设计完成、代码未开始阶段
@@ -66,7 +66,7 @@
 - 策略、审计、事务、命令管道基础实现
 - 控制面实体化第一批切片：tenant / user / role / department / agent profile catalog 与用户绑定关系
 - 治理核心第一批切片：policy rule 持久化、生命周期、audit query，以及最小 Admin create/list/activate/deactivate 管理面
-- Agent runtime 第一批切片：session/task 仓储、状态流转、workspace event
+- Agent runtime 第一批切片：session/task 仓储、状态流转、workspace event、session-scoped SSE stream
 - Capability governance 第一批切片：tenant-scoped model catalog 与 tool catalog baseline，以及最小 Admin create/list 管理面
 - Outbox reliability 第一批切片：dispatcher、retry、failed recovery、tenant-scoped Admin operator list/requeue，以及 poll observability seam
 - Agent Gateway 的 workspace 事件入口骨架
@@ -78,7 +78,7 @@
 
 - 更完整的 Tenant / IAM / Policy 控制面模型
 - 插件注册、租户启用、model/tool policy binding、quota / feature flag 与租户级能力治理的剩余部分
-- Agent session / task 的流式协议、执行记录、证据模型与 live integration
+- Agent session / task 的真实 WebSocket 协议、跨进程流式回放、执行记录、证据模型与 live integration
 - Approval / Workflow 的更完整业务流程、多级编排与 runtime orchestration
 - 供应链闭环所需的主数据、销售、采购、库存、应收应付上下文
 
@@ -114,11 +114,11 @@
 | 领域 | 模块 | 功能清单 | 优先级 | 当前实现情况 | 代码锚点 |
 | --- | --- | --- | --- | --- | --- |
 | Experience Plane | API Server 运行时 | 加载配置、装配容器、启动 Gin HTTP 服务 | P0 | 已实现 | `cmd/api-server/main.go` |
-| Experience Plane | HTTP 路由分组 | `Admin API`、`Workspace API`、`Platform API`、`Integration API` 的分组入口 | P0 | 部分实现 | `internal/interfaces/http/router/router.go`、`admin.go`、`workspace.go`、`platform.go`、`integration.go`；当前 `Platform API` 已提供健康检查，`Admin API` 已提供控制面目录、policy rule / audit、审批定义/实例/任务、model/tool catalog，以及 outbox message operator 的最小写入/查询接口，`Workspace API` 已提供 sessions/tasks/events 的最小写入/查询接口，`Integration API` 仍是占位 |
+| Experience Plane | HTTP 路由分组 | `Admin API`、`Workspace API`、`Platform API`、`Integration API` 的分组入口 | P0 | 部分实现 | `internal/interfaces/http/router/router.go`、`admin.go`、`workspace.go`、`platform.go`、`integration.go`；当前 `Platform API` 已提供健康检查，`Admin API` 已提供控制面目录、policy rule / audit、审批定义/实例/任务、model/tool catalog，以及 outbox message operator 的最小写入/查询接口，`Workspace API` 已提供 sessions/tasks/events/stream 的最小写入/查询/SSE 接口，`Integration API` 仍是占位 |
 | Experience Plane | 健康检查接口 | `/api/platform/v1/health/livez`、`/readyz` | P0 | 已实现 | `internal/interfaces/http/router/health.go`、`internal/platform/health/service.go` |
 | Experience Plane | 中间件链 | request ID、logging、tenant、auth、audit | P0 | 已实现 | `internal/interfaces/http/middleware/*` |
-| Experience Plane | Workspace Gateway seam | 工作台会话注册、事件广播骨架 | P1 | 部分实现 | `internal/interfaces/ws/workspace_gateway.go`；已经具备 session channel 注册、广播和最小事件 replay/query seam，并已通过 `internal/interfaces/http/router/workspace.go` 暴露最小写入/查询 HTTP surface；但仍未实现真实 WebSocket 协议和跨进程回放。 |
-| Experience Plane | Agent Workspace / Web Console 业务接口 | 工作台命令、会话查询、事件订阅、控制台业务操作 | P1 | 部分实现 | 已补 `internal/interfaces/http/router/workspace.go`，提供 sessions/tasks/events 的最小写入/查询接口；但仍没有真实 WebSocket 协议或前端应用。 |
+| Experience Plane | Workspace Gateway seam | 工作台会话注册、事件广播骨架 | P1 | 部分实现 | `internal/interfaces/ws/workspace_gateway.go`；已经具备 session-aware subscription、广播和最小事件 replay/query/SSE stream seam，并已通过 `internal/interfaces/http/router/workspace.go` 暴露最小写入/查询/stream HTTP surface；但仍未实现真实 WebSocket 协议和跨进程回放。 |
+| Experience Plane | Agent Workspace / Web Console 业务接口 | 工作台命令、会话查询、事件订阅、控制台业务操作 | P1 | 部分实现 | 已补 `internal/interfaces/http/router/workspace.go`，提供 sessions/tasks/events/stream 的最小写入/查询/SSE 接口；但仍没有真实 WebSocket 协议或前端应用。 |
 
 ### 5.2 Control Plane / 平台控制面
 
@@ -128,7 +128,7 @@
 | Control Plane | IAM Actor 基线 | 请求上下文中的 actor 注入 | P0 | 部分实现 | `internal/platform/iam/actor.go`、`internal/interfaces/http/middleware/auth.go`；当前只有占位 `system` actor |
 | Control Plane | Policy Engine | 策略决策枚举、评估接口、规则生命周期、命令治理缝合点 | P1 | 部分实现 | `internal/platform/policy/*`、`internal/application/governance/*`、`internal/infrastructure/persistence/postgres/policy_audit_repository.go`、`internal/bootstrap/governance_catalog.go`；当前已具备 repository-backed rule evaluator、activate/deactivate 生命周期、治理命令处理器，以及最小 Admin create/list/activate/deactivate 管理面，但还没有真实 ABAC / RBAC / rules engine |
 | Control Plane | Audit 基线 | 审计记录模型、Recorder / Store、持久化查询 | P1 | 部分实现 | `internal/platform/audit/*`、`internal/infrastructure/persistence/postgres/policy_audit_repository.go`、`internal/bootstrap/governance_catalog.go`；已具备持久化 store、查询服务和最小 Admin audit list 接口，但还没有更完整的审计治理、分页和 retention 策略 |
-| Control Plane | Agent session/task 元数据 | session/task 表、仓储、状态机、workspace event identity | P1 | 部分实现 | `internal/domain/agentruntime/*`、`internal/application/agentruntime/*`、`internal/infrastructure/persistence/postgres/agent_runtime_repository.go`、`migrations/000004_phase1_agent_runtime_control.*`；已具备仓储、状态流转、close/fail/cancel 流程，以及以 `session_key` 为查询契约的 create/list/update/replay workspace 最小 HTTP surface，但还没有流式协议与执行记录模型。 |
+| Control Plane | Agent session/task 元数据 | session/task 表、仓储、状态机、workspace event identity | P1 | 部分实现 | `internal/domain/agentruntime/*`、`internal/application/agentruntime/*`、`internal/infrastructure/persistence/postgres/agent_runtime_repository.go`、`migrations/000004_phase1_agent_runtime_control.*`；已具备仓储、状态流转、close/fail/cancel 流程，以及以 `session_key` 为查询契约的 create/list/update/replay/stream workspace 最小 HTTP surface，但还没有真实 WebSocket 协议、跨进程流式回放与执行记录模型。 |
 | Control Plane | Plugin / Tool Registry | 插件注册、工具目录、租户启用、风险级别、输入输出 schema | P1 | 部分实现 | 已补 `internal/domain/capability/tool_catalog_entry.go`、`internal/application/capability/*tool*`、`internal/infrastructure/persistence/postgres/capability_repository.go`、`internal/bootstrap/capability_catalog.go` 与 `migrations/000008_phase1_tool_catalog.*`，落地 tenant-scoped tool catalog baseline 和最小 Admin create/list 管理面；但 plugin registry、tenant enablement、tool schema/runtime 和 policy binding 仍未完成。 |
 | Control Plane | Quota / Feature Flag / Model Catalog | 配额、租户特性开关、模型与工具可用性治理 | P2 | 部分实现 | `internal/domain/capability/*`、`internal/application/capability/*`、`internal/infrastructure/persistence/postgres/capability_repository.go`、`internal/bootstrap/capability_catalog.go`、`migrations/000005_phase1_capability_governance.*`、`migrations/000008_phase1_tool_catalog.*`；当前已经落地 tenant-scoped model catalog 与 tool catalog baseline，以及最小 Admin create/list 管理面，quota、feature flag 和更完整的 capability policy binding 仍未开始。 |
 
@@ -191,8 +191,8 @@
 - 更完整的 Tenant / Organization / User / Role / Department 模型与 actor/policy 联动
 - 更完整的控制面策略引擎，而不仅是 repository-backed rule evaluator
 - 更完整的审计治理、分页、retention 与合规能力
-- Agent session/task 的流式协议、执行记录、证据模型与 live integration
-- Workspace HTTP surface、真正的流式协议与更完整的事件订阅
+- Agent session/task 的真实 WebSocket 协议、跨进程流式回放、执行记录、证据模型与 live integration
+- Workspace HTTP surface、真实 WebSocket 协议、跨进程事件回放与更完整的事件订阅
 - Approval 的多级审批与 workflow orchestration
 - Outbox 的 consumer-side idempotency、DLQ 与 live DB contention 验证
 - 插件注册、租户启用、model/tool policy binding、quota / feature flag 与能力治理剩余部分
@@ -263,7 +263,7 @@
 
 ### Wave 3：Agent Workspace 强化
 
-- Workspace WebSocket / SSE 协议
+- Workspace WebSocket / SSE 强化与跨进程回放
 - 执行状态流
 - 人工接管与审批暂停/恢复
 - Tool catalog / command translator / knowledge retrieval

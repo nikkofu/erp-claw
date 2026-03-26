@@ -1,12 +1,15 @@
 package integration
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/nikkofu/erp-claw/internal/bootstrap"
 	agentruntime "github.com/nikkofu/erp-claw/internal/domain/agentruntime"
@@ -179,6 +182,72 @@ func TestWorkspaceRoutesSupportWriteFlow(t *testing.T) {
 	}
 }
 
+func TestWorkspaceStreamRouteReplaysHistoryAndStreamsLiveEvents(t *testing.T) {
+	container := bootstrap.NewTestContainer()
+	container.AgentRuntimeCatalog = bootstrap.NewInMemoryAgentRuntimeCatalogForTest()
+	gateway := ws.NewWorkspaceGateway()
+	container.WorkspaceGateway = gateway
+
+	if err := gateway.AppendWorkspaceEvent(context.Background(), platformruntime.WorkspaceEvent{
+		Type:       platformruntime.WorkspaceEventTypeTaskStatusChanged,
+		TenantID:   "tenant-a",
+		SessionID:  "workspace-stream",
+		TaskID:     "task-1",
+		Payload:    map[string]any{"status": "running"},
+		OccurredAt: time.Date(2026, 3, 26, 13, 0, 0, 0, time.UTC),
+	}); err != nil {
+		t.Fatalf("append historical event: %v", err)
+	}
+
+	handler := router.New(router.WithContainer(container))
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	req := httptest.NewRequest(http.MethodGet, "/api/workspace/v1/stream?tenant_id=tenant-a&session_id=workspace-stream", nil).WithContext(ctx)
+	req.Header.Set("X-Tenant-ID", "tenant-a")
+	rec := newConcurrentStreamRecorder()
+	done := make(chan struct{})
+	go func() {
+		handler.ServeHTTP(rec, req)
+		close(done)
+	}()
+
+	firstPayload := waitForBodySubstring(t, rec, `"running"`, 2*time.Second)
+	if !strings.Contains(firstPayload, `"running"`) {
+		t.Fatalf("expected first SSE payload to contain running status, got %s", firstPayload)
+	}
+
+	if err := gateway.AppendWorkspaceEvent(context.Background(), platformruntime.WorkspaceEvent{
+		Type:       platformruntime.WorkspaceEventTypeTaskStatusChanged,
+		TenantID:   "tenant-a",
+		SessionID:  "workspace-stream",
+		TaskID:     "task-1",
+		Payload:    map[string]any{"status": "succeeded"},
+		OccurredAt: time.Date(2026, 3, 26, 13, 0, 1, 0, time.UTC),
+	}); err != nil {
+		t.Fatalf("append live event: %v", err)
+	}
+
+	secondPayload := waitForBodySubstring(t, rec, `"succeeded"`, 2*time.Second)
+	if !strings.Contains(secondPayload, `"succeeded"`) {
+		t.Fatalf("expected second SSE payload to contain succeeded status, got %s", secondPayload)
+	}
+
+	if rec.Code() != http.StatusOK {
+		t.Fatalf("expected stream 200, got %d", rec.Code())
+	}
+	if got := rec.Header().Get("Content-Type"); !strings.HasPrefix(got, "text/event-stream") {
+		t.Fatalf("expected SSE content type, got %q", got)
+	}
+
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for stream handler shutdown")
+	}
+}
+
 func firstWorkspaceIDFromResponse(t *testing.T, payload []byte) string {
 	t.Helper()
 
@@ -193,4 +262,82 @@ func firstWorkspaceIDFromResponse(t *testing.T, payload []byte) string {
 		t.Fatalf("expected ID in workspace response, got %+v", envelope.Data)
 	}
 	return id
+}
+
+func waitForBodySubstring(t *testing.T, rec *concurrentStreamRecorder, needle string, timeout time.Duration) string {
+	t.Helper()
+
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		body := rec.BodyString()
+		if strings.Contains(body, needle) {
+			return body
+		}
+
+		select {
+		case <-rec.writeCh:
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+
+	t.Fatalf("timed out waiting for body to contain %s", needle)
+	return ""
+}
+
+type concurrentStreamRecorder struct {
+	mu      sync.Mutex
+	header  http.Header
+	body    bytes.Buffer
+	code    int
+	writeCh chan struct{}
+}
+
+func newConcurrentStreamRecorder() *concurrentStreamRecorder {
+	return &concurrentStreamRecorder{
+		header:  make(http.Header),
+		writeCh: make(chan struct{}, 32),
+	}
+}
+
+func (r *concurrentStreamRecorder) Header() http.Header {
+	return r.header
+}
+
+func (r *concurrentStreamRecorder) WriteHeader(statusCode int) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.code == 0 {
+		r.code = statusCode
+	}
+}
+
+func (r *concurrentStreamRecorder) Write(p []byte) (int, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.code == 0 {
+		r.code = http.StatusOK
+	}
+	n, err := r.body.Write(p)
+	select {
+	case r.writeCh <- struct{}{}:
+	default:
+	}
+	return n, err
+}
+
+func (r *concurrentStreamRecorder) Flush() {}
+
+func (r *concurrentStreamRecorder) BodyString() string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.body.String()
+}
+
+func (r *concurrentStreamRecorder) Code() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.code == 0 {
+		return http.StatusOK
+	}
+	return r.code
 }

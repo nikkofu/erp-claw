@@ -62,8 +62,9 @@ The Workspace API now exposes a minimal command surface in addition to the exist
 - Start / complete / fail / cancel tasks
 - Close sessions
 - List sessions / tasks / replay events
+- Stream session-scoped workspace events over SSE
 
-This is still not a full real-time workspace protocol. It is the smallest write-side seam needed to let the Phase 1 agent runtime contracts be exercised end-to-end over HTTP.
+This is still not a full real-time workspace protocol. It now includes the smallest session-scoped SSE seam that replays stored events and streams live updates over HTTP, but it does not yet provide a full WebSocket protocol or cross-process stream durability.
 
 ## Outbox Operator Slice (Phase 1)
 

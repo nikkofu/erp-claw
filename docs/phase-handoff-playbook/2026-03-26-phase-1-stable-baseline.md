@@ -18,7 +18,7 @@
 - 目标分支：`feature/phase1-control-plane`
 - 目标工作树：`.worktrees/phase1-control-plane`
 - 根仓库状态：`main` 工作区已清理干净，不再残留误落的未跟踪 `Phase 1` 文件
-- 版本号：`0.2.0`
+- 版本号：`0.2.6`
 - bootstrap 合同：运行时 catalog 在非测试路径下失败即中止，不再静默回退为内存存储
 - Fresh 验证命令：`GOCACHE=$(pwd)/.cache/go-build go test ./... -count=1`
 
@@ -38,8 +38,8 @@
 - session / task domain model 与 Postgres repository
 - runtime service 的 open / close / fail / cancel 状态流转
 - workspace event publish / replay seam
-- workspace sessions / tasks / events 最小只读 HTTP surface
-- 以 `session_key` 为统一契约的 task query / event replay read side
+- workspace sessions / tasks / events 最小写入/查询 HTTP surface
+- 以 `session_key` 为统一契约的 task query / event replay / SSE stream read side
 
 ### 3.3 Capability / Approval / Reliability
 
@@ -54,7 +54,7 @@
 在 `Phase 2` 或其他并行分支中，可以默认依赖以下稳定边界：
 
 - `Admin API` 已存在控制面目录型接口，不需要重新从零搭 tenant/iam catalog
-- `Workspace API` 已存在 sessions/tasks/events 只读面，可作为后续 workspace 写入面和 streaming protocol 的依赖底座
+- `Workspace API` 已存在 sessions/tasks/events/stream 最小写入/查询/SSE 面，可作为后续更深 workspace protocol 的依赖底座
 - `policy` / `audit` / `approval starter seam` 已存在，可在业务命令中继续复用
 - `model catalog` / `tool catalog` 已存在，不需要重新设计租户级 capability 主键和仓储边界
 - `outbox reliability baseline` 已存在，后续业务事件发布应沿用该路径，而不是绕开它
@@ -67,7 +67,7 @@
 - Phase 2 供应链业务闭环，包括 master data、procurement、inventory、sales 与 receivable/payable
 - 更完整的 capability policy binding、tenant enablement、plugin registry、quota / feature flag
 - 更完整的 workflow orchestration、approval admin surface、多级审批与 approver resolution
-- workspace 写入面、真实 WebSocket / streaming protocol、跨进程 event replay
+- 真实 WebSocket / streaming protocol、跨进程 event replay 与更完整的 stream durability
 - live DB round-trip、consumer-side idempotency、DLQ 与更完整的 reliability hardening
 
 ## 6. 协作约束
@@ -80,11 +80,14 @@
 
 ## 7. 实际提交清单
 
-当前稳定基线至少包含以下明确提交：
+当前稳定基线至少覆盖以下稳定切片：
 
-- `d6d9a41` `feat: finalize phase1 control plane executable baseline`
-- `f5a92f0` `fix: harden phase1 control plane runtime contracts`
-- 当前文档与版本同步提交：承载 `README`、`CHANGELOG`、`VERSION`、phase status 文档、handoff 文档与可复用 skill 资产
+- `6c99a48` `feat: add phase1 approval admin surface`
+- `619d40b` `feat: add phase1 capability admin surface`
+- `13e5f1f` `feat: add phase1 workspace write surface`
+- `a366ac1` `feat: add phase1 governance admin surface`
+- `0281578` `feat: add phase1 outbox operator surface`
+- 当前这次 workspace streaming slice 与其配套文档/版本同步提交
 
 ## 8. 建议的下一步
 
@@ -92,6 +95,6 @@
 2. 当前分支继续只处理 `Phase 1` 剩余项，不与 `Phase 2` 业务建模混写
 3. Phase 1 后续优先顺序保持为：
    - capability policy binding / tenant enablement
-   - approval admin surface / workflow orchestration
-   - workspace write side / streaming protocol
+   - approval / workflow orchestration
+   - workspace WebSocket / cross-process streaming protocol
    - live DB reliability hardening

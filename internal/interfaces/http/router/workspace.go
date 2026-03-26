@@ -1,6 +1,8 @@
 package router
 
 import (
+	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 
@@ -8,6 +10,7 @@ import (
 	agentruntimeapp "github.com/nikkofu/erp-claw/internal/application/agentruntime"
 	"github.com/nikkofu/erp-claw/internal/bootstrap"
 	"github.com/nikkofu/erp-claw/internal/interfaces/http/presenter"
+	platformruntime "github.com/nikkofu/erp-claw/internal/platform/runtime"
 )
 
 type createWorkspaceSessionRequest struct {
@@ -238,4 +241,90 @@ func registerWorkspaceRoutes(rg *gin.RouterGroup, container *bootstrap.Container
 
 		presenter.OK(c, events)
 	})
+
+	rg.GET("/stream", func(c *gin.Context) {
+		tenantID := tenantIDFromQueryOrHeader(c)
+		if tenantID == "" {
+			adminError(c, http.StatusBadRequest, errors.New("tenant_id is required"))
+			return
+		}
+
+		sessionID := strings.TrimSpace(c.Query("session_id"))
+		if sessionID == "" {
+			adminError(c, http.StatusBadRequest, errors.New("session_id is required"))
+			return
+		}
+
+		history, stream, unsubscribe, err := container.WorkspaceGateway.Subscribe(sessionID, 32)
+		if err != nil {
+			adminError(c, http.StatusBadRequest, err)
+			return
+		}
+		defer unsubscribe()
+
+		flusher, ok := c.Writer.(http.Flusher)
+		if !ok {
+			adminError(c, http.StatusInternalServerError, errors.New("streaming is not supported"))
+			return
+		}
+
+		c.Header("Content-Type", "text/event-stream")
+		c.Header("Cache-Control", "no-cache")
+		c.Header("Connection", "keep-alive")
+		c.Header("X-Accel-Buffering", "no")
+
+		for _, evt := range history {
+			if !workspaceEventMatchesTenantAndSession(evt, tenantID, sessionID) {
+				continue
+			}
+			if err := writeWorkspaceSSEEvent(c, evt); err != nil {
+				return
+			}
+			flusher.Flush()
+		}
+
+		for {
+			select {
+			case <-c.Request.Context().Done():
+				return
+			case evt, ok := <-stream:
+				if !ok {
+					return
+				}
+				if !workspaceEventMatchesTenantAndSession(evt, tenantID, sessionID) {
+					continue
+				}
+				if err := writeWorkspaceSSEEvent(c, evt); err != nil {
+					return
+				}
+				flusher.Flush()
+			}
+		}
+	})
+}
+
+func workspaceEventMatchesTenantAndSession(evt platformruntime.WorkspaceEvent, tenantID, sessionID string) bool {
+	return strings.TrimSpace(evt.TenantID) == strings.TrimSpace(tenantID) &&
+		strings.TrimSpace(evt.SessionID) == strings.TrimSpace(sessionID)
+}
+
+func writeWorkspaceSSEEvent(c *gin.Context, evt platformruntime.WorkspaceEvent) error {
+	payload, err := json.Marshal(evt)
+	if err != nil {
+		return err
+	}
+
+	if _, err := c.Writer.Write([]byte("event: workspace.event\n")); err != nil {
+		return err
+	}
+	if _, err := c.Writer.Write([]byte("data: ")); err != nil {
+		return err
+	}
+	if _, err := c.Writer.Write(payload); err != nil {
+		return err
+	}
+	if _, err := c.Writer.Write([]byte("\n\n")); err != nil {
+		return err
+	}
+	return nil
 }

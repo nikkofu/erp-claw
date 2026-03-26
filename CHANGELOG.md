@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.6] - 2026-03-26
+
+### Added
+
+- Minimal workspace SSE stream route that replays tenant-scoped session history and then streams live workspace events.
+- Atomic workspace gateway subscription support with history snapshots and multi-subscriber fan-out for the same session.
+- Integration and gateway coverage for workspace stream replay/live delivery behavior.
+
+### Changed
+
+- Phase 1 docs and README now reflect that the workspace surface includes a minimal session-scoped streaming protocol, not only write/read-side HTTP endpoints.
+
 ## [0.2.5] - 2026-03-26
 
 ### Added

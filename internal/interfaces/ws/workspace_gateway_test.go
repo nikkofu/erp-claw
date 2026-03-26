@@ -126,6 +126,95 @@ func TestGatewayListsWorkspaceEventsByTenantAndSession(t *testing.T) {
 	}
 }
 
+func TestGatewaySubscribeReturnsHistoryAndStreamsLiveEvents(t *testing.T) {
+	gateway := NewWorkspaceGateway()
+
+	historical := platformruntime.WorkspaceEvent{
+		Type:       platformruntime.WorkspaceEventTypeTaskStatusChanged,
+		TenantID:   "tenant-a",
+		SessionID:  "session-a",
+		TaskID:     "task-a",
+		Payload:    map[string]any{"status": "running"},
+		OccurredAt: mustTime(t, "2026-03-26T10:00:00Z"),
+	}
+	if err := gateway.AppendWorkspaceEvent(context.Background(), historical); err != nil {
+		t.Fatalf("append historical workspace event: %v", err)
+	}
+
+	history, stream, unsubscribe, err := gateway.Subscribe("session-a", 2)
+	if err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
+	defer unsubscribe()
+
+	if len(history) != 1 {
+		t.Fatalf("expected 1 replayed event, got %d", len(history))
+	}
+	if history[0].Payload.(map[string]any)["status"] != "running" {
+		t.Fatalf("unexpected replayed event payload: %#v", history[0].Payload)
+	}
+
+	live := platformruntime.WorkspaceEvent{
+		Type:       platformruntime.WorkspaceEventTypeTaskStatusChanged,
+		TenantID:   "tenant-a",
+		SessionID:  "session-a",
+		TaskID:     "task-a",
+		Payload:    map[string]any{"status": "succeeded"},
+		OccurredAt: mustTime(t, "2026-03-26T10:00:01Z"),
+	}
+	if err := gateway.AppendWorkspaceEvent(context.Background(), live); err != nil {
+		t.Fatalf("append live workspace event: %v", err)
+	}
+
+	select {
+	case got := <-stream:
+		if got.Payload.(map[string]any)["status"] != "succeeded" {
+			t.Fatalf("unexpected live event payload: %#v", got.Payload)
+		}
+	case <-time.After(250 * time.Millisecond):
+		t.Fatal("timed out waiting for live workspace event")
+	}
+}
+
+func TestGatewayBroadcastsToMultipleSubscribersForSameSession(t *testing.T) {
+	gateway := NewWorkspaceGateway()
+
+	_, first, unsubscribeFirst, err := gateway.Subscribe("session-a", 1)
+	if err != nil {
+		t.Fatalf("subscribe first: %v", err)
+	}
+	defer unsubscribeFirst()
+
+	_, second, unsubscribeSecond, err := gateway.Subscribe("session-a", 1)
+	if err != nil {
+		t.Fatalf("subscribe second: %v", err)
+	}
+	defer unsubscribeSecond()
+
+	evt := platformruntime.WorkspaceEvent{
+		Type:       platformruntime.WorkspaceEventTypeTaskStatusChanged,
+		TenantID:   "tenant-a",
+		SessionID:  "session-a",
+		TaskID:     "task-a",
+		Payload:    map[string]any{"status": "running"},
+		OccurredAt: mustTime(t, "2026-03-26T10:00:02Z"),
+	}
+	if err := gateway.AppendWorkspaceEvent(context.Background(), evt); err != nil {
+		t.Fatalf("append workspace event: %v", err)
+	}
+
+	for idx, stream := range []<-chan platformruntime.WorkspaceEvent{first, second} {
+		select {
+		case got := <-stream:
+			if got.TaskID != "task-a" {
+				t.Fatalf("stream %d unexpected task id: %s", idx, got.TaskID)
+			}
+		case <-time.After(250 * time.Millisecond):
+			t.Fatalf("timed out waiting for event on stream %d", idx)
+		}
+	}
+}
+
 func mustTime(t *testing.T, raw string) time.Time {
 	t.Helper()
 
