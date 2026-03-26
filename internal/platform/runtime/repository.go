@@ -13,6 +13,7 @@ var (
 type SessionRepository interface {
 	Save(ctx context.Context, session Session) error
 	Get(ctx context.Context, tenantID, sessionID string) (Session, error)
+	ListByTenant(ctx context.Context, tenantID string) ([]Session, error)
 }
 
 type TaskRepository interface {

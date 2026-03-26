@@ -145,6 +145,24 @@ func (r sessionRepository) Get(_ context.Context, tenantID, sessionID string) (p
 	return cloneSession(session), nil
 }
 
+func (r sessionRepository) ListByTenant(_ context.Context, tenantID string) ([]platformruntime.Session, error) {
+	r.store.mu.RLock()
+	defer r.store.mu.RUnlock()
+
+	prefix := tenantID + "/"
+	out := make([]platformruntime.Session, 0)
+	for sessionKey, session := range r.store.sessions {
+		if !strings.HasPrefix(sessionKey, prefix) {
+			continue
+		}
+		out = append(out, cloneSession(session))
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].ID < out[j].ID
+	})
+	return out, nil
+}
+
 type taskRepository struct {
 	store *ControlPlaneStore
 }

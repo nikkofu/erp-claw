@@ -188,8 +188,33 @@ func registerControlPlaneRoutes(rg *gin.RouterGroup, container *bootstrap.Contai
 		presenter.OK(c, sessionResponse(session))
 	})
 
+	agentGroup.GET("/sessions", func(c *gin.Context) {
+		sessions, err := container.ControlPlane.ListSessions(c.Request.Context(), controlplane.ListSessionsInput{
+			TenantID: tenantIDFromContext(c),
+			ActorID:  actorIDFromContext(c),
+		})
+		if err != nil {
+			renderControlPlaneError(c, err)
+			return
+		}
+		presenter.OK(c, gin.H{"sessions": sessionListResponse(sessions)})
+	})
+
 	agentGroup.GET("/sessions/:id", func(c *gin.Context) {
 		session, err := container.ControlPlane.GetSession(c.Request.Context(), controlplane.GetSessionInput{
+			TenantID:  tenantIDFromContext(c),
+			ActorID:   actorIDFromContext(c),
+			SessionID: c.Param("id"),
+		})
+		if err != nil {
+			renderControlPlaneError(c, err)
+			return
+		}
+		presenter.OK(c, sessionResponse(session))
+	})
+
+	agentGroup.POST("/sessions/:id/close", func(c *gin.Context) {
+		session, err := container.ControlPlane.CloseSession(c.Request.Context(), controlplane.CloseSessionInput{
 			TenantID:  tenantIDFromContext(c),
 			ActorID:   actorIDFromContext(c),
 			SessionID: c.Param("id"),
@@ -499,6 +524,14 @@ func taskListResponse(tasks []platformruntime.Task) []gin.H {
 	out := make([]gin.H, 0, len(tasks))
 	for _, task := range tasks {
 		out = append(out, taskResponse(task))
+	}
+	return out
+}
+
+func sessionListResponse(sessions []platformruntime.Session) []gin.H {
+	out := make([]gin.H, 0, len(sessions))
+	for _, session := range sessions {
+		out = append(out, sessionResponse(session))
 	}
 	return out
 }

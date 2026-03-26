@@ -274,6 +274,47 @@ func (s *Service) OpenSession(ctx context.Context, input OpenSessionInput) (plat
 	return session, err
 }
 
+type CloseSessionInput struct {
+	TenantID  string
+	ActorID   string
+	SessionID string
+}
+
+func (s *Service) CloseSession(ctx context.Context, input CloseSessionInput) (platformruntime.Session, error) {
+	var session platformruntime.Session
+	err := s.pipeline.Execute(ctx, shared.Command{
+		Name:     "runtime.sessions.close",
+		TenantID: input.TenantID,
+		ActorID:  input.ActorID,
+		Payload:  input,
+	}, func(txCtx context.Context, _ shared.Command) error {
+		current, err := s.sessions.Get(txCtx, strings.TrimSpace(input.TenantID), strings.TrimSpace(input.SessionID))
+		if err != nil {
+			return err
+		}
+		if err := current.Close(time.Now().UTC()); err != nil {
+			return err
+		}
+		if err := s.sessions.Save(txCtx, current); err != nil {
+			return err
+		}
+		if err := s.emitWorkspaceEvent(platformruntime.WorkspaceEvent{
+			Type:      "runtime.session.closed",
+			TenantID:  current.TenantID,
+			SessionID: current.ID,
+			Payload: map[string]any{
+				"actor_id": current.ActorID,
+				"status":   string(current.Status),
+			},
+		}); err != nil {
+			return err
+		}
+		session = current
+		return nil
+	})
+	return session, err
+}
+
 type EnqueueTaskInput struct {
 	TenantID  string
 	ActorID   string
@@ -307,8 +348,12 @@ func (s *Service) EnqueueTask(ctx context.Context, input EnqueueTaskInput) (plat
 			return err
 		}
 
-		if _, err := s.sessions.Get(txCtx, created.TenantID, created.SessionID); err != nil {
+		session, err := s.sessions.Get(txCtx, created.TenantID, created.SessionID)
+		if err != nil {
 			return err
+		}
+		if session.Status != platformruntime.SessionStatusOpen {
+			return platformruntime.ErrInvalidSessionTransition
 		}
 		if err := s.tasks.Save(txCtx, created); err != nil {
 			return err
@@ -329,6 +374,29 @@ func (s *Service) EnqueueTask(ctx context.Context, input EnqueueTaskInput) (plat
 		return nil
 	})
 	return task, err
+}
+
+type ListSessionsInput struct {
+	TenantID string
+	ActorID  string
+}
+
+func (s *Service) ListSessions(ctx context.Context, input ListSessionsInput) ([]platformruntime.Session, error) {
+	var sessions []platformruntime.Session
+	err := s.pipeline.Execute(ctx, shared.Command{
+		Name:     "runtime.sessions.list",
+		TenantID: input.TenantID,
+		ActorID:  input.ActorID,
+		Payload:  input,
+	}, func(txCtx context.Context, _ shared.Command) error {
+		current, err := s.sessions.ListByTenant(txCtx, strings.TrimSpace(input.TenantID))
+		if err != nil {
+			return err
+		}
+		sessions = append([]platformruntime.Session(nil), current...)
+		return nil
+	})
+	return sessions, err
 }
 
 type AdvanceTaskInput struct {

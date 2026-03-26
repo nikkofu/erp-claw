@@ -119,6 +119,57 @@ func TestPlatformControlPlaneActorPolicyAndAgentRuntimeFlow(t *testing.T) {
 	}
 }
 
+func TestPlatformControlPlaneSessionCloseAndListFlow(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	container := bootstrap.NewContainer(bootstrap.DefaultConfig())
+	h := router.New(router.WithContainer(container))
+
+	headers := map[string]string{
+		"X-Tenant-ID": "tenant-admin",
+	}
+	session := doJSONWithHeaders(t, h, http.MethodPost, "/api/platform/v1/agent/sessions", map[string]any{
+		"session_id": "sess-close-001",
+		"metadata": map[string]any{
+			"channel": "workspace",
+		},
+	}, http.StatusOK, headers).Data
+	if got := stringField(t, session, "status"); got != "open" {
+		t.Fatalf("expected open session, got %s", got)
+	}
+
+	listed := doJSONWithHeaders(t, h, http.MethodGet, "/api/platform/v1/agent/sessions", nil, http.StatusOK, headers).Data
+	items, ok := listed["sessions"].([]any)
+	if !ok {
+		t.Fatalf("expected sessions array, got %#v", listed["sessions"])
+	}
+	if len(items) != 1 {
+		t.Fatalf("expected 1 session item, got %d", len(items))
+	}
+	item, ok := items[0].(map[string]any)
+	if !ok {
+		t.Fatalf("expected session object, got %#v", items[0])
+	}
+	if got := stringField(t, item, "id"); got != "sess-close-001" {
+		t.Fatalf("expected session id sess-close-001, got %s", got)
+	}
+
+	closed := doJSONWithHeaders(t, h, http.MethodPost, "/api/platform/v1/agent/sessions/sess-close-001/close", nil, http.StatusOK, headers).Data
+	if got := stringField(t, closed, "status"); got != "closed" {
+		t.Fatalf("expected closed session, got %s", got)
+	}
+
+	denied := doJSONWithHeaders(t, h, http.MethodPost, "/api/platform/v1/agent/sessions/sess-close-001/tasks", map[string]any{
+		"task_id":   "task-after-close",
+		"task_type": "tool.call",
+		"input": map[string]any{
+			"tool": "search",
+		},
+	}, http.StatusBadRequest, headers)
+	if denied.Error["message"] == "" {
+		t.Fatal("expected enqueue rejection message")
+	}
+}
+
 func doJSONWithHeaders(
 	t *testing.T,
 	h http.Handler,
