@@ -78,6 +78,7 @@ The control plane now exposes a minimal governed allowlist surface for agent cap
 - Replace semantics on write, with normalized and deduplicated model/tool entry reads
 - Effective reads resolve explicit stored allowlists against the current tenant-local catalogs and separate active bindings from stale bindings
 - Empty explicit capability policy reads return empty effective/stale lists; the route does not implicitly treat `agent_profile.model` as an allowlist entry
+- The shared command pipeline now has an opt-in capability guard seam that can reject payload-declared `model_entry_id` / `tool_entry_ids` before approval-start or handler execution
 
 The capability catalog also now has a tenant enablement baseline.
 
@@ -88,6 +89,8 @@ The capability catalog also now has a tenant enablement baseline.
 - Future capability policy writes reject inactive catalog entries
 - Existing capability bindings remain queryable after deactivation through the stored policy route, while the effective read surface reports deactivated entries as stale
 - The current Admin lifecycle naturally produces stale inactive entries; stale missing entries are handled defensively for repository drift and future lifecycle expansion
+- Commands that explicitly declare capability request keys can now be blocked by the pipeline when those requests are stale or not effectively allowed for the referenced agent profile
+- When capability denial happens after policy evaluation, audit events retain the policy decision and record `capability_denied` as the pipeline outcome
 - Runtime-side enforcement is still a later Phase 1/Phase 3 concern
 
 This is still not the full capability governance system. Tenant enablement, plugin registry, quota, feature flags, and runtime-side enforcement remain outside this Phase 1 slice.

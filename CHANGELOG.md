@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.10] - 2026-03-26
+
+### Added
+
+- Shared command pipeline capability guard seam that can reject commands before transaction and handler execution when a requested model/tool is not effectively allowed for an agent profile.
+- Capability pipeline adapter that resolves explicit `agent_profile_id` / `model_entry_id` / `tool_entry_ids` payload fields against the effective capability policy surface.
+- Integration coverage that proves capability denial blocks command execution and prevents approval creation when policy would otherwise require approval.
+
+### Changed
+
+- Phase 1 docs and README now describe capability governance as having both an effective read surface and an opt-in pipeline-side enforcement baseline.
+- Phase 1 docs now clarify that pipeline-side capability enforcement is additive and payload-driven; it is not yet a full tool runtime, plugin registry, or executor.
+
 ## [0.2.9] - 2026-03-26
 
 ### Added

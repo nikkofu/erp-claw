@@ -11,6 +11,7 @@ import (
 
 var ErrAgentCapabilityPolicyRepositoryRequired = errors.New("agent capability policy repository is required")
 var errAgentCapabilityPolicyProfileRepositoryRequired = errors.New("agent profile repository is required")
+var ErrAgentProfileNotFound = errors.New("agent profile not found")
 
 type agentCapabilityProfileReader interface {
 	ListAgentProfiles(ctx context.Context, tenantID string) ([]controlplane.AgentProfile, error)
@@ -101,7 +102,7 @@ func ensureAgentProfile(ctx context.Context, profiles agentCapabilityProfileRead
 			return nil
 		}
 	}
-	return fmt.Errorf("agent profile %q not found", agentProfileID)
+	return fmt.Errorf("%w: %q", ErrAgentProfileNotFound, agentProfileID)
 }
 
 func ensureModelEntryIDs(ctx context.Context, models modelCatalogReader, tenantID string, entryIDs []string) error {

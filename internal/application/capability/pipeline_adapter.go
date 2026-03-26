@@ -42,6 +42,9 @@ func (s SharedCommandCapabilityAuthorizer) AuthorizeCommandCapabilities(ctx cont
 
 	policy, err := s.Resolver.Handle(ctx, cmd.TenantID, agentProfileID)
 	if err != nil {
+		if errors.Is(err, ErrAgentProfileNotFound) {
+			return fmt.Errorf("%w: %v", shared.ErrCapabilityDenied, err)
+		}
 		return err
 	}
 

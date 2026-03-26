@@ -152,6 +152,28 @@ func TestSharedCommandCapabilityAuthorizerRejectsMissingAgentProfileID(t *testin
 	}
 }
 
+func TestSharedCommandCapabilityAuthorizerRejectsUnknownAgentProfileID(t *testing.T) {
+	t.Parallel()
+
+	authorizer := newTestSharedCommandCapabilityAuthorizer(t, &fakeAgentCapabilityPolicyRepository{
+		profiles: []controlplane.AgentProfile{{TenantID: "tenant-a", ID: "profile-2"}},
+		models:   []*domaincap.ModelCatalogEntry{{TenantID: "tenant-a", EntryID: "model-1", Status: domaincap.CatalogStatusActive}},
+	})
+
+	err := authorizer.AuthorizeCommandCapabilities(context.Background(), shared.Command{
+		Name:     "agent.run",
+		TenantID: "tenant-a",
+		ActorID:  "user-a",
+		Payload: map[string]any{
+			"agent_profile_id": "profile-1",
+			"model_entry_id":   "model-1",
+		},
+	})
+	if !errors.Is(err, shared.ErrCapabilityDenied) {
+		t.Fatalf("expected capability denied error, got %v", err)
+	}
+}
+
 func newTestSharedCommandCapabilityAuthorizer(t *testing.T, repo *fakeAgentCapabilityPolicyRepository) SharedCommandCapabilityAuthorizer {
 	t.Helper()
 

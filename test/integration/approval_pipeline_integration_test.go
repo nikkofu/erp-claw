@@ -7,8 +7,11 @@ import (
 	"testing"
 
 	appapproval "github.com/nikkofu/erp-claw/internal/application/approval"
+	appcap "github.com/nikkofu/erp-claw/internal/application/capability"
 	"github.com/nikkofu/erp-claw/internal/application/shared"
 	domainapproval "github.com/nikkofu/erp-claw/internal/domain/approval"
+	domaincap "github.com/nikkofu/erp-claw/internal/domain/capability"
+	"github.com/nikkofu/erp-claw/internal/domain/controlplane"
 	"github.com/nikkofu/erp-claw/internal/platform/audit"
 	"github.com/nikkofu/erp-claw/internal/platform/policy"
 )
@@ -73,6 +76,95 @@ func TestPipelineRequireApprovalStartsApprovalInstanceAndTask(t *testing.T) {
 	}
 	if events[0].Outcome != "pending_approval" {
 		t.Fatalf("expected pending_approval outcome, got %s", events[0].Outcome)
+	}
+}
+
+func TestPipelineCapabilityDenialPreventsApprovalStart(t *testing.T) {
+	repo := newIntegrationApprovalRepo(t)
+	definition, err := domainapproval.NewDefinition("tenant-a", "def-a", "purchase approval", "manager-a", true)
+	if err != nil {
+		t.Fatalf("new definition: %v", err)
+	}
+	repo.definitions["tenant-a|def-a"] = definition
+
+	capRepo := newIntegrationCapabilityRepo()
+	capRepo.profiles = []controlplane.AgentProfile{{TenantID: "tenant-a", ID: "profile-1"}}
+	capRepo.getPolicy = &domaincap.AgentCapabilityPolicy{
+		TenantID:             "tenant-a",
+		AgentProfileID:       "profile-1",
+		AllowedModelEntryIDs: []string{"model-2"},
+		AllowedToolEntryIDs:  []string{"tool-1"},
+	}
+	capRepo.models = []*domaincap.ModelCatalogEntry{
+		{TenantID: "tenant-a", EntryID: "model-2", Status: domaincap.CatalogStatusInactive},
+	}
+	capRepo.tools = []*domaincap.ToolCatalogEntry{
+		{TenantID: "tenant-a", EntryID: "tool-1", Status: domaincap.CatalogStatusActive},
+	}
+
+	resolver, err := appcap.NewResolveEffectiveAgentCapabilityPolicyHandler(capRepo, capRepo, capRepo, capRepo)
+	if err != nil {
+		t.Fatalf("new resolver: %v", err)
+	}
+
+	auditStore := audit.NewInMemoryStore()
+	auditService, err := audit.NewService(auditStore)
+	if err != nil {
+		t.Fatalf("new audit service: %v", err)
+	}
+
+	startHandler := appapproval.StartApprovalHandler{
+		Definitions: repo,
+		Instances:   repo,
+		Tasks:       repo,
+	}
+	pipeline := shared.NewPipeline(shared.PipelineDeps{
+		Policy:       policy.StaticEvaluator(policy.DecisionRequireApproval),
+		Audit:        auditService,
+		Approvals:    appapproval.SharedCommandApprovalStarter{Handler: startHandler},
+		Capabilities: appcap.SharedCommandCapabilityAuthorizer{Resolver: resolver},
+	})
+
+	err = pipeline.Execute(context.Background(), shared.Command{
+		Name:     "purchase.submit",
+		TenantID: "tenant-a",
+		ActorID:  "user-a",
+		Payload: map[string]any{
+			"approval_definition_id": "def-a",
+			"resource_type":          "purchase_order",
+			"resource_id":            "po-1",
+			"agent_profile_id":       "profile-1",
+			"model_entry_id":         "model-2",
+		},
+	})
+	if !errors.Is(err, shared.ErrCapabilityDenied) {
+		t.Fatalf("expected capability denied error, got %v", err)
+	}
+
+	if len(repo.instances) != 0 {
+		t.Fatalf("expected no approval instance, got %d", len(repo.instances))
+	}
+	if len(repo.tasks) != 0 {
+		t.Fatalf("expected no approval task, got %d", len(repo.tasks))
+	}
+
+	events, err := auditService.List(context.Background(), audit.Query{
+		TenantID:    "tenant-a",
+		CommandName: "purchase.submit",
+		ActorID:     "user-a",
+		Limit:       10,
+	})
+	if err != nil {
+		t.Fatalf("list audit events: %v", err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("expected one audit event, got %d", len(events))
+	}
+	if events[0].Decision != policy.DecisionRequireApproval {
+		t.Fatalf("expected require_approval decision, got %s", events[0].Decision)
+	}
+	if events[0].Outcome != "capability_denied" {
+		t.Fatalf("expected capability_denied outcome, got %s", events[0].Outcome)
 	}
 }
 

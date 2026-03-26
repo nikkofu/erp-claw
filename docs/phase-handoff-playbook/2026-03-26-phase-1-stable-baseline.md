@@ -18,7 +18,7 @@
 - 目标分支：`feature/phase1-control-plane`
 - 目标工作树：`.worktrees/phase1-control-plane`
 - 根仓库状态：`main` 工作区已清理干净，不再残留误落的未跟踪 `Phase 1` 文件
-- 版本号：`0.2.9`
+- 版本号：`0.2.10`
 - bootstrap 合同：运行时 catalog 在非测试路径下失败即中止，不再静默回退为内存存储
 - Fresh 验证命令：`GOCACHE=$(pwd)/.cache/go-build go test ./... -count=1`
 
@@ -48,6 +48,7 @@
 - capability tenant enablement baseline (`activate` / `deactivate`)
 - agent profile capability policy binding baseline
 - agent profile effective capability read baseline (`/capability-policy/effective`)
+- opt-in pipeline capability enforcement baseline for explicit capability request payloads
 - approval definition / instance / task baseline
 - `REQUIRE_APPROVAL` 到 approval instance/task 的最小 pipeline 接线
 - outbox dispatch / retry / failed recovery / stale `publishing` reclaim / poll instrumentation baseline
@@ -61,6 +62,8 @@
 - `policy` / `audit` / `approval starter seam` 已存在，可在业务命令中继续复用
 - `model catalog` / `tool catalog` / `tenant enablement baseline` / `agent capability policy binding` / `effective capability read surface` 已存在，不需要重新设计租户级 capability 主键和仓储边界
 - `/capability-policy/effective` 当前只解析显式 `capability-policy` 绑定，不隐式推导 `agent_profile.model`
+- shared pipeline 现已支持 opt-in capability guard；显式 capability payload 会先过 capability 检查，再进入 approval 或 handler
+- capability denial 的审计合同为：保留既有 policy decision，并把 outcome 记录为 `capability_denied`
 - `outbox reliability baseline` 已存在，后续业务事件发布应沿用该路径，而不是绕开它
 - tenant-scoped admin mutations 已要求 tenant root 先存在，后续业务建模应沿用这一边界
 
@@ -71,6 +74,7 @@
 - Phase 2 供应链业务闭环，包括 master data、procurement、inventory、sales 与 receivable/payable
 - plugin registry、quota / feature flag，以及 runtime-side capability enforcement
 - capability effective read surface 不是 runtime-side enforcement，也不是完整 plugin/tool runtime
+- pipeline capability guard 只对显式 payload capability request 生效，还不是完整 tool executor / session runtime enforcement
 - 更完整的 workflow orchestration、approval admin surface、多级审批与 approver resolution
 - 真实 WebSocket / streaming protocol、跨进程 event replay 与更完整的 stream durability
 - live DB round-trip、consumer-side idempotency、DLQ 与更完整的 reliability hardening
@@ -97,6 +101,8 @@
 - `1ea9e61` `feat: add phase1 capability tenant enablement surface`
 - `224240e` `feat: add phase1 effective capability policy resolver`
 - `c974b1f` `feat: add phase1 effective capability policy admin surface`
+- `62e46d6` `feat: add phase1 pipeline capability guard`
+- `1ff1180` `feat: add phase1 capability pipeline adapter`
 
 ## 8. 建议的下一步
 
