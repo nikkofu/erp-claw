@@ -153,6 +153,20 @@ func registerControlPlaneRoutes(rg *gin.RouterGroup, container *bootstrap.Contai
 		presenter.OK(c, gin.H{"rules": policyRuleListResponse(rules)})
 	})
 
+	controlGroup.DELETE("/policy/rules", func(c *gin.Context) {
+		err := container.ControlPlane.DeletePolicyRule(c.Request.Context(), controlplane.DeletePolicyRuleInput{
+			OperatorTenantID: tenantIDFromContext(c),
+			OperatorActorID:  actorIDFromContext(c),
+			TenantID:         c.Query("tenant_id"),
+			CommandPrefix:    c.Query("command_prefix"),
+		})
+		if err != nil {
+			renderControlPlaneError(c, err)
+			return
+		}
+		presenter.OK(c, gin.H{"deleted": true})
+	})
+
 	agentGroup := rg.Group("/agent")
 	agentGroup.POST("/sessions", func(c *gin.Context) {
 		var req openSessionRequest
@@ -369,6 +383,7 @@ func renderControlPlaneError(c *gin.Context, err error) {
 		presenter.Error(c, http.StatusConflict, err.Error())
 	case errors.Is(err, tenant.ErrTenantNotFound),
 		errors.Is(err, iam.ErrActorNotFound),
+		errors.Is(err, policy.ErrRuleNotFound),
 		errors.Is(err, platformruntime.ErrSessionNotFound),
 		errors.Is(err, platformruntime.ErrTaskNotFound):
 		presenter.Error(c, http.StatusNotFound, err.Error())

@@ -510,6 +510,32 @@ func (s *Service) ListPolicyRules(ctx context.Context, input ListPolicyRulesInpu
 	return rules, err
 }
 
+type DeletePolicyRuleInput struct {
+	OperatorTenantID string
+	OperatorActorID  string
+	TenantID         string
+	CommandPrefix    string
+}
+
+func (s *Service) DeletePolicyRule(ctx context.Context, input DeletePolicyRuleInput) error {
+	if s.policyRules == nil {
+		return ErrPolicyRuleStoreUnavailable
+	}
+
+	return s.pipeline.Execute(ctx, shared.Command{
+		Name:     "controlplane.policy_rules.delete",
+		TenantID: input.OperatorTenantID,
+		ActorID:  input.OperatorActorID,
+		Payload:  input,
+	}, func(txCtx context.Context, _ shared.Command) error {
+		targetTenantID := strings.TrimSpace(input.TenantID)
+		if targetTenantID == "" {
+			targetTenantID = strings.TrimSpace(input.OperatorTenantID)
+		}
+		return s.policyRules.Delete(txCtx, targetTenantID, strings.TrimSpace(input.CommandPrefix))
+	})
+}
+
 type ListAuditInput struct {
 	TenantID      string
 	ActorID       string

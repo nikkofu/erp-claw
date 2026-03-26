@@ -9,10 +9,12 @@ import (
 )
 
 var ErrInvalidRule = errors.New("invalid policy rule")
+var ErrRuleNotFound = errors.New("policy rule not found")
 
 type RuleStore interface {
 	Upsert(ctx context.Context, tenantID string, rule Rule) error
 	List(ctx context.Context, tenantID string) ([]Rule, error)
+	Delete(ctx context.Context, tenantID string, commandPrefix string) error
 }
 
 type InMemoryRuleStore struct {
@@ -65,6 +67,30 @@ func (s *InMemoryRuleStore) List(_ context.Context, tenantID string) ([]Rule, er
 		return out[i].CommandPrefix < out[j].CommandPrefix
 	})
 	return out, nil
+}
+
+func (s *InMemoryRuleStore) Delete(_ context.Context, tenantID string, commandPrefix string) error {
+	tenantID = strings.TrimSpace(tenantID)
+	commandPrefix = strings.TrimSpace(commandPrefix)
+	if tenantID == "" || commandPrefix == "" {
+		return ErrInvalidRule
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	tenantRules, ok := s.rules[tenantID]
+	if !ok {
+		return ErrRuleNotFound
+	}
+	if _, ok := tenantRules[commandPrefix]; !ok {
+		return ErrRuleNotFound
+	}
+	delete(tenantRules, commandPrefix)
+	if len(tenantRules) == 0 {
+		delete(s.rules, tenantID)
+	}
+	return nil
 }
 
 func normalizeRule(rule Rule) (Rule, bool) {

@@ -55,4 +55,24 @@ func TestControlPlanePolicyRuleCanGrantTenantRoleAccess(t *testing.T) {
 	if len(items) == 0 {
 		t.Fatal("expected at least one policy rule")
 	}
+
+	doJSONWithHeaders(
+		t,
+		h,
+		http.MethodDelete,
+		"/api/platform/v1/control/policy/rules?tenant_id="+tenantID+"&command_prefix=masterdata.",
+		nil,
+		http.StatusOK,
+		map[string]string{
+			"X-Tenant-ID": "tenant-admin",
+		},
+	)
+
+	doJSONWithHeaders(t, h, http.MethodPost, "/api/admin/v1/master-data/suppliers", map[string]any{
+		"code": "SUP-POLICY-3",
+		"name": "Policy Supplier 3",
+	}, http.StatusForbidden, map[string]string{
+		"X-Tenant-ID": tenantID,
+		"X-Actor-ID":  "actor-viewer",
+	})
 }

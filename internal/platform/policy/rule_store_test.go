@@ -42,3 +42,25 @@ func TestInMemoryRuleStoreRejectsInvalidRule(t *testing.T) {
 		t.Fatalf("expected ErrInvalidRule, got %v", err)
 	}
 }
+
+func TestInMemoryRuleStoreDeletesRule(t *testing.T) {
+	store := NewInMemoryRuleStore()
+	if err := store.Upsert(context.Background(), "tenant-a", Rule{
+		CommandPrefix: "masterdata.",
+		AnyOfRoles:    []string{"viewer"},
+	}); err != nil {
+		t.Fatalf("upsert rule: %v", err)
+	}
+
+	if err := store.Delete(context.Background(), "tenant-a", "masterdata."); err != nil {
+		t.Fatalf("delete rule: %v", err)
+	}
+
+	rules, err := store.List(context.Background(), "tenant-a")
+	if err != nil {
+		t.Fatalf("list rules: %v", err)
+	}
+	if len(rules) != 0 {
+		t.Fatalf("expected no rules after delete, got %d", len(rules))
+	}
+}
