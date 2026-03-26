@@ -2,6 +2,7 @@ package integration
 
 import (
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -74,6 +75,38 @@ func TestPlatformAuditRecordsSupportFilterAndOffset(t *testing.T) {
 		}
 		if record["outcome"] != "rejected" {
 			t.Fatalf("expected outcome rejected, got %#v", record["outcome"])
+		}
+	}
+
+	prefixFiltered := doJSONWithHeaders(
+		t,
+		h,
+		http.MethodGet,
+		"/api/platform/v1/audit/records?command_prefix=masterdata.suppliers.&limit=20",
+		nil,
+		http.StatusOK,
+		map[string]string{
+			"X-Tenant-ID": tenantID,
+		},
+	)
+	prefixItems, ok := prefixFiltered.Data["records"].([]any)
+	if !ok {
+		t.Fatalf("expected records array, got %#v", prefixFiltered.Data["records"])
+	}
+	if len(prefixItems) == 0 {
+		t.Fatal("expected at least one prefix-filtered record")
+	}
+	for _, raw := range prefixItems {
+		record, ok := raw.(map[string]any)
+		if !ok {
+			t.Fatalf("expected audit record object, got %#v", raw)
+		}
+		commandName, ok := record["command_name"].(string)
+		if !ok {
+			t.Fatalf("expected command_name string, got %#v", record["command_name"])
+		}
+		if !strings.HasPrefix(commandName, "masterdata.suppliers.") {
+			t.Fatalf("expected masterdata.suppliers.* command, got %s", commandName)
 		}
 	}
 }

@@ -496,6 +496,7 @@ func registerControlPlaneRoutes(rg *gin.RouterGroup, container *bootstrap.Contai
 			TenantID:      tenantIDFromContext(c),
 			ActorID:       actorIDFromContext(c),
 			CommandName:   c.Query("command"),
+			CommandPrefix: c.Query("command_prefix"),
 			QueryActorID:  c.Query("actor_id"),
 			QueryDecision: decision,
 			QueryOutcome:  c.Query("outcome"),

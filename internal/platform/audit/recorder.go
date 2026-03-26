@@ -19,6 +19,7 @@ type Query struct {
 	Decision    policy.Decision
 	Outcome     string
 	CommandName string
+	CommandPrefix string
 	Offset      int
 	Limit       int
 }
@@ -73,6 +74,7 @@ func (r *InMemoryRecorder) List(_ context.Context, query Query) ([]Record, error
 	actorID := strings.TrimSpace(query.ActorID)
 	outcome := strings.TrimSpace(query.Outcome)
 	commandName := strings.TrimSpace(query.CommandName)
+	commandPrefix := strings.TrimSpace(query.CommandPrefix)
 	offset := query.Offset
 	if offset < 0 {
 		offset = 0
@@ -95,6 +97,9 @@ func (r *InMemoryRecorder) List(_ context.Context, query Query) ([]Record, error
 			continue
 		}
 		if commandName != "" && record.CommandName != commandName {
+			continue
+		}
+		if commandPrefix != "" && !strings.HasPrefix(record.CommandName, commandPrefix) {
 			continue
 		}
 		if skipped < offset {

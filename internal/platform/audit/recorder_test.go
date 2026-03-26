@@ -145,3 +145,50 @@ func TestInMemoryRecorderListsByActorDecisionOutcomeAndOffset(t *testing.T) {
 		t.Fatalf("expected offset record to be create, got %s", records[0].CommandName)
 	}
 }
+
+func TestInMemoryRecorderListsByCommandPrefix(t *testing.T) {
+	recorder := NewInMemoryRecorder()
+	for _, record := range []Record{
+		{
+			CommandName: "procurement.purchase_orders.create",
+			TenantID:    "tenant-a",
+			ActorID:     "actor-a",
+			Decision:    policy.DecisionAllow,
+			Outcome:     "succeeded",
+		},
+		{
+			CommandName: "procurement.purchase_orders.submit",
+			TenantID:    "tenant-a",
+			ActorID:     "actor-a",
+			Decision:    policy.DecisionAllow,
+			Outcome:     "succeeded",
+		},
+		{
+			CommandName: "controlplane.actors.upsert",
+			TenantID:    "tenant-a",
+			ActorID:     "actor-admin",
+			Decision:    policy.DecisionAllow,
+			Outcome:     "succeeded",
+		},
+	} {
+		if err := recorder.Record(context.Background(), record); err != nil {
+			t.Fatalf("record audit: %v", err)
+		}
+	}
+
+	records, err := recorder.List(context.Background(), Query{
+		TenantID:      "tenant-a",
+		CommandPrefix: "procurement.purchase_orders.",
+	})
+	if err != nil {
+		t.Fatalf("list audit by command prefix: %v", err)
+	}
+	if len(records) != 2 {
+		t.Fatalf("expected 2 records, got %d", len(records))
+	}
+	for _, record := range records {
+		if record.CommandName != "procurement.purchase_orders.create" && record.CommandName != "procurement.purchase_orders.submit" {
+			t.Fatalf("unexpected command in prefix filter result: %s", record.CommandName)
+		}
+	}
+}

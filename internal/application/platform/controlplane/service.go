@@ -818,6 +818,7 @@ type ListAuditInput struct {
 	TenantID      string
 	ActorID       string
 	CommandName   string
+	CommandPrefix string
 	QueryActorID  string
 	QueryDecision policy.Decision
 	QueryOutcome  string
@@ -843,6 +844,7 @@ func (s *Service) ListAudit(ctx context.Context, input ListAuditInput) ([]audit.
 			Decision:    input.QueryDecision,
 			Outcome:     strings.TrimSpace(input.QueryOutcome),
 			CommandName: strings.TrimSpace(input.CommandName),
+			CommandPrefix: strings.TrimSpace(input.CommandPrefix),
 			Offset:      input.Offset,
 			Limit:       input.Limit,
 		})
