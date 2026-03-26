@@ -11,6 +11,8 @@ import (
 	"github.com/nikkofu/erp-claw/internal/domain/masterdata"
 	"github.com/nikkofu/erp-claw/internal/domain/payable"
 	"github.com/nikkofu/erp-claw/internal/domain/procurement"
+	"github.com/nikkofu/erp-claw/internal/domain/receivable"
+	"github.com/nikkofu/erp-claw/internal/domain/sales"
 	"github.com/nikkofu/erp-claw/internal/infrastructure/persistence/memory"
 )
 
@@ -335,6 +337,576 @@ func TestServiceReturnsInventoryBalanceFromPostedReceipts(t *testing.T) {
 	if balance.OnHand != approvedOrder.Lines[0].Quantity {
 		t.Fatalf("expected on hand %d, got %d", approvedOrder.Lines[0].Quantity, balance.OnHand)
 	}
+	if balance.Reserved != 0 {
+		t.Fatalf("expected reserved 0, got %d", balance.Reserved)
+	}
+	if balance.Available != approvedOrder.Lines[0].Quantity {
+		t.Fatalf("expected available %d, got %d", approvedOrder.Lines[0].Quantity, balance.Available)
+	}
+}
+
+func TestServiceReservesInventoryAndUpdatesAvailableBalance(t *testing.T) {
+	ctx := context.Background()
+	svc := newTestService()
+	approvedOrder := createApprovedOrder(t, ctx, svc)
+
+	_, _, _, err := svc.ReceivePurchaseOrder(ctx, ReceivePurchaseOrderInput{
+		TenantID:        "tenant-a",
+		ActorID:         "receiver-a",
+		PurchaseOrderID: approvedOrder.ID,
+		Lines: []ReceivePurchaseOrderLine{{
+			ProductID: approvedOrder.Lines[0].ProductID,
+			Quantity:  approvedOrder.Lines[0].Quantity,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("receive purchase order: %v", err)
+	}
+
+	reservation, err := svc.ReserveInventory(ctx, ReserveInventoryInput{
+		TenantID:      "tenant-a",
+		ActorID:       "planner-a",
+		ProductID:     approvedOrder.Lines[0].ProductID,
+		WarehouseID:   approvedOrder.WarehouseID,
+		Quantity:      2,
+		ReferenceType: "sales_order",
+		ReferenceID:   "so-001",
+	})
+	if err != nil {
+		t.Fatalf("reserve inventory: %v", err)
+	}
+	if reservation.Status != inventory.ReservationStatusActive {
+		t.Fatalf("expected active reservation, got %s", reservation.Status)
+	}
+
+	balance, err := svc.GetInventoryBalance(ctx, GetInventoryBalanceInput{
+		TenantID:    "tenant-a",
+		ProductID:   approvedOrder.Lines[0].ProductID,
+		WarehouseID: approvedOrder.WarehouseID,
+	})
+	if err != nil {
+		t.Fatalf("get inventory balance: %v", err)
+	}
+	if balance.OnHand != approvedOrder.Lines[0].Quantity {
+		t.Fatalf("expected on hand %d, got %d", approvedOrder.Lines[0].Quantity, balance.OnHand)
+	}
+	if balance.Reserved != 2 {
+		t.Fatalf("expected reserved 2, got %d", balance.Reserved)
+	}
+	if balance.Available != approvedOrder.Lines[0].Quantity-2 {
+		t.Fatalf("expected available %d, got %d", approvedOrder.Lines[0].Quantity-2, balance.Available)
+	}
+}
+
+func TestServiceReserveInventoryFailsWhenQuantityExceedsAvailable(t *testing.T) {
+	ctx := context.Background()
+	svc := newTestService()
+	approvedOrder := createApprovedOrder(t, ctx, svc)
+
+	_, _, _, err := svc.ReceivePurchaseOrder(ctx, ReceivePurchaseOrderInput{
+		TenantID:        "tenant-a",
+		ActorID:         "receiver-a",
+		PurchaseOrderID: approvedOrder.ID,
+		Lines: []ReceivePurchaseOrderLine{{
+			ProductID: approvedOrder.Lines[0].ProductID,
+			Quantity:  approvedOrder.Lines[0].Quantity,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("receive purchase order: %v", err)
+	}
+
+	_, err = svc.ReserveInventory(ctx, ReserveInventoryInput{
+		TenantID:      "tenant-a",
+		ActorID:       "planner-a",
+		ProductID:     approvedOrder.Lines[0].ProductID,
+		WarehouseID:   approvedOrder.WarehouseID,
+		Quantity:      approvedOrder.Lines[0].Quantity + 1,
+		ReferenceType: "sales_order",
+		ReferenceID:   "so-002",
+	})
+	if !errors.Is(err, inventory.ErrInsufficientAvailableInventory) {
+		t.Fatalf("expected insufficient available inventory, got %v", err)
+	}
+}
+
+func TestServiceIssuesInventoryAndReducesAvailableBalance(t *testing.T) {
+	ctx := context.Background()
+	svc := newTestService()
+	approvedOrder := createApprovedOrder(t, ctx, svc)
+
+	_, _, _, err := svc.ReceivePurchaseOrder(ctx, ReceivePurchaseOrderInput{
+		TenantID:        "tenant-a",
+		ActorID:         "receiver-a",
+		PurchaseOrderID: approvedOrder.ID,
+		Lines: []ReceivePurchaseOrderLine{{
+			ProductID: approvedOrder.Lines[0].ProductID,
+			Quantity:  approvedOrder.Lines[0].Quantity,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("receive purchase order: %v", err)
+	}
+
+	outbound, err := svc.IssueInventory(ctx, IssueInventoryInput{
+		TenantID:      "tenant-a",
+		ActorID:       "warehouse-a",
+		ProductID:     approvedOrder.Lines[0].ProductID,
+		WarehouseID:   approvedOrder.WarehouseID,
+		Quantity:      2,
+		ReferenceType: "shipment",
+		ReferenceID:   "shp-001",
+	})
+	if err != nil {
+		t.Fatalf("issue inventory: %v", err)
+	}
+	if outbound.MovementType != inventory.MovementTypeOutbound {
+		t.Fatalf("expected outbound movement, got %s", outbound.MovementType)
+	}
+	if outbound.QuantityDelta != -2 {
+		t.Fatalf("expected quantity delta -2, got %d", outbound.QuantityDelta)
+	}
+
+	balance, err := svc.GetInventoryBalance(ctx, GetInventoryBalanceInput{
+		TenantID:    "tenant-a",
+		ProductID:   approvedOrder.Lines[0].ProductID,
+		WarehouseID: approvedOrder.WarehouseID,
+	})
+	if err != nil {
+		t.Fatalf("get inventory balance: %v", err)
+	}
+	if balance.OnHand != approvedOrder.Lines[0].Quantity-2 {
+		t.Fatalf("expected on hand %d, got %d", approvedOrder.Lines[0].Quantity-2, balance.OnHand)
+	}
+	if balance.Reserved != 0 {
+		t.Fatalf("expected reserved 0, got %d", balance.Reserved)
+	}
+	if balance.Available != approvedOrder.Lines[0].Quantity-2 {
+		t.Fatalf("expected available %d, got %d", approvedOrder.Lines[0].Quantity-2, balance.Available)
+	}
+}
+
+func TestServiceIssueInventoryFailsWhenQuantityExceedsAvailable(t *testing.T) {
+	ctx := context.Background()
+	svc := newTestService()
+	approvedOrder := createApprovedOrder(t, ctx, svc)
+
+	_, _, _, err := svc.ReceivePurchaseOrder(ctx, ReceivePurchaseOrderInput{
+		TenantID:        "tenant-a",
+		ActorID:         "receiver-a",
+		PurchaseOrderID: approvedOrder.ID,
+		Lines: []ReceivePurchaseOrderLine{{
+			ProductID: approvedOrder.Lines[0].ProductID,
+			Quantity:  approvedOrder.Lines[0].Quantity,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("receive purchase order: %v", err)
+	}
+
+	_, err = svc.ReserveInventory(ctx, ReserveInventoryInput{
+		TenantID:      "tenant-a",
+		ActorID:       "planner-a",
+		ProductID:     approvedOrder.Lines[0].ProductID,
+		WarehouseID:   approvedOrder.WarehouseID,
+		Quantity:      approvedOrder.Lines[0].Quantity - 1,
+		ReferenceType: "sales_order",
+		ReferenceID:   "so-003",
+	})
+	if err != nil {
+		t.Fatalf("reserve inventory: %v", err)
+	}
+
+	_, err = svc.IssueInventory(ctx, IssueInventoryInput{
+		TenantID:      "tenant-a",
+		ActorID:       "warehouse-a",
+		ProductID:     approvedOrder.Lines[0].ProductID,
+		WarehouseID:   approvedOrder.WarehouseID,
+		Quantity:      2,
+		ReferenceType: "shipment",
+		ReferenceID:   "shp-002",
+	})
+	if !errors.Is(err, inventory.ErrInsufficientAvailableInventory) {
+		t.Fatalf("expected insufficient available inventory, got %v", err)
+	}
+}
+
+func TestServiceTransfersInventoryBetweenWarehousesAndUpdatesBalances(t *testing.T) {
+	ctx := context.Background()
+	svc := newTestService()
+	approvedOrder := createApprovedOrder(t, ctx, svc)
+
+	targetWarehouse, err := svc.CreateWarehouse(ctx, CreateWarehouseInput{
+		TenantID: "tenant-a",
+		ActorID:  "actor-a",
+		Code:     "WH-BJ",
+		Name:     "Beijing Warehouse",
+	})
+	if err != nil {
+		t.Fatalf("create target warehouse: %v", err)
+	}
+
+	_, _, _, err = svc.ReceivePurchaseOrder(ctx, ReceivePurchaseOrderInput{
+		TenantID:        "tenant-a",
+		ActorID:         "receiver-a",
+		PurchaseOrderID: approvedOrder.ID,
+		Lines: []ReceivePurchaseOrderLine{{
+			ProductID: approvedOrder.Lines[0].ProductID,
+			Quantity:  approvedOrder.Lines[0].Quantity,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("receive purchase order: %v", err)
+	}
+
+	entries, err := svc.TransferInventory(ctx, TransferInventoryInput{
+		TenantID:        "tenant-a",
+		ActorID:         "warehouse-a",
+		ProductID:       approvedOrder.Lines[0].ProductID,
+		FromWarehouseID: approvedOrder.WarehouseID,
+		ToWarehouseID:   targetWarehouse.ID,
+		Quantity:        2,
+		ReferenceType:   "transfer_order",
+		ReferenceID:     "trf-001",
+	})
+	if err != nil {
+		t.Fatalf("transfer inventory: %v", err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("expected 2 transfer ledger entries, got %d", len(entries))
+	}
+	if entries[0].MovementType != inventory.MovementTypeOutbound || entries[0].QuantityDelta != -2 {
+		t.Fatalf("expected first entry outbound -2, got %s %d", entries[0].MovementType, entries[0].QuantityDelta)
+	}
+	if entries[1].MovementType != inventory.MovementTypeInbound || entries[1].QuantityDelta != 2 {
+		t.Fatalf("expected second entry inbound 2, got %s %d", entries[1].MovementType, entries[1].QuantityDelta)
+	}
+
+	sourceBalance, err := svc.GetInventoryBalance(ctx, GetInventoryBalanceInput{
+		TenantID:    "tenant-a",
+		ProductID:   approvedOrder.Lines[0].ProductID,
+		WarehouseID: approvedOrder.WarehouseID,
+	})
+	if err != nil {
+		t.Fatalf("get source inventory balance: %v", err)
+	}
+	if sourceBalance.OnHand != approvedOrder.Lines[0].Quantity-2 {
+		t.Fatalf("expected source on hand %d, got %d", approvedOrder.Lines[0].Quantity-2, sourceBalance.OnHand)
+	}
+	if sourceBalance.Available != approvedOrder.Lines[0].Quantity-2 {
+		t.Fatalf("expected source available %d, got %d", approvedOrder.Lines[0].Quantity-2, sourceBalance.Available)
+	}
+
+	targetBalance, err := svc.GetInventoryBalance(ctx, GetInventoryBalanceInput{
+		TenantID:    "tenant-a",
+		ProductID:   approvedOrder.Lines[0].ProductID,
+		WarehouseID: targetWarehouse.ID,
+	})
+	if err != nil {
+		t.Fatalf("get target inventory balance: %v", err)
+	}
+	if targetBalance.OnHand != 2 {
+		t.Fatalf("expected target on hand 2, got %d", targetBalance.OnHand)
+	}
+	if targetBalance.Available != 2 {
+		t.Fatalf("expected target available 2, got %d", targetBalance.Available)
+	}
+}
+
+func TestServiceTransferInventoryFailsWhenQuantityExceedsAvailable(t *testing.T) {
+	ctx := context.Background()
+	svc := newTestService()
+	approvedOrder := createApprovedOrder(t, ctx, svc)
+
+	targetWarehouse, err := svc.CreateWarehouse(ctx, CreateWarehouseInput{
+		TenantID: "tenant-a",
+		ActorID:  "actor-a",
+		Code:     "WH-BJ",
+		Name:     "Beijing Warehouse",
+	})
+	if err != nil {
+		t.Fatalf("create target warehouse: %v", err)
+	}
+
+	_, _, _, err = svc.ReceivePurchaseOrder(ctx, ReceivePurchaseOrderInput{
+		TenantID:        "tenant-a",
+		ActorID:         "receiver-a",
+		PurchaseOrderID: approvedOrder.ID,
+		Lines: []ReceivePurchaseOrderLine{{
+			ProductID: approvedOrder.Lines[0].ProductID,
+			Quantity:  approvedOrder.Lines[0].Quantity,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("receive purchase order: %v", err)
+	}
+
+	_, err = svc.TransferInventory(ctx, TransferInventoryInput{
+		TenantID:        "tenant-a",
+		ActorID:         "warehouse-a",
+		ProductID:       approvedOrder.Lines[0].ProductID,
+		FromWarehouseID: approvedOrder.WarehouseID,
+		ToWarehouseID:   targetWarehouse.ID,
+		Quantity:        approvedOrder.Lines[0].Quantity + 1,
+		ReferenceType:   "transfer_order",
+		ReferenceID:     "trf-002",
+	})
+	if !errors.Is(err, inventory.ErrInsufficientAvailableInventory) {
+		t.Fatalf("expected insufficient available inventory, got %v", err)
+	}
+}
+
+func TestServiceListsInventoryLedgerEntriesForWarehouseProduct(t *testing.T) {
+	ctx := context.Background()
+	svc := newTestService()
+	approvedOrder := createApprovedOrder(t, ctx, svc)
+
+	_, _, _, err := svc.ReceivePurchaseOrder(ctx, ReceivePurchaseOrderInput{
+		TenantID:        "tenant-a",
+		ActorID:         "receiver-a",
+		PurchaseOrderID: approvedOrder.ID,
+		Lines: []ReceivePurchaseOrderLine{{
+			ProductID: approvedOrder.Lines[0].ProductID,
+			Quantity:  approvedOrder.Lines[0].Quantity,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("receive purchase order: %v", err)
+	}
+	_, err = svc.IssueInventory(ctx, IssueInventoryInput{
+		TenantID:      "tenant-a",
+		ActorID:       "warehouse-a",
+		ProductID:     approvedOrder.Lines[0].ProductID,
+		WarehouseID:   approvedOrder.WarehouseID,
+		Quantity:      2,
+		ReferenceType: "shipment",
+		ReferenceID:   "shp-ledger-001",
+	})
+	if err != nil {
+		t.Fatalf("issue inventory: %v", err)
+	}
+
+	entries, err := svc.ListInventoryLedger(ctx, ListInventoryLedgerInput{
+		TenantID:    "tenant-a",
+		ProductID:   approvedOrder.Lines[0].ProductID,
+		WarehouseID: approvedOrder.WarehouseID,
+	})
+	if err != nil {
+		t.Fatalf("list inventory ledger: %v", err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("expected 2 ledger entries, got %d", len(entries))
+	}
+	if entries[0].MovementType != inventory.MovementTypeInbound || entries[0].QuantityDelta != approvedOrder.Lines[0].Quantity {
+		t.Fatalf("expected first ledger entry inbound %d, got %s %d", approvedOrder.Lines[0].Quantity, entries[0].MovementType, entries[0].QuantityDelta)
+	}
+	if entries[1].MovementType != inventory.MovementTypeOutbound || entries[1].QuantityDelta != -2 {
+		t.Fatalf("expected second ledger entry outbound -2, got %s %d", entries[1].MovementType, entries[1].QuantityDelta)
+	}
+}
+
+func TestServiceCreatesAndShipsSalesOrder(t *testing.T) {
+	ctx := context.Background()
+	svc := newTestService()
+	receivedOrder := createReceivedOrder(t, ctx, svc)
+
+	order, err := svc.CreateSalesOrder(ctx, CreateSalesOrderInput{
+		TenantID:    "tenant-a",
+		ActorID:     "sales-a",
+		WarehouseID: receivedOrder.WarehouseID,
+		ExternalRef: "SO-001",
+		Lines: []CreateSalesOrderLine{{
+			ProductID: receivedOrder.Lines[0].ProductID,
+			Quantity:  2,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("create sales order: %v", err)
+	}
+	if order.Status != sales.OrderStatusDraft {
+		t.Fatalf("expected draft sales order, got %s", order.Status)
+	}
+
+	shippingOrder, entries, err := svc.ShipSalesOrder(ctx, ShipSalesOrderInput{
+		TenantID:     "tenant-a",
+		ActorID:      "warehouse-a",
+		SalesOrderID: order.ID,
+	})
+	if err != nil {
+		t.Fatalf("ship sales order: %v", err)
+	}
+	if shippingOrder.Status != sales.OrderStatusShipped {
+		t.Fatalf("expected shipped sales order, got %s", shippingOrder.Status)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 shipment ledger entry, got %d", len(entries))
+	}
+	if entries[0].MovementType != inventory.MovementTypeOutbound || entries[0].QuantityDelta != -2 {
+		t.Fatalf("expected outbound shipment entry -2, got %s %d", entries[0].MovementType, entries[0].QuantityDelta)
+	}
+
+	balance, err := svc.GetInventoryBalance(ctx, GetInventoryBalanceInput{
+		TenantID:    "tenant-a",
+		ProductID:   receivedOrder.Lines[0].ProductID,
+		WarehouseID: receivedOrder.WarehouseID,
+	})
+	if err != nil {
+		t.Fatalf("get inventory balance: %v", err)
+	}
+	if balance.OnHand != receivedOrder.Lines[0].Quantity-2 {
+		t.Fatalf("expected on hand %d, got %d", receivedOrder.Lines[0].Quantity-2, balance.OnHand)
+	}
+	if balance.Available != receivedOrder.Lines[0].Quantity-2 {
+		t.Fatalf("expected available %d, got %d", receivedOrder.Lines[0].Quantity-2, balance.Available)
+	}
+}
+
+func TestServiceShipSalesOrderFailsWhenQuantityExceedsAvailable(t *testing.T) {
+	ctx := context.Background()
+	svc := newTestService()
+	receivedOrder := createReceivedOrder(t, ctx, svc)
+
+	order, err := svc.CreateSalesOrder(ctx, CreateSalesOrderInput{
+		TenantID:    "tenant-a",
+		ActorID:     "sales-a",
+		WarehouseID: receivedOrder.WarehouseID,
+		ExternalRef: "SO-002",
+		Lines: []CreateSalesOrderLine{{
+			ProductID: receivedOrder.Lines[0].ProductID,
+			Quantity:  receivedOrder.Lines[0].Quantity + 1,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("create sales order: %v", err)
+	}
+
+	_, _, err = svc.ShipSalesOrder(ctx, ShipSalesOrderInput{
+		TenantID:     "tenant-a",
+		ActorID:      "warehouse-a",
+		SalesOrderID: order.ID,
+	})
+	if !errors.Is(err, inventory.ErrInsufficientAvailableInventory) {
+		t.Fatalf("expected insufficient available inventory, got %v", err)
+	}
+}
+
+func TestServiceListsSalesOrdersByTenant(t *testing.T) {
+	ctx := context.Background()
+	svc := newTestService()
+	receivedOrder := createReceivedOrder(t, ctx, svc)
+
+	orderA, err := svc.CreateSalesOrder(ctx, CreateSalesOrderInput{
+		TenantID:    "tenant-a",
+		ActorID:     "sales-a",
+		WarehouseID: receivedOrder.WarehouseID,
+		ExternalRef: "SO-003",
+		Lines: []CreateSalesOrderLine{{
+			ProductID: receivedOrder.Lines[0].ProductID,
+			Quantity:  1,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("create tenant-a sales order: %v", err)
+	}
+	if _, err := svc.CreateSalesOrder(ctx, CreateSalesOrderInput{
+		TenantID:    "tenant-b",
+		ActorID:     "sales-b",
+		WarehouseID: receivedOrder.WarehouseID,
+		ExternalRef: "SO-B-001",
+		Lines: []CreateSalesOrderLine{{
+			ProductID: receivedOrder.Lines[0].ProductID,
+			Quantity:  1,
+		}},
+	}); err == nil {
+		t.Fatalf("expected tenant-b create to fail due to tenant-scoped master data")
+	}
+
+	orders, err := svc.ListSalesOrders(ctx, ListSalesOrdersInput{TenantID: "tenant-a"})
+	if err != nil {
+		t.Fatalf("list sales orders: %v", err)
+	}
+	if len(orders) != 1 {
+		t.Fatalf("expected 1 tenant-a sales order, got %d", len(orders))
+	}
+	if orders[0].ID != orderA.ID {
+		t.Fatalf("expected tenant-a sales order id %s, got %s", orderA.ID, orders[0].ID)
+	}
+}
+
+func TestServiceBuildsBackofficeOverviewReadModel(t *testing.T) {
+	ctx := context.Background()
+	svc := newTestService()
+	receivedOrder := createReceivedOrder(t, ctx, svc)
+
+	if _, err := svc.CreatePayableBill(ctx, CreatePayableBillInput{
+		TenantID:        "tenant-a",
+		ActorID:         "finance-a",
+		PurchaseOrderID: receivedOrder.ID,
+	}); err != nil {
+		t.Fatalf("create payable bill: %v", err)
+	}
+	if _, err := svc.CreateReceivableBill(ctx, CreateReceivableBillInput{
+		TenantID:    "tenant-a",
+		ActorID:     "finance-a",
+		ExternalRef: "SO-OV-001",
+	}); err != nil {
+		t.Fatalf("create receivable bill: %v", err)
+	}
+
+	shipOrder, err := svc.CreateSalesOrder(ctx, CreateSalesOrderInput{
+		TenantID:    "tenant-a",
+		ActorID:     "sales-a",
+		WarehouseID: receivedOrder.WarehouseID,
+		ExternalRef: "SO-OV-002",
+		Lines: []CreateSalesOrderLine{{
+			ProductID: receivedOrder.Lines[0].ProductID,
+			Quantity:  2,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("create sales order to ship: %v", err)
+	}
+	if _, _, err := svc.ShipSalesOrder(ctx, ShipSalesOrderInput{
+		TenantID:     "tenant-a",
+		ActorID:      "warehouse-a",
+		SalesOrderID: shipOrder.ID,
+	}); err != nil {
+		t.Fatalf("ship sales order: %v", err)
+	}
+	if _, err := svc.CreateSalesOrder(ctx, CreateSalesOrderInput{
+		TenantID:    "tenant-a",
+		ActorID:     "sales-a",
+		WarehouseID: receivedOrder.WarehouseID,
+		ExternalRef: "SO-OV-003",
+		Lines: []CreateSalesOrderLine{{
+			ProductID: receivedOrder.Lines[0].ProductID,
+			Quantity:  1,
+		}},
+	}); err != nil {
+		t.Fatalf("create draft sales order: %v", err)
+	}
+
+	overview, err := svc.GetBackofficeOverview(ctx, GetBackofficeOverviewInput{
+		TenantID: "tenant-a",
+	})
+	if err != nil {
+		t.Fatalf("get backoffice overview: %v", err)
+	}
+	if overview.Payable.OpenCount != 1 {
+		t.Fatalf("expected payable open_count 1, got %d", overview.Payable.OpenCount)
+	}
+	if overview.Receivable.OpenCount != 1 {
+		t.Fatalf("expected receivable open_count 1, got %d", overview.Receivable.OpenCount)
+	}
+	if overview.Sales.DraftCount != 1 {
+		t.Fatalf("expected sales draft_count 1, got %d", overview.Sales.DraftCount)
+	}
+	if overview.Sales.ShippedCount != 1 {
+		t.Fatalf("expected sales shipped_count 1, got %d", overview.Sales.ShippedCount)
+	}
+	if overview.Sales.TotalCount != 2 {
+		t.Fatalf("expected sales total_count 2, got %d", overview.Sales.TotalCount)
+	}
 }
 
 func TestServiceReceivePurchaseOrderFailsWhenOrderNotApproved(t *testing.T) {
@@ -610,6 +1182,74 @@ func TestServiceListPayableBillsReturnsTenantScopedBills(t *testing.T) {
 	}
 }
 
+func TestServiceCreatesReceivableBill(t *testing.T) {
+	ctx := context.Background()
+	svc := newTestService()
+
+	bill, err := svc.CreateReceivableBill(ctx, CreateReceivableBillInput{
+		TenantID:    "tenant-a",
+		ActorID:     "finance-a",
+		ExternalRef: "SO-001",
+	})
+	if err != nil {
+		t.Fatalf("create receivable bill: %v", err)
+	}
+	if bill.Status != receivable.BillStatusOpen {
+		t.Fatalf("expected open receivable bill, got %s", bill.Status)
+	}
+	if bill.ExternalRef != "SO-001" {
+		t.Fatalf("expected external_ref SO-001, got %s", bill.ExternalRef)
+	}
+}
+
+func TestServiceCreateReceivableBillFailsForInvalidInput(t *testing.T) {
+	ctx := context.Background()
+	svc := newTestService()
+
+	_, err := svc.CreateReceivableBill(ctx, CreateReceivableBillInput{
+		TenantID:    "tenant-a",
+		ActorID:     "finance-a",
+		ExternalRef: "   ",
+	})
+	if !errors.Is(err, receivable.ErrInvalidBill) {
+		t.Fatalf("expected invalid receivable bill, got %v", err)
+	}
+}
+
+func TestServiceListReceivableBillsReturnsTenantScopedBills(t *testing.T) {
+	ctx := context.Background()
+	svc := newTestService()
+
+	billA, err := svc.CreateReceivableBill(ctx, CreateReceivableBillInput{
+		TenantID:    "tenant-a",
+		ActorID:     "finance-a",
+		ExternalRef: "SO-001",
+	})
+	if err != nil {
+		t.Fatalf("create tenant-a receivable bill: %v", err)
+	}
+	if _, err := svc.CreateReceivableBill(ctx, CreateReceivableBillInput{
+		TenantID:    "tenant-b",
+		ActorID:     "finance-b",
+		ExternalRef: "SO-B-001",
+	}); err != nil {
+		t.Fatalf("create tenant-b receivable bill: %v", err)
+	}
+
+	bills, err := svc.ListReceivableBills(ctx, ListReceivableBillsInput{
+		TenantID: "tenant-a",
+	})
+	if err != nil {
+		t.Fatalf("list tenant-a receivable bills: %v", err)
+	}
+	if len(bills) != 1 {
+		t.Fatalf("expected 1 tenant-a receivable bill, got %d", len(bills))
+	}
+	if bills[0].ID != billA.ID {
+		t.Fatalf("expected tenant-a receivable bill id %s, got %s", billA.ID, bills[0].ID)
+	}
+}
+
 func newTestService() *Service {
 	return NewService(ServiceDeps{
 		MasterData:     memory.NewMasterDataRepository(),
@@ -617,6 +1257,8 @@ func newTestService() *Service {
 		Approvals:      memory.NewApprovalRepository(),
 		Inventory:      memory.NewInventoryRepository(),
 		Payables:       memory.NewPayableRepository(),
+		Receivables:    memory.NewReceivableRepository(),
+		SalesOrders:    memory.NewSalesOrderRepository(),
 		Pipeline:       shared.NewPipeline(shared.PipelineDeps{}),
 	})
 }

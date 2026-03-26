@@ -12,6 +12,8 @@ import (
 	"github.com/nikkofu/erp-claw/internal/domain/masterdata"
 	"github.com/nikkofu/erp-claw/internal/domain/payable"
 	"github.com/nikkofu/erp-claw/internal/domain/procurement"
+	"github.com/nikkofu/erp-claw/internal/domain/receivable"
+	"github.com/nikkofu/erp-claw/internal/domain/sales"
 )
 
 type ServiceDeps struct {
@@ -20,6 +22,8 @@ type ServiceDeps struct {
 	Approvals      approval.Repository
 	Inventory      inventory.Repository
 	Payables       payable.Repository
+	Receivables    receivable.Repository
+	SalesOrders    sales.Repository
 	Pipeline       *shared.Pipeline
 }
 
@@ -29,6 +33,8 @@ type Service struct {
 	approvals      approval.Repository
 	inventory      inventory.Repository
 	payables       payable.Repository
+	receivables    receivable.Repository
+	salesOrders    sales.Repository
 	pipeline       *shared.Pipeline
 }
 
@@ -44,6 +50,8 @@ func NewService(deps ServiceDeps) *Service {
 		approvals:      deps.Approvals,
 		inventory:      deps.Inventory,
 		payables:       deps.Payables,
+		receivables:    deps.Receivables,
+		salesOrders:    deps.SalesOrders,
 		pipeline:       deps.Pipeline,
 	}
 }
@@ -288,6 +296,10 @@ func (s *Service) GetInventoryBalance(ctx context.Context, input GetInventoryBal
 	if err != nil {
 		return inventory.Balance{}, err
 	}
+	reservations, err := s.inventory.ListReservations(ctx, input.TenantID, input.ProductID, input.WarehouseID)
+	if err != nil {
+		return inventory.Balance{}, err
+	}
 	balance := inventory.Balance{
 		TenantID:    input.TenantID,
 		ProductID:   input.ProductID,
@@ -296,7 +308,179 @@ func (s *Service) GetInventoryBalance(ctx context.Context, input GetInventoryBal
 	for _, entry := range entries {
 		balance.OnHand += entry.QuantityDelta
 	}
+	for _, reservation := range reservations {
+		if reservation.Status != inventory.ReservationStatusActive {
+			continue
+		}
+		balance.Reserved += reservation.Quantity
+	}
+	balance.Available = balance.OnHand - balance.Reserved
 	return balance, nil
+}
+
+func (s *Service) ListInventoryLedger(ctx context.Context, input ListInventoryLedgerInput) ([]inventory.LedgerEntry, error) {
+	return s.inventory.ListLedgerEntries(ctx, input.TenantID, input.ProductID, input.WarehouseID)
+}
+
+func (s *Service) ReserveInventory(ctx context.Context, input ReserveInventoryInput) (inventory.Reservation, error) {
+	var reservation inventory.Reservation
+	err := s.pipeline.Execute(ctx, shared.Command{
+		Name:     "inventory.reservations.create",
+		TenantID: input.TenantID,
+		ActorID:  input.ActorID,
+		Payload:  input,
+	}, func(txCtx context.Context, _ shared.Command) error {
+		if _, err := s.masterData.GetProduct(txCtx, input.TenantID, input.ProductID); err != nil {
+			return err
+		}
+		if _, err := s.masterData.GetWarehouse(txCtx, input.TenantID, input.WarehouseID); err != nil {
+			return err
+		}
+
+		balance, err := s.GetInventoryBalance(txCtx, GetInventoryBalanceInput{
+			TenantID:    input.TenantID,
+			ProductID:   input.ProductID,
+			WarehouseID: input.WarehouseID,
+		})
+		if err != nil {
+			return err
+		}
+		if input.Quantity > balance.Available {
+			return inventory.ErrInsufficientAvailableInventory
+		}
+
+		created, err := inventory.NewReservation(
+			nextID("rsv"),
+			input.TenantID,
+			input.ProductID,
+			input.WarehouseID,
+			input.ReferenceType,
+			input.ReferenceID,
+			input.ActorID,
+			input.Quantity,
+		)
+		if err != nil {
+			return err
+		}
+		if err := s.inventory.SaveReservation(txCtx, created); err != nil {
+			return err
+		}
+		reservation = created
+		return nil
+	})
+	return reservation, err
+}
+
+func (s *Service) IssueInventory(ctx context.Context, input IssueInventoryInput) (inventory.LedgerEntry, error) {
+	var outbound inventory.LedgerEntry
+	err := s.pipeline.Execute(ctx, shared.Command{
+		Name:     "inventory.outbounds.create",
+		TenantID: input.TenantID,
+		ActorID:  input.ActorID,
+		Payload:  input,
+	}, func(txCtx context.Context, _ shared.Command) error {
+		if _, err := s.masterData.GetProduct(txCtx, input.TenantID, input.ProductID); err != nil {
+			return err
+		}
+		if _, err := s.masterData.GetWarehouse(txCtx, input.TenantID, input.WarehouseID); err != nil {
+			return err
+		}
+
+		balance, err := s.GetInventoryBalance(txCtx, GetInventoryBalanceInput{
+			TenantID:    input.TenantID,
+			ProductID:   input.ProductID,
+			WarehouseID: input.WarehouseID,
+		})
+		if err != nil {
+			return err
+		}
+		if input.Quantity > balance.Available {
+			return inventory.ErrInsufficientAvailableInventory
+		}
+
+		entry, err := inventory.NewOutboundLedgerEntry(
+			nextID("led"),
+			input.TenantID,
+			input.ProductID,
+			input.WarehouseID,
+			input.ReferenceType,
+			input.ReferenceID,
+			input.Quantity,
+		)
+		if err != nil {
+			return err
+		}
+		if err := s.inventory.AppendLedgerEntries(txCtx, []inventory.LedgerEntry{entry}); err != nil {
+			return err
+		}
+		outbound = entry
+		return nil
+	})
+	return outbound, err
+}
+
+func (s *Service) TransferInventory(ctx context.Context, input TransferInventoryInput) ([]inventory.LedgerEntry, error) {
+	var entries []inventory.LedgerEntry
+	err := s.pipeline.Execute(ctx, shared.Command{
+		Name:     "inventory.transfers.create",
+		TenantID: input.TenantID,
+		ActorID:  input.ActorID,
+		Payload:  input,
+	}, func(txCtx context.Context, _ shared.Command) error {
+		if _, err := s.masterData.GetProduct(txCtx, input.TenantID, input.ProductID); err != nil {
+			return err
+		}
+		if _, err := s.masterData.GetWarehouse(txCtx, input.TenantID, input.FromWarehouseID); err != nil {
+			return err
+		}
+		if _, err := s.masterData.GetWarehouse(txCtx, input.TenantID, input.ToWarehouseID); err != nil {
+			return err
+		}
+
+		sourceBalance, err := s.GetInventoryBalance(txCtx, GetInventoryBalanceInput{
+			TenantID:    input.TenantID,
+			ProductID:   input.ProductID,
+			WarehouseID: input.FromWarehouseID,
+		})
+		if err != nil {
+			return err
+		}
+		if input.Quantity > sourceBalance.Available {
+			return inventory.ErrInsufficientAvailableInventory
+		}
+
+		outbound, err := inventory.NewOutboundLedgerEntry(
+			nextID("led"),
+			input.TenantID,
+			input.ProductID,
+			input.FromWarehouseID,
+			input.ReferenceType,
+			input.ReferenceID,
+			input.Quantity,
+		)
+		if err != nil {
+			return err
+		}
+		inbound, err := inventory.NewInboundLedgerEntry(
+			nextID("led"),
+			input.TenantID,
+			input.ProductID,
+			input.ToWarehouseID,
+			input.ReferenceType,
+			input.ReferenceID,
+			input.Quantity,
+		)
+		if err != nil {
+			return err
+		}
+		created := []inventory.LedgerEntry{outbound, inbound}
+		if err := s.inventory.AppendLedgerEntries(txCtx, created); err != nil {
+			return err
+		}
+		entries = created
+		return nil
+	})
+	return entries, err
 }
 
 func (s *Service) CreatePayableBill(ctx context.Context, input CreatePayableBillInput) (payable.Bill, error) {
@@ -368,6 +552,184 @@ func (s *Service) CreatePayablePaymentPlan(ctx context.Context, input CreatePaya
 
 func (s *Service) ListPayablePaymentPlans(ctx context.Context, input ListPayablePaymentPlansInput) ([]payable.PaymentPlan, error) {
 	return s.payables.ListPaymentPlansByBill(ctx, input.TenantID, input.PayableBillID)
+}
+
+func (s *Service) CreateReceivableBill(ctx context.Context, input CreateReceivableBillInput) (receivable.Bill, error) {
+	var bill receivable.Bill
+	err := s.pipeline.Execute(ctx, shared.Command{
+		Name:     "receivable.bills.create",
+		TenantID: input.TenantID,
+		ActorID:  input.ActorID,
+		Payload:  input,
+	}, func(txCtx context.Context, _ shared.Command) error {
+		created, err := receivable.NewBill(nextID("reb"), input.TenantID, input.ExternalRef, input.ActorID)
+		if err != nil {
+			return err
+		}
+		if err := s.receivables.Save(txCtx, created); err != nil {
+			return err
+		}
+		bill = created
+		return nil
+	})
+	return bill, err
+}
+
+func (s *Service) GetReceivableBill(ctx context.Context, input GetReceivableBillInput) (receivable.Bill, error) {
+	return s.receivables.Get(ctx, input.TenantID, input.BillID)
+}
+
+func (s *Service) ListReceivableBills(ctx context.Context, input ListReceivableBillsInput) ([]receivable.Bill, error) {
+	return s.receivables.ListByTenant(ctx, input.TenantID)
+}
+
+func (s *Service) CreateSalesOrder(ctx context.Context, input CreateSalesOrderInput) (sales.Order, error) {
+	var order sales.Order
+	err := s.pipeline.Execute(ctx, shared.Command{
+		Name:     "sales.orders.create",
+		TenantID: input.TenantID,
+		ActorID:  input.ActorID,
+		Payload:  input,
+	}, func(txCtx context.Context, _ shared.Command) error {
+		if _, err := s.masterData.GetWarehouse(txCtx, input.TenantID, input.WarehouseID); err != nil {
+			return err
+		}
+
+		lines := make([]sales.Line, 0, len(input.Lines))
+		for _, line := range input.Lines {
+			if _, err := s.masterData.GetProduct(txCtx, input.TenantID, line.ProductID); err != nil {
+				return err
+			}
+			lines = append(lines, sales.Line{
+				ProductID: line.ProductID,
+				Quantity:  line.Quantity,
+			})
+		}
+
+		created, err := sales.NewOrder(nextID("sor"), input.TenantID, input.WarehouseID, input.ExternalRef, input.ActorID, lines)
+		if err != nil {
+			return err
+		}
+		if err := s.salesOrders.Save(txCtx, created); err != nil {
+			return err
+		}
+		order = created
+		return nil
+	})
+	return order, err
+}
+
+func (s *Service) GetSalesOrder(ctx context.Context, input GetSalesOrderInput) (sales.Order, error) {
+	return s.salesOrders.Get(ctx, input.TenantID, input.SalesOrderID)
+}
+
+func (s *Service) ListSalesOrders(ctx context.Context, input ListSalesOrdersInput) ([]sales.Order, error) {
+	return s.salesOrders.ListByTenant(ctx, input.TenantID)
+}
+
+func (s *Service) ShipSalesOrder(ctx context.Context, input ShipSalesOrderInput) (sales.Order, []inventory.LedgerEntry, error) {
+	var (
+		order   sales.Order
+		entries []inventory.LedgerEntry
+	)
+	err := s.pipeline.Execute(ctx, shared.Command{
+		Name:     "sales.orders.ship",
+		TenantID: input.TenantID,
+		ActorID:  input.ActorID,
+		Payload:  input,
+	}, func(txCtx context.Context, _ shared.Command) error {
+		current, err := s.salesOrders.Get(txCtx, input.TenantID, input.SalesOrderID)
+		if err != nil {
+			return err
+		}
+
+		requiredByProduct := make(map[string]int, len(current.Lines))
+		for _, line := range current.Lines {
+			requiredByProduct[line.ProductID] += line.Quantity
+		}
+		for productID, requiredQty := range requiredByProduct {
+			balance, err := s.GetInventoryBalance(txCtx, GetInventoryBalanceInput{
+				TenantID:    input.TenantID,
+				ProductID:   productID,
+				WarehouseID: current.WarehouseID,
+			})
+			if err != nil {
+				return err
+			}
+			if requiredQty > balance.Available {
+				return inventory.ErrInsufficientAvailableInventory
+			}
+		}
+
+		created := make([]inventory.LedgerEntry, 0, len(current.Lines))
+		for _, line := range current.Lines {
+			entry, err := inventory.NewOutboundLedgerEntry(
+				nextID("led"),
+				input.TenantID,
+				line.ProductID,
+				current.WarehouseID,
+				"sales_order",
+				current.ID,
+				line.Quantity,
+			)
+			if err != nil {
+				return err
+			}
+			created = append(created, entry)
+		}
+
+		if err := current.MarkShipped(); err != nil {
+			return err
+		}
+		if err := s.inventory.AppendLedgerEntries(txCtx, created); err != nil {
+			return err
+		}
+		if err := s.salesOrders.Save(txCtx, current); err != nil {
+			return err
+		}
+
+		order = current
+		entries = created
+		return nil
+	})
+	return order, entries, err
+}
+
+func (s *Service) GetBackofficeOverview(ctx context.Context, input GetBackofficeOverviewInput) (BackofficeOverview, error) {
+	payableBills, err := s.payables.ListByTenant(ctx, input.TenantID)
+	if err != nil {
+		return BackofficeOverview{}, err
+	}
+	receivableBills, err := s.receivables.ListByTenant(ctx, input.TenantID)
+	if err != nil {
+		return BackofficeOverview{}, err
+	}
+	salesOrders, err := s.salesOrders.ListByTenant(ctx, input.TenantID)
+	if err != nil {
+		return BackofficeOverview{}, err
+	}
+
+	overview := BackofficeOverview{
+		TenantID: input.TenantID,
+		Payable: PayableOverview{
+			OpenCount: len(payableBills),
+		},
+		Receivable: ReceivableOverview{
+			OpenCount: len(receivableBills),
+		},
+		Sales: SalesOverview{
+			TotalCount: len(salesOrders),
+		},
+	}
+	for _, order := range salesOrders {
+		switch order.Status {
+		case sales.OrderStatusDraft:
+			overview.Sales.DraftCount++
+		case sales.OrderStatusShipped:
+			overview.Sales.ShippedCount++
+		}
+	}
+	return overview, nil
 }
 
 func (s *Service) resolveRequest(
