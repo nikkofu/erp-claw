@@ -491,6 +491,47 @@ func TestServiceListSessionsReturnsTenantScopedSessions(t *testing.T) {
 	}
 }
 
+func TestServiceListSessionsSupportsActorFilter(t *testing.T) {
+	store := memory.NewControlPlaneStore()
+	svc := NewService(ServiceDeps{
+		TenantCatalog: store.TenantCatalog(),
+		IAMDirectory:  store.IAMDirectory(),
+		Sessions:      store.SessionRepository(),
+		Tasks:         store.TaskRepository(),
+		Pipeline: shared.NewPipeline(shared.PipelineDeps{
+			Policy: policy.StaticEvaluator(policy.DecisionAllow),
+		}),
+	})
+
+	ctx := context.Background()
+	for _, input := range []OpenSessionInput{
+		{TenantID: "tenant-a", ActorID: "actor-alice", SessionID: "sess-actor-001"},
+		{TenantID: "tenant-a", ActorID: "actor-bob", SessionID: "sess-actor-002"},
+		{TenantID: "tenant-a", ActorID: "actor-alice", SessionID: "sess-actor-003"},
+	} {
+		if _, err := svc.OpenSession(ctx, input); err != nil {
+			t.Fatalf("open session %s: %v", input.SessionID, err)
+		}
+	}
+
+	filtered, err := svc.ListSessions(ctx, ListSessionsInput{
+		TenantID:     "tenant-a",
+		ActorID:      "actor-admin",
+		QueryActorID: "actor-alice",
+	})
+	if err != nil {
+		t.Fatalf("list actor-filtered sessions: %v", err)
+	}
+	if len(filtered) != 2 {
+		t.Fatalf("expected 2 actor-filtered sessions, got %d", len(filtered))
+	}
+	for _, session := range filtered {
+		if session.ActorID != "actor-alice" {
+			t.Fatalf("expected actor-alice session, got actor %s", session.ActorID)
+		}
+	}
+}
+
 func TestServiceListTasksReturnsTenantScopedAndFilteredTasks(t *testing.T) {
 	store := memory.NewControlPlaneStore()
 	svc := NewService(ServiceDeps{

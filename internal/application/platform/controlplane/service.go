@@ -455,11 +455,12 @@ func (s *Service) EnqueueTask(ctx context.Context, input EnqueueTaskInput) (plat
 }
 
 type ListSessionsInput struct {
-	TenantID string
-	ActorID  string
-	Status   platformruntime.SessionStatus
-	Offset   int
-	Limit    int
+	TenantID     string
+	ActorID      string
+	QueryActorID string
+	Status       platformruntime.SessionStatus
+	Offset       int
+	Limit        int
 }
 
 func (s *Service) ListSessions(ctx context.Context, input ListSessionsInput) ([]platformruntime.Session, error) {
@@ -475,8 +476,12 @@ func (s *Service) ListSessions(ctx context.Context, input ListSessionsInput) ([]
 			return err
 		}
 		targetStatus := input.Status
+		targetSessionActorID := strings.TrimSpace(input.QueryActorID)
 		filtered := make([]platformruntime.Session, 0, len(current))
 		for _, session := range current {
+			if targetSessionActorID != "" && session.ActorID != targetSessionActorID {
+				continue
+			}
 			if targetStatus != "" && session.Status != targetStatus {
 				continue
 			}

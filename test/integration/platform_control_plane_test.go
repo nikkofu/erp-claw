@@ -378,6 +378,63 @@ func TestPlatformControlPlaneListSessionsSupportsStatusFilter(t *testing.T) {
 	}
 }
 
+func TestPlatformControlPlaneListSessionsSupportsActorFilter(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	container := bootstrap.NewContainer(bootstrap.DefaultConfig())
+	h := router.New(router.WithContainer(container))
+
+	postJSONData(t, h, "/api/platform/v1/control/actors", map[string]any{
+		"tenant_id": "tenant-admin",
+		"actor_id":  "actor-alice",
+		"roles":     []string{"workspace_operator"},
+	})
+	postJSONData(t, h, "/api/platform/v1/control/actors", map[string]any{
+		"tenant_id": "tenant-admin",
+		"actor_id":  "actor-bob",
+		"roles":     []string{"workspace_operator"},
+	})
+
+	doJSONWithHeaders(t, h, http.MethodPost, "/api/platform/v1/agent/sessions", map[string]any{
+		"session_id": "sess-actor-001",
+		"metadata": map[string]any{
+			"channel": "workspace",
+		},
+	}, http.StatusOK, map[string]string{
+		"X-Tenant-ID": "tenant-admin",
+		"X-Actor-ID":  "actor-alice",
+	})
+	doJSONWithHeaders(t, h, http.MethodPost, "/api/platform/v1/agent/sessions", map[string]any{
+		"session_id": "sess-actor-002",
+		"metadata": map[string]any{
+			"channel": "workspace",
+		},
+	}, http.StatusOK, map[string]string{
+		"X-Tenant-ID": "tenant-admin",
+		"X-Actor-ID":  "actor-bob",
+	})
+
+	filtered := doJSONWithHeaders(t, h, http.MethodGet, "/api/platform/v1/agent/sessions?actor_id=actor-alice", nil, http.StatusOK, map[string]string{
+		"X-Tenant-ID": "tenant-admin",
+	}).Data
+	items, ok := filtered["sessions"].([]any)
+	if !ok {
+		t.Fatalf("expected sessions array, got %#v", filtered["sessions"])
+	}
+	if len(items) != 1 {
+		t.Fatalf("expected 1 actor-filtered session, got %d", len(items))
+	}
+	session, ok := items[0].(map[string]any)
+	if !ok {
+		t.Fatalf("expected session object, got %#v", items[0])
+	}
+	if got := stringField(t, session, "id"); got != "sess-actor-001" {
+		t.Fatalf("expected sess-actor-001, got %s", got)
+	}
+	if got := stringField(t, session, "actor_id"); got != "actor-alice" {
+		t.Fatalf("expected actor-alice, got %s", got)
+	}
+}
+
 func TestPlatformControlPlaneListTasksSupportsPagination(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	container := bootstrap.NewContainer(bootstrap.DefaultConfig())
