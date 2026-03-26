@@ -327,6 +327,26 @@ func registerControlPlaneRoutes(rg *gin.RouterGroup, container *bootstrap.Contai
 		presenter.OK(c, taskResponse(task))
 	})
 
+	agentGroup.POST("/tasks/:id/cancel", func(c *gin.Context) {
+		var req cancelTaskRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			presenter.Error(c, http.StatusBadRequest, err.Error())
+			return
+		}
+
+		task, err := container.ControlPlane.CancelTask(c.Request.Context(), controlplane.AdvanceTaskInput{
+			TenantID: tenantIDFromContext(c),
+			ActorID:  actorIDFromContext(c),
+			TaskID:   c.Param("id"),
+			Reason:   req.Reason,
+		})
+		if err != nil {
+			renderControlPlaneError(c, err)
+			return
+		}
+		presenter.OK(c, taskResponse(task))
+	})
+
 	auditGroup := rg.Group("/audit")
 	auditGroup.GET("/records", func(c *gin.Context) {
 		limit, err := parseLimit(c.Query("limit"), 20)
@@ -391,6 +411,10 @@ type completeTaskRequest struct {
 }
 
 type failTaskRequest struct {
+	Reason string `json:"reason"`
+}
+
+type cancelTaskRequest struct {
 	Reason string `json:"reason"`
 }
 

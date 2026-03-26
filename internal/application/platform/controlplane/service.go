@@ -425,6 +425,12 @@ func (s *Service) FailTask(ctx context.Context, input AdvanceTaskInput) (platfor
 	})
 }
 
+func (s *Service) CancelTask(ctx context.Context, input AdvanceTaskInput) (platformruntime.Task, error) {
+	return s.mutateTask(ctx, "runtime.tasks.cancel", "runtime.task.canceled", input, func(task *platformruntime.Task) error {
+		return task.Cancel(input.Reason, time.Now().UTC())
+	})
+}
+
 type GetSessionInput struct {
 	TenantID  string
 	ActorID   string

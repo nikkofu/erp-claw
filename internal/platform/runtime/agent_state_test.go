@@ -70,3 +70,44 @@ func TestTaskCannotCompleteBeforeStart(t *testing.T) {
 		t.Fatalf("expected ErrInvalidTaskTransition, got %v", err)
 	}
 }
+
+func TestTaskCanCancelFromPending(t *testing.T) {
+	now := time.Date(2026, 3, 26, 8, 0, 0, 0, time.UTC)
+	task, err := NewTask("task-001", "tenant-admin", "sess-001", "tool.call", nil, now)
+	if err != nil {
+		t.Fatalf("new task: %v", err)
+	}
+
+	canceledAt := now.Add(time.Minute)
+	if err := task.Cancel("manual cancel", canceledAt); err != nil {
+		t.Fatalf("cancel task: %v", err)
+	}
+	if task.Status != TaskStatusCanceled {
+		t.Fatalf("expected task canceled, got %s", task.Status)
+	}
+	if task.FailureReason != "manual cancel" {
+		t.Fatalf("expected cancel reason, got %q", task.FailureReason)
+	}
+	if task.CompletedAt.IsZero() {
+		t.Fatal("expected completed_at to be set for canceled task")
+	}
+}
+
+func TestTaskCannotCancelAfterCompletion(t *testing.T) {
+	now := time.Date(2026, 3, 26, 8, 0, 0, 0, time.UTC)
+	task, err := NewTask("task-001", "tenant-admin", "sess-001", "tool.call", nil, now)
+	if err != nil {
+		t.Fatalf("new task: %v", err)
+	}
+	if err := task.Start(now.Add(time.Minute)); err != nil {
+		t.Fatalf("start task: %v", err)
+	}
+	if err := task.Complete(map[string]any{"ok": true}, now.Add(2*time.Minute)); err != nil {
+		t.Fatalf("complete task: %v", err)
+	}
+
+	err = task.Cancel("too late", now.Add(3*time.Minute))
+	if !errors.Is(err, ErrInvalidTaskTransition) {
+		t.Fatalf("expected ErrInvalidTaskTransition, got %v", err)
+	}
+}

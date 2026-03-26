@@ -129,6 +129,63 @@ func TestServiceEmitsFailureEventOnTaskFail(t *testing.T) {
 	assertWorkspaceEvent(t, got[3], "runtime.task.failed", "tenant-a", session.ID, task.ID)
 }
 
+func TestServiceEmitsCanceledEventOnTaskCancel(t *testing.T) {
+	store := memory.NewControlPlaneStore()
+	sink := &recordingWorkspaceEventSink{}
+	svc := NewService(ServiceDeps{
+		TenantCatalog:   store.TenantCatalog(),
+		IAMDirectory:    store.IAMDirectory(),
+		Sessions:        store.SessionRepository(),
+		Tasks:           store.TaskRepository(),
+		WorkspaceEvents: sink,
+		Pipeline: shared.NewPipeline(shared.PipelineDeps{
+			Policy: policy.StaticEvaluator(policy.DecisionAllow),
+		}),
+	})
+
+	ctx := context.Background()
+	session, err := svc.OpenSession(ctx, OpenSessionInput{
+		TenantID:  "tenant-a",
+		ActorID:   "actor-a",
+		SessionID: "sess-001",
+	})
+	if err != nil {
+		t.Fatalf("open session: %v", err)
+	}
+	task, err := svc.EnqueueTask(ctx, EnqueueTaskInput{
+		TenantID:  "tenant-a",
+		ActorID:   "actor-a",
+		SessionID: session.ID,
+		TaskID:    "task-001",
+		TaskType:  "tool.call",
+	})
+	if err != nil {
+		t.Fatalf("enqueue task: %v", err)
+	}
+
+	canceled, err := svc.CancelTask(ctx, AdvanceTaskInput{
+		TenantID: "tenant-a",
+		ActorID:  "actor-a",
+		TaskID:   task.ID,
+		Reason:   "manual cancel",
+	})
+	if err != nil {
+		t.Fatalf("cancel task: %v", err)
+	}
+	if canceled.Status != platformruntime.TaskStatusCanceled {
+		t.Fatalf("expected canceled task, got %s", canceled.Status)
+	}
+	if canceled.FailureReason != "manual cancel" {
+		t.Fatalf("expected cancel reason manual cancel, got %q", canceled.FailureReason)
+	}
+
+	got := sink.Events()
+	if len(got) != 3 {
+		t.Fatalf("expected 3 workspace events, got %d", len(got))
+	}
+	assertWorkspaceEvent(t, got[2], "runtime.task.canceled", "tenant-a", session.ID, task.ID)
+}
+
 func TestServiceCloseSessionEmitsWorkspaceEventAndRejectsEnqueueOnClosedSession(t *testing.T) {
 	store := memory.NewControlPlaneStore()
 	sink := &recordingWorkspaceEventSink{}

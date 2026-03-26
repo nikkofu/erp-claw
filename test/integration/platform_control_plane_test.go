@@ -170,6 +170,41 @@ func TestPlatformControlPlaneSessionCloseAndListFlow(t *testing.T) {
 	}
 }
 
+func TestPlatformControlPlaneTaskCancelFlow(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	container := bootstrap.NewContainer(bootstrap.DefaultConfig())
+	h := router.New(router.WithContainer(container))
+
+	postJSONData(t, h, "/api/platform/v1/agent/sessions", map[string]any{
+		"session_id": "sess-cancel-001",
+		"metadata": map[string]any{
+			"channel": "workspace",
+		},
+	})
+	postJSONData(t, h, "/api/platform/v1/agent/sessions/sess-cancel-001/tasks", map[string]any{
+		"task_id":   "task-cancel-001",
+		"task_type": "tool.call",
+		"input": map[string]any{
+			"tool": "search",
+		},
+	})
+
+	canceled := postJSONData(t, h, "/api/platform/v1/agent/tasks/task-cancel-001/cancel", map[string]any{
+		"reason": "manual cancel",
+	})
+	if got := stringField(t, canceled, "status"); got != "canceled" {
+		t.Fatalf("expected canceled task, got %s", got)
+	}
+	if got := stringField(t, canceled, "failure_reason"); got != "manual cancel" {
+		t.Fatalf("expected cancel reason manual cancel, got %s", got)
+	}
+
+	gotTask := getJSONData(t, h, "/api/platform/v1/agent/tasks/task-cancel-001")
+	if got := stringField(t, gotTask, "status"); got != "canceled" {
+		t.Fatalf("expected persisted canceled task, got %s", got)
+	}
+}
+
 func doJSONWithHeaders(
 	t *testing.T,
 	h http.Handler,
