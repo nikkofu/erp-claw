@@ -87,6 +87,19 @@ func registerControlPlaneRoutes(rg *gin.RouterGroup, container *bootstrap.Contai
 		presenter.OK(c, sessionResponse(session))
 	})
 
+	agentGroup.GET("/sessions/:id", func(c *gin.Context) {
+		session, err := container.ControlPlane.GetSession(c.Request.Context(), controlplane.GetSessionInput{
+			TenantID:  tenantIDFromContext(c),
+			ActorID:   actorIDFromContext(c),
+			SessionID: c.Param("id"),
+		})
+		if err != nil {
+			renderControlPlaneError(c, err)
+			return
+		}
+		presenter.OK(c, sessionResponse(session))
+	})
+
 	agentGroup.POST("/sessions/:id/tasks", func(c *gin.Context) {
 		var req enqueueTaskRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
@@ -101,6 +114,32 @@ func registerControlPlaneRoutes(rg *gin.RouterGroup, container *bootstrap.Contai
 			TaskID:    req.TaskID,
 			TaskType:  req.TaskType,
 			Input:     req.Input,
+		})
+		if err != nil {
+			renderControlPlaneError(c, err)
+			return
+		}
+		presenter.OK(c, taskResponse(task))
+	})
+
+	agentGroup.GET("/sessions/:id/tasks", func(c *gin.Context) {
+		tasks, err := container.ControlPlane.ListSessionTasks(c.Request.Context(), controlplane.ListSessionTasksInput{
+			TenantID:  tenantIDFromContext(c),
+			ActorID:   actorIDFromContext(c),
+			SessionID: c.Param("id"),
+		})
+		if err != nil {
+			renderControlPlaneError(c, err)
+			return
+		}
+		presenter.OK(c, gin.H{"tasks": taskListResponse(tasks)})
+	})
+
+	agentGroup.GET("/tasks/:id", func(c *gin.Context) {
+		task, err := container.ControlPlane.GetTask(c.Request.Context(), controlplane.GetTaskInput{
+			TenantID: tenantIDFromContext(c),
+			ActorID:  actorIDFromContext(c),
+			TaskID:   c.Param("id"),
 		})
 		if err != nil {
 			renderControlPlaneError(c, err)
@@ -296,6 +335,14 @@ func auditRecordsResponse(records []audit.Record) []gin.H {
 			"error":        record.Error,
 			"occurred_at":  formatTime(record.OccurredAt),
 		})
+	}
+	return out
+}
+
+func taskListResponse(tasks []platformruntime.Task) []gin.H {
+	out := make([]gin.H, 0, len(tasks))
+	for _, task := range tasks {
+		out = append(out, taskResponse(task))
 	}
 	return out
 }

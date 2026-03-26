@@ -81,6 +81,20 @@ func TestPlatformControlPlaneActorPolicyAndAgentRuntimeFlow(t *testing.T) {
 		t.Fatalf("expected running task, got %s", got)
 	}
 
+	gotSession := getJSONData(t, h, "/api/platform/v1/agent/sessions/sess-001")
+	if got := stringField(t, gotSession, "id"); got != "sess-001" {
+		t.Fatalf("expected session id sess-001, got %s", got)
+	}
+
+	sessionTasks := getJSONData(t, h, "/api/platform/v1/agent/sessions/sess-001/tasks")
+	taskItems, ok := sessionTasks["tasks"].([]any)
+	if !ok {
+		t.Fatalf("expected tasks array, got %#v", sessionTasks["tasks"])
+	}
+	if len(taskItems) != 1 {
+		t.Fatalf("expected 1 task item, got %d", len(taskItems))
+	}
+
 	completed := postJSONData(t, h, "/api/platform/v1/agent/tasks/task-001/complete", map[string]any{
 		"output": map[string]any{
 			"result": "ok",
@@ -88,6 +102,11 @@ func TestPlatformControlPlaneActorPolicyAndAgentRuntimeFlow(t *testing.T) {
 	})
 	if got := stringField(t, completed, "status"); got != "succeeded" {
 		t.Fatalf("expected succeeded task, got %s", got)
+	}
+
+	gotTask := getJSONData(t, h, "/api/platform/v1/agent/tasks/task-001")
+	if got := stringField(t, gotTask, "status"); got != "succeeded" {
+		t.Fatalf("expected task status succeeded, got %s", got)
 	}
 
 	auditResp := getJSONData(t, h, "/api/platform/v1/audit/records?limit=20")

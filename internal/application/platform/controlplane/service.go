@@ -246,6 +246,78 @@ func (s *Service) FailTask(ctx context.Context, input AdvanceTaskInput) (platfor
 	})
 }
 
+type GetSessionInput struct {
+	TenantID  string
+	ActorID   string
+	SessionID string
+}
+
+func (s *Service) GetSession(ctx context.Context, input GetSessionInput) (platformruntime.Session, error) {
+	var session platformruntime.Session
+	err := s.pipeline.Execute(ctx, shared.Command{
+		Name:     "runtime.sessions.get",
+		TenantID: input.TenantID,
+		ActorID:  input.ActorID,
+		Payload:  input,
+	}, func(txCtx context.Context, _ shared.Command) error {
+		current, err := s.sessions.Get(txCtx, input.TenantID, input.SessionID)
+		if err != nil {
+			return err
+		}
+		session = current
+		return nil
+	})
+	return session, err
+}
+
+type GetTaskInput struct {
+	TenantID string
+	ActorID  string
+	TaskID   string
+}
+
+func (s *Service) GetTask(ctx context.Context, input GetTaskInput) (platformruntime.Task, error) {
+	var task platformruntime.Task
+	err := s.pipeline.Execute(ctx, shared.Command{
+		Name:     "runtime.tasks.get",
+		TenantID: input.TenantID,
+		ActorID:  input.ActorID,
+		Payload:  input,
+	}, func(txCtx context.Context, _ shared.Command) error {
+		current, err := s.tasks.Get(txCtx, input.TenantID, input.TaskID)
+		if err != nil {
+			return err
+		}
+		task = current
+		return nil
+	})
+	return task, err
+}
+
+type ListSessionTasksInput struct {
+	TenantID  string
+	ActorID   string
+	SessionID string
+}
+
+func (s *Service) ListSessionTasks(ctx context.Context, input ListSessionTasksInput) ([]platformruntime.Task, error) {
+	var tasks []platformruntime.Task
+	err := s.pipeline.Execute(ctx, shared.Command{
+		Name:     "runtime.tasks.list_by_session",
+		TenantID: input.TenantID,
+		ActorID:  input.ActorID,
+		Payload:  input,
+	}, func(txCtx context.Context, _ shared.Command) error {
+		current, err := s.tasks.ListBySession(txCtx, input.TenantID, input.SessionID)
+		if err != nil {
+			return err
+		}
+		tasks = current
+		return nil
+	})
+	return tasks, err
+}
+
 type ListAuditInput struct {
 	TenantID    string
 	ActorID     string
