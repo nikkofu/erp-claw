@@ -30,6 +30,7 @@ func NewContainer(cfg Config) *Container {
 	controlPlaneStore := memory.NewControlPlaneStore()
 	auditRecorder := audit.NewInMemoryRecorder()
 	workspaceGateway := ws.NewWorkspaceGateway()
+	policyRules := policy.NewInMemoryRuleStore()
 
 	lookupRoles := func(ctx context.Context, tenantID, actorID string) ([]string, error) {
 		if actorID == iam.SystemActor.ID {
@@ -45,18 +46,21 @@ func NewContainer(cfg Config) *Container {
 		return append([]string(nil), actor.Roles...), nil
 	}
 
-	evaluator := policy.NewRoleEvaluator(
+	defaultPolicyRules := []policy.Rule{
+		{CommandPrefix: "masterdata.", AnyOfRoles: []string{"platform_admin", "supplychain_operator"}},
+		{CommandPrefix: "procurement.", AnyOfRoles: []string{"platform_admin", "supplychain_operator"}},
+		{CommandPrefix: "inventory.", AnyOfRoles: []string{"platform_admin", "supplychain_operator"}},
+		{CommandPrefix: "sales.", AnyOfRoles: []string{"platform_admin", "supplychain_operator"}},
+		{CommandPrefix: "approval.", AnyOfRoles: []string{"platform_admin", "supplychain_operator", "approver"}},
+		{CommandPrefix: "controlplane.", AnyOfRoles: []string{"platform_admin"}},
+		{CommandPrefix: "runtime.", AnyOfRoles: []string{"platform_admin", "workspace_operator"}},
+		{CommandPrefix: "platform.audit.", AnyOfRoles: []string{"platform_admin"}},
+	}
+
+	evaluator := policy.NewRoleEvaluatorWithTenantRules(
 		lookupRoles,
-		[]policy.Rule{
-			{CommandPrefix: "masterdata.", AnyOfRoles: []string{"platform_admin", "supplychain_operator"}},
-			{CommandPrefix: "procurement.", AnyOfRoles: []string{"platform_admin", "supplychain_operator"}},
-			{CommandPrefix: "inventory.", AnyOfRoles: []string{"platform_admin", "supplychain_operator"}},
-			{CommandPrefix: "sales.", AnyOfRoles: []string{"platform_admin", "supplychain_operator"}},
-			{CommandPrefix: "approval.", AnyOfRoles: []string{"platform_admin", "supplychain_operator", "approver"}},
-			{CommandPrefix: "controlplane.", AnyOfRoles: []string{"platform_admin"}},
-			{CommandPrefix: "runtime.", AnyOfRoles: []string{"platform_admin", "workspace_operator"}},
-			{CommandPrefix: "platform.audit.", AnyOfRoles: []string{"platform_admin"}},
-		},
+		defaultPolicyRules,
+		policyRules.List,
 	)
 
 	pipeline := shared.NewPipeline(shared.PipelineDeps{
@@ -84,6 +88,7 @@ func NewContainer(cfg Config) *Container {
 			Sessions:        controlPlaneStore.SessionRepository(),
 			Tasks:           controlPlaneStore.TaskRepository(),
 			AuditReader:     auditRecorder,
+			PolicyRules:     policyRules,
 			WorkspaceEvents: workspaceGateway,
 			Pipeline:        pipeline,
 		}),

@@ -4,6 +4,8 @@ import (
 	"context"
 	"strings"
 	"sync"
+
+	"github.com/nikkofu/erp-claw/internal/platform/policy"
 )
 
 // Recorder persists audit records emitted by the command pipeline.
@@ -13,7 +15,12 @@ type Recorder interface {
 
 type Query struct {
 	TenantID    string
+	ActorID     string
+	Decision    policy.Decision
+	Outcome     string
 	CommandName string
+	CommandPrefix string
+	Offset      int
 	Limit       int
 }
 
@@ -64,7 +71,15 @@ func (r *InMemoryRecorder) List(_ context.Context, query Query) ([]Record, error
 	defer r.mu.Unlock()
 
 	tenantID := strings.TrimSpace(query.TenantID)
+	actorID := strings.TrimSpace(query.ActorID)
+	outcome := strings.TrimSpace(query.Outcome)
 	commandName := strings.TrimSpace(query.CommandName)
+	commandPrefix := strings.TrimSpace(query.CommandPrefix)
+	offset := query.Offset
+	if offset < 0 {
+		offset = 0
+	}
+	skipped := 0
 
 	out := make([]Record, 0, len(r.records))
 	for idx := len(r.records) - 1; idx >= 0; idx-- {
@@ -72,7 +87,23 @@ func (r *InMemoryRecorder) List(_ context.Context, query Query) ([]Record, error
 		if tenantID != "" && record.TenantID != tenantID {
 			continue
 		}
+		if actorID != "" && record.ActorID != actorID {
+			continue
+		}
+		if query.Decision != "" && record.Decision != query.Decision {
+			continue
+		}
+		if outcome != "" && record.Outcome != outcome {
+			continue
+		}
 		if commandName != "" && record.CommandName != commandName {
+			continue
+		}
+		if commandPrefix != "" && !strings.HasPrefix(record.CommandName, commandPrefix) {
+			continue
+		}
+		if skipped < offset {
+			skipped++
 			continue
 		}
 		out = append(out, record)

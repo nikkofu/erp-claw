@@ -14,6 +14,7 @@ import (
 	"github.com/nikkofu/erp-claw/internal/interfaces/http/presenter"
 	"github.com/nikkofu/erp-claw/internal/platform/audit"
 	"github.com/nikkofu/erp-claw/internal/platform/iam"
+	"github.com/nikkofu/erp-claw/internal/platform/policy"
 	platformruntime "github.com/nikkofu/erp-claw/internal/platform/runtime"
 	"github.com/nikkofu/erp-claw/internal/platform/tenant"
 )
@@ -44,6 +45,44 @@ func registerControlPlaneRoutes(rg *gin.RouterGroup, container *bootstrap.Contai
 		presenter.OK(c, tenantResponse(created))
 	})
 
+	controlGroup.GET("/tenants", func(c *gin.Context) {
+		tenants, err := container.ControlPlane.ListTenants(c.Request.Context(), controlplane.ListTenantsInput{
+			OperatorTenantID: tenantIDFromContext(c),
+			OperatorActorID:  actorIDFromContext(c),
+		})
+		if err != nil {
+			renderControlPlaneError(c, err)
+			return
+		}
+		presenter.OK(c, gin.H{"tenants": tenantListResponse(tenants)})
+	})
+
+	controlGroup.GET("/tenants/:code", func(c *gin.Context) {
+		value, err := container.ControlPlane.GetTenant(c.Request.Context(), controlplane.GetTenantInput{
+			OperatorTenantID: tenantIDFromContext(c),
+			OperatorActorID:  actorIDFromContext(c),
+			Code:             c.Param("code"),
+		})
+		if err != nil {
+			renderControlPlaneError(c, err)
+			return
+		}
+		presenter.OK(c, tenantResponse(value))
+	})
+
+	controlGroup.DELETE("/tenants/:code", func(c *gin.Context) {
+		err := container.ControlPlane.DeleteTenant(c.Request.Context(), controlplane.DeleteTenantInput{
+			OperatorTenantID: tenantIDFromContext(c),
+			OperatorActorID:  actorIDFromContext(c),
+			Code:             c.Param("code"),
+		})
+		if err != nil {
+			renderControlPlaneError(c, err)
+			return
+		}
+		presenter.OK(c, gin.H{"deleted": true})
+	})
+
 	controlGroup.POST("/actors", func(c *gin.Context) {
 		var req upsertActorRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
@@ -64,6 +103,124 @@ func registerControlPlaneRoutes(rg *gin.RouterGroup, container *bootstrap.Contai
 			return
 		}
 		presenter.OK(c, actorResponse(actor))
+	})
+
+	controlGroup.GET("/actors", func(c *gin.Context) {
+		limit, err := parseLimit(c.Query("limit"), 20)
+		if err != nil {
+			presenter.Error(c, http.StatusBadRequest, err.Error())
+			return
+		}
+		offset, err := parseOffset(c.Query("offset"))
+		if err != nil {
+			presenter.Error(c, http.StatusBadRequest, err.Error())
+			return
+		}
+
+		actors, err := container.ControlPlane.ListActors(c.Request.Context(), controlplane.ListActorsInput{
+			OperatorTenantID: tenantIDFromContext(c),
+			OperatorActorID:  actorIDFromContext(c),
+			TenantID:         c.Query("tenant_id"),
+			Role:             c.Query("role"),
+			DepartmentID:     c.Query("department_id"),
+			Offset:           offset,
+			Limit:            limit,
+		})
+		if err != nil {
+			renderControlPlaneError(c, err)
+			return
+		}
+		presenter.OK(c, gin.H{"actors": actorListResponse(actors)})
+	})
+
+	controlGroup.GET("/actors/:id", func(c *gin.Context) {
+		actor, err := container.ControlPlane.GetActor(c.Request.Context(), controlplane.GetActorInput{
+			OperatorTenantID: tenantIDFromContext(c),
+			OperatorActorID:  actorIDFromContext(c),
+			TenantID:         c.Query("tenant_id"),
+			ActorID:          c.Param("id"),
+		})
+		if err != nil {
+			renderControlPlaneError(c, err)
+			return
+		}
+		presenter.OK(c, actorResponse(actor))
+	})
+
+	controlGroup.DELETE("/actors/:id", func(c *gin.Context) {
+		err := container.ControlPlane.DeleteActor(c.Request.Context(), controlplane.DeleteActorInput{
+			OperatorTenantID: tenantIDFromContext(c),
+			OperatorActorID:  actorIDFromContext(c),
+			TenantID:         c.Query("tenant_id"),
+			ActorID:          c.Param("id"),
+		})
+		if err != nil {
+			renderControlPlaneError(c, err)
+			return
+		}
+		presenter.OK(c, gin.H{"deleted": true})
+	})
+
+	controlGroup.POST("/policy/rules", func(c *gin.Context) {
+		var req upsertPolicyRuleRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			presenter.Error(c, http.StatusBadRequest, err.Error())
+			return
+		}
+
+		rule, err := container.ControlPlane.UpsertPolicyRule(c.Request.Context(), controlplane.UpsertPolicyRuleInput{
+			OperatorTenantID: tenantIDFromContext(c),
+			OperatorActorID:  actorIDFromContext(c),
+			TenantID:         req.TenantID,
+			CommandPrefix:    req.CommandPrefix,
+			AnyOfRoles:       req.AnyOfRoles,
+		})
+		if err != nil {
+			renderControlPlaneError(c, err)
+			return
+		}
+		presenter.OK(c, policyRuleResponse(rule))
+	})
+
+	controlGroup.GET("/policy/rules", func(c *gin.Context) {
+		limit, err := parseLimit(c.Query("limit"), 20)
+		if err != nil {
+			presenter.Error(c, http.StatusBadRequest, err.Error())
+			return
+		}
+		offset, err := parseOffset(c.Query("offset"))
+		if err != nil {
+			presenter.Error(c, http.StatusBadRequest, err.Error())
+			return
+		}
+
+		rules, err := container.ControlPlane.ListPolicyRules(c.Request.Context(), controlplane.ListPolicyRulesInput{
+			OperatorTenantID: tenantIDFromContext(c),
+			OperatorActorID:  actorIDFromContext(c),
+			TenantID:         c.Query("tenant_id"),
+			CommandPrefix:    c.Query("command_prefix"),
+			Offset:           offset,
+			Limit:            limit,
+		})
+		if err != nil {
+			renderControlPlaneError(c, err)
+			return
+		}
+		presenter.OK(c, gin.H{"rules": policyRuleListResponse(rules)})
+	})
+
+	controlGroup.DELETE("/policy/rules", func(c *gin.Context) {
+		err := container.ControlPlane.DeletePolicyRule(c.Request.Context(), controlplane.DeletePolicyRuleInput{
+			OperatorTenantID: tenantIDFromContext(c),
+			OperatorActorID:  actorIDFromContext(c),
+			TenantID:         c.Query("tenant_id"),
+			CommandPrefix:    c.Query("command_prefix"),
+		})
+		if err != nil {
+			renderControlPlaneError(c, err)
+			return
+		}
+		presenter.OK(c, gin.H{"deleted": true})
 	})
 
 	agentGroup := rg.Group("/agent")
@@ -87,8 +244,53 @@ func registerControlPlaneRoutes(rg *gin.RouterGroup, container *bootstrap.Contai
 		presenter.OK(c, sessionResponse(session))
 	})
 
+	agentGroup.GET("/sessions", func(c *gin.Context) {
+		status, err := parseSessionStatus(c.Query("status"))
+		if err != nil {
+			renderControlPlaneError(c, err)
+			return
+		}
+		limit, err := parseLimit(c.Query("limit"), 20)
+		if err != nil {
+			presenter.Error(c, http.StatusBadRequest, err.Error())
+			return
+		}
+		offset, err := parseOffset(c.Query("offset"))
+		if err != nil {
+			presenter.Error(c, http.StatusBadRequest, err.Error())
+			return
+		}
+
+		sessions, err := container.ControlPlane.ListSessions(c.Request.Context(), controlplane.ListSessionsInput{
+			TenantID:     tenantIDFromContext(c),
+			ActorID:      actorIDFromContext(c),
+			QueryActorID: c.Query("actor_id"),
+			Status:       status,
+			Offset:       offset,
+			Limit:        limit,
+		})
+		if err != nil {
+			renderControlPlaneError(c, err)
+			return
+		}
+		presenter.OK(c, gin.H{"sessions": sessionListResponse(sessions)})
+	})
+
 	agentGroup.GET("/sessions/:id", func(c *gin.Context) {
 		session, err := container.ControlPlane.GetSession(c.Request.Context(), controlplane.GetSessionInput{
+			TenantID:  tenantIDFromContext(c),
+			ActorID:   actorIDFromContext(c),
+			SessionID: c.Param("id"),
+		})
+		if err != nil {
+			renderControlPlaneError(c, err)
+			return
+		}
+		presenter.OK(c, sessionResponse(session))
+	})
+
+	agentGroup.POST("/sessions/:id/close", func(c *gin.Context) {
+		session, err := container.ControlPlane.CloseSession(c.Request.Context(), controlplane.CloseSessionInput{
 			TenantID:  tenantIDFromContext(c),
 			ActorID:   actorIDFromContext(c),
 			SessionID: c.Param("id"),
@@ -123,10 +325,62 @@ func registerControlPlaneRoutes(rg *gin.RouterGroup, container *bootstrap.Contai
 	})
 
 	agentGroup.GET("/sessions/:id/tasks", func(c *gin.Context) {
+		status, err := parseTaskStatus(c.Query("status"))
+		if err != nil {
+			renderControlPlaneError(c, err)
+			return
+		}
+		limit, err := parseLimit(c.Query("limit"), 20)
+		if err != nil {
+			presenter.Error(c, http.StatusBadRequest, err.Error())
+			return
+		}
+		offset, err := parseOffset(c.Query("offset"))
+		if err != nil {
+			presenter.Error(c, http.StatusBadRequest, err.Error())
+			return
+		}
+
 		tasks, err := container.ControlPlane.ListSessionTasks(c.Request.Context(), controlplane.ListSessionTasksInput{
 			TenantID:  tenantIDFromContext(c),
 			ActorID:   actorIDFromContext(c),
 			SessionID: c.Param("id"),
+			Status:    status,
+			Offset:    offset,
+			Limit:     limit,
+		})
+		if err != nil {
+			renderControlPlaneError(c, err)
+			return
+		}
+		presenter.OK(c, gin.H{"tasks": taskListResponse(tasks)})
+	})
+
+	agentGroup.GET("/tasks", func(c *gin.Context) {
+		status, err := parseTaskStatus(c.Query("status"))
+		if err != nil {
+			renderControlPlaneError(c, err)
+			return
+		}
+		limit, err := parseLimit(c.Query("limit"), 20)
+		if err != nil {
+			presenter.Error(c, http.StatusBadRequest, err.Error())
+			return
+		}
+		offset, err := parseOffset(c.Query("offset"))
+		if err != nil {
+			presenter.Error(c, http.StatusBadRequest, err.Error())
+			return
+		}
+
+		tasks, err := container.ControlPlane.ListTasks(c.Request.Context(), controlplane.ListTasksInput{
+			TenantID:     tenantIDFromContext(c),
+			ActorID:      actorIDFromContext(c),
+			SessionID:    c.Query("session_id"),
+			QueryActorID: c.Query("actor_id"),
+			Status:       status,
+			Offset:       offset,
+			Limit:        limit,
 		})
 		if err != nil {
 			renderControlPlaneError(c, err)
@@ -201,6 +455,39 @@ func registerControlPlaneRoutes(rg *gin.RouterGroup, container *bootstrap.Contai
 		presenter.OK(c, taskResponse(task))
 	})
 
+	agentGroup.POST("/tasks/:id/retry", func(c *gin.Context) {
+		task, err := container.ControlPlane.RetryTask(c.Request.Context(), controlplane.AdvanceTaskInput{
+			TenantID: tenantIDFromContext(c),
+			ActorID:  actorIDFromContext(c),
+			TaskID:   c.Param("id"),
+		})
+		if err != nil {
+			renderControlPlaneError(c, err)
+			return
+		}
+		presenter.OK(c, taskResponse(task))
+	})
+
+	agentGroup.POST("/tasks/:id/cancel", func(c *gin.Context) {
+		var req cancelTaskRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			presenter.Error(c, http.StatusBadRequest, err.Error())
+			return
+		}
+
+		task, err := container.ControlPlane.CancelTask(c.Request.Context(), controlplane.AdvanceTaskInput{
+			TenantID: tenantIDFromContext(c),
+			ActorID:  actorIDFromContext(c),
+			TaskID:   c.Param("id"),
+			Reason:   req.Reason,
+		})
+		if err != nil {
+			renderControlPlaneError(c, err)
+			return
+		}
+		presenter.OK(c, taskResponse(task))
+	})
+
 	auditGroup := rg.Group("/audit")
 	auditGroup.GET("/records", func(c *gin.Context) {
 		limit, err := parseLimit(c.Query("limit"), 20)
@@ -208,12 +495,27 @@ func registerControlPlaneRoutes(rg *gin.RouterGroup, container *bootstrap.Contai
 			presenter.Error(c, http.StatusBadRequest, err.Error())
 			return
 		}
+		offset, err := parseOffset(c.Query("offset"))
+		if err != nil {
+			presenter.Error(c, http.StatusBadRequest, err.Error())
+			return
+		}
+		decision, err := parseDecision(c.Query("decision"))
+		if err != nil {
+			presenter.Error(c, http.StatusBadRequest, err.Error())
+			return
+		}
 
 		records, err := container.ControlPlane.ListAudit(c.Request.Context(), controlplane.ListAuditInput{
-			TenantID:    tenantIDFromContext(c),
-			ActorID:     actorIDFromContext(c),
-			CommandName: c.Query("command"),
-			Limit:       limit,
+			TenantID:      tenantIDFromContext(c),
+			ActorID:       actorIDFromContext(c),
+			CommandName:   c.Query("command"),
+			CommandPrefix: c.Query("command_prefix"),
+			QueryActorID:  c.Query("actor_id"),
+			QueryDecision: decision,
+			QueryOutcome:  c.Query("outcome"),
+			Offset:        offset,
+			Limit:         limit,
 		})
 		if err != nil {
 			renderControlPlaneError(c, err)
@@ -254,24 +556,40 @@ type failTaskRequest struct {
 	Reason string `json:"reason"`
 }
 
+type cancelTaskRequest struct {
+	Reason string `json:"reason"`
+}
+
+type upsertPolicyRuleRequest struct {
+	TenantID      string   `json:"tenant_id"`
+	CommandPrefix string   `json:"command_prefix"`
+	AnyOfRoles    []string `json:"any_of_roles"`
+}
+
 func renderControlPlaneError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, shared.ErrPolicyDenied):
 		presenter.Error(c, http.StatusForbidden, err.Error())
 	case errors.Is(err, shared.ErrApprovalRequired):
 		presenter.Error(c, http.StatusConflict, err.Error())
+	case errors.Is(err, platformruntime.ErrTaskRetryLimitExceeded):
+		presenter.Error(c, http.StatusConflict, err.Error())
 	case errors.Is(err, tenant.ErrTenantNotFound),
 		errors.Is(err, iam.ErrActorNotFound),
+		errors.Is(err, policy.ErrRuleNotFound),
 		errors.Is(err, platformruntime.ErrSessionNotFound),
 		errors.Is(err, platformruntime.ErrTaskNotFound):
 		presenter.Error(c, http.StatusNotFound, err.Error())
 	case errors.Is(err, tenant.ErrInvalidTenant),
 		errors.Is(err, iam.ErrInvalidActor),
+		errors.Is(err, policy.ErrInvalidRule),
 		errors.Is(err, platformruntime.ErrInvalidSession),
 		errors.Is(err, platformruntime.ErrInvalidTask),
 		errors.Is(err, platformruntime.ErrInvalidSessionTransition),
 		errors.Is(err, platformruntime.ErrInvalidTaskTransition):
 		presenter.Error(c, http.StatusBadRequest, err.Error())
+	case errors.Is(err, controlplane.ErrPolicyRuleStoreUnavailable):
+		presenter.Error(c, http.StatusServiceUnavailable, err.Error())
 	default:
 		presenter.Error(c, http.StatusInternalServerError, err.Error())
 	}
@@ -292,6 +610,22 @@ func actorResponse(value iam.Actor) gin.H {
 		"roles":         append([]string(nil), value.Roles...),
 		"department_id": value.DepartmentID,
 	}
+}
+
+func tenantListResponse(values []tenant.Tenant) []gin.H {
+	out := make([]gin.H, 0, len(values))
+	for _, value := range values {
+		out = append(out, tenantResponse(value))
+	}
+	return out
+}
+
+func actorListResponse(values []iam.Actor) []gin.H {
+	out := make([]gin.H, 0, len(values))
+	for _, value := range values {
+		out = append(out, actorResponse(value))
+	}
+	return out
 }
 
 func sessionResponse(value platformruntime.Session) gin.H {
@@ -339,10 +673,33 @@ func auditRecordsResponse(records []audit.Record) []gin.H {
 	return out
 }
 
+func policyRuleResponse(value policy.Rule) gin.H {
+	return gin.H{
+		"command_prefix": value.CommandPrefix,
+		"any_of_roles":   append([]string(nil), value.AnyOfRoles...),
+	}
+}
+
+func policyRuleListResponse(rules []policy.Rule) []gin.H {
+	out := make([]gin.H, 0, len(rules))
+	for _, rule := range rules {
+		out = append(out, policyRuleResponse(rule))
+	}
+	return out
+}
+
 func taskListResponse(tasks []platformruntime.Task) []gin.H {
 	out := make([]gin.H, 0, len(tasks))
 	for _, task := range tasks {
 		out = append(out, taskResponse(task))
+	}
+	return out
+}
+
+func sessionListResponse(sessions []platformruntime.Session) []gin.H {
+	out := make([]gin.H, 0, len(sessions))
+	for _, session := range sessions {
+		out = append(out, sessionResponse(session))
 	}
 	return out
 }
@@ -367,4 +724,68 @@ func parseLimit(raw string, fallback int) (int, error) {
 		return 0, errors.New("limit must be greater than 0")
 	}
 	return limit, nil
+}
+
+func parseOffset(raw string) (int, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return 0, nil
+	}
+	offset, err := strconv.Atoi(raw)
+	if err != nil {
+		return 0, err
+	}
+	if offset < 0 {
+		return 0, errors.New("offset must be greater than or equal to 0")
+	}
+	return offset, nil
+}
+
+func parseDecision(raw string) (policy.Decision, error) {
+	value := strings.ToUpper(strings.TrimSpace(raw))
+	if value == "" {
+		return "", nil
+	}
+
+	decision := policy.Decision(value)
+	switch decision {
+	case policy.DecisionAllow, policy.DecisionAllowWithGuard, policy.DecisionRequireApproval, policy.DecisionDeny:
+		return decision, nil
+	default:
+		return "", errors.New("invalid decision filter")
+	}
+}
+
+func parseSessionStatus(raw string) (platformruntime.SessionStatus, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", nil
+	}
+
+	status := platformruntime.SessionStatus(raw)
+	switch status {
+	case platformruntime.SessionStatusOpen, platformruntime.SessionStatusClosed:
+		return status, nil
+	default:
+		return "", platformruntime.ErrInvalidSession
+	}
+}
+
+func parseTaskStatus(raw string) (platformruntime.TaskStatus, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", nil
+	}
+
+	status := platformruntime.TaskStatus(raw)
+	switch status {
+	case platformruntime.TaskStatusPending,
+		platformruntime.TaskStatusRunning,
+		platformruntime.TaskStatusSucceeded,
+		platformruntime.TaskStatusFailed,
+		platformruntime.TaskStatusCanceled:
+		return status, nil
+	default:
+		return "", platformruntime.ErrInvalidTask
+	}
 }

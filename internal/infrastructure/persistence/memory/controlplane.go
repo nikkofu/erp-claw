@@ -2,6 +2,8 @@ package memory
 
 import (
 	"context"
+	"sort"
+	"strings"
 	"sync"
 
 	"github.com/nikkofu/erp-claw/internal/platform/iam"
@@ -69,6 +71,32 @@ func (r tenantCatalogRepository) Get(_ context.Context, code string) (tenant.Ten
 	return value, nil
 }
 
+func (r tenantCatalogRepository) List(_ context.Context) ([]tenant.Tenant, error) {
+	r.store.mu.RLock()
+	defer r.store.mu.RUnlock()
+
+	out := make([]tenant.Tenant, 0, len(r.store.tenants))
+	for _, value := range r.store.tenants {
+		out = append(out, value)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].Code < out[j].Code
+	})
+	return out, nil
+}
+
+func (r tenantCatalogRepository) Delete(_ context.Context, code string) error {
+	code = strings.TrimSpace(code)
+	r.store.mu.Lock()
+	defer r.store.mu.Unlock()
+
+	if _, ok := r.store.tenants[code]; !ok {
+		return tenant.ErrTenantNotFound
+	}
+	delete(r.store.tenants, code)
+	return nil
+}
+
 type iamDirectoryRepository struct {
 	store *ControlPlaneStore
 }
@@ -90,6 +118,36 @@ func (r iamDirectoryRepository) Get(_ context.Context, tenantID, actorID string)
 	return cloneActor(actor), nil
 }
 
+func (r iamDirectoryRepository) List(_ context.Context, tenantID string) ([]iam.Actor, error) {
+	r.store.mu.RLock()
+	defer r.store.mu.RUnlock()
+
+	prefix := tenantID + "/"
+	out := make([]iam.Actor, 0)
+	for key, actor := range r.store.actors {
+		if !strings.HasPrefix(key, prefix) {
+			continue
+		}
+		out = append(out, cloneActor(actor))
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].ID < out[j].ID
+	})
+	return out, nil
+}
+
+func (r iamDirectoryRepository) Delete(_ context.Context, tenantID, actorID string) error {
+	r.store.mu.Lock()
+	defer r.store.mu.Unlock()
+
+	actorKey := key(tenantID, actorID)
+	if _, ok := r.store.actors[actorKey]; !ok {
+		return iam.ErrActorNotFound
+	}
+	delete(r.store.actors, actorKey)
+	return nil
+}
+
 type sessionRepository struct {
 	store *ControlPlaneStore
 }
@@ -109,6 +167,24 @@ func (r sessionRepository) Get(_ context.Context, tenantID, sessionID string) (p
 		return platformruntime.Session{}, platformruntime.ErrSessionNotFound
 	}
 	return cloneSession(session), nil
+}
+
+func (r sessionRepository) ListByTenant(_ context.Context, tenantID string) ([]platformruntime.Session, error) {
+	r.store.mu.RLock()
+	defer r.store.mu.RUnlock()
+
+	prefix := tenantID + "/"
+	out := make([]platformruntime.Session, 0)
+	for sessionKey, session := range r.store.sessions {
+		if !strings.HasPrefix(sessionKey, prefix) {
+			continue
+		}
+		out = append(out, cloneSession(session))
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].ID < out[j].ID
+	})
+	return out, nil
 }
 
 type taskRepository struct {
@@ -159,6 +235,24 @@ func (r taskRepository) ListBySession(_ context.Context, tenantID, sessionID str
 		}
 		out = append(out, cloneTask(task))
 	}
+	return out, nil
+}
+
+func (r taskRepository) ListByTenant(_ context.Context, tenantID string) ([]platformruntime.Task, error) {
+	r.store.mu.RLock()
+	defer r.store.mu.RUnlock()
+
+	prefix := tenantID + "/"
+	out := make([]platformruntime.Task, 0)
+	for taskKey, task := range r.store.tasks {
+		if !strings.HasPrefix(taskKey, prefix) {
+			continue
+		}
+		out = append(out, cloneTask(task))
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].ID < out[j].ID
+	})
 	return out, nil
 }
 
