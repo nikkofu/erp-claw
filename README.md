@@ -69,6 +69,21 @@ Application commands flow through a shared pipeline before any domain mutation h
 - Audit recording wraps command execution so later observability and compliance hooks share one contract.
 - Later ERP domain modules will plug into this same pipeline instead of bypassing it.
 
+## Phase 2 Wave 1 Admin Flow
+
+The first executable Phase 2 slice is now available through the admin surface. It currently uses in-memory repositories at runtime and forward-looking SQL migrations for the future PostgreSQL-backed implementation.
+
+- `POST /api/admin/v1/master-data/suppliers`
+- `POST /api/admin/v1/master-data/products`
+- `POST /api/admin/v1/master-data/warehouses`
+- `POST /api/admin/v1/procurement/purchase-orders`
+- `POST /api/admin/v1/procurement/purchase-orders/:id/submit`
+- `GET /api/admin/v1/procurement/purchase-orders/:id`
+- `POST /api/admin/v1/approvals/:id/approve`
+- `POST /api/admin/v1/approvals/:id/reject`
+
+Run `go test ./test/integration -run TestAdminSupplyChainFlow -v` to verify the end-to-end Wave 1 admin flow locally.
+
 ## Smoke Run
 
 Start the API server and hit the health endpoint to confirm the router boots:

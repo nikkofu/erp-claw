@@ -9,6 +9,7 @@ func Auth() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		rc := requestContext(c)
 		rc.ActorID = iam.SystemActor.ID
+		c.Set("actor_id", iam.SystemActor.ID)
 		c.Header("X-Actor-ID", iam.SystemActor.ID)
 		c.Next()
 	}
