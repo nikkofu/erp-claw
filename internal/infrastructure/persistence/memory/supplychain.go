@@ -19,39 +19,41 @@ type masterDataRepository struct {
 }
 
 type SupplyChainStore struct {
-	mu           sync.RWMutex
-	suppliers    map[string]masterdata.Supplier
-	products     map[string]masterdata.Product
-	warehouses   map[string]masterdata.Warehouse
-	orders       map[string]procurement.PurchaseOrder
-	requests     map[string]approval.Request
-	receipts     map[string]inventory.Receipt
-	ledger       map[string][]inventory.LedgerEntry
-	bills        map[string]payable.Bill
-	billsByPO    map[string]string
-	plans        map[string]payable.PaymentPlan
-	plansByBill  map[string][]string
-	receivables  map[string]receivable.Bill
-	reservations map[string][]inventory.Reservation
-	salesOrders  map[string]sales.Order
+	mu             sync.RWMutex
+	suppliers      map[string]masterdata.Supplier
+	products       map[string]masterdata.Product
+	warehouses     map[string]masterdata.Warehouse
+	orders         map[string]procurement.PurchaseOrder
+	requests       map[string]approval.Request
+	receipts       map[string]inventory.Receipt
+	ledger         map[string][]inventory.LedgerEntry
+	bills          map[string]payable.Bill
+	billsByPO      map[string]string
+	plans          map[string]payable.PaymentPlan
+	plansByBill    map[string][]string
+	receivables    map[string]receivable.Bill
+	reservations   map[string][]inventory.Reservation
+	transferOrders map[string]inventory.TransferOrder
+	salesOrders    map[string]sales.Order
 }
 
 func NewSupplyChainStore() *SupplyChainStore {
 	return &SupplyChainStore{
-		suppliers:    make(map[string]masterdata.Supplier),
-		products:     make(map[string]masterdata.Product),
-		warehouses:   make(map[string]masterdata.Warehouse),
-		orders:       make(map[string]procurement.PurchaseOrder),
-		requests:     make(map[string]approval.Request),
-		receipts:     make(map[string]inventory.Receipt),
-		ledger:       make(map[string][]inventory.LedgerEntry),
-		bills:        make(map[string]payable.Bill),
-		billsByPO:    make(map[string]string),
-		plans:        make(map[string]payable.PaymentPlan),
-		plansByBill:  make(map[string][]string),
-		receivables:  make(map[string]receivable.Bill),
-		reservations: make(map[string][]inventory.Reservation),
-		salesOrders:  make(map[string]sales.Order),
+		suppliers:      make(map[string]masterdata.Supplier),
+		products:       make(map[string]masterdata.Product),
+		warehouses:     make(map[string]masterdata.Warehouse),
+		orders:         make(map[string]procurement.PurchaseOrder),
+		requests:       make(map[string]approval.Request),
+		receipts:       make(map[string]inventory.Receipt),
+		ledger:         make(map[string][]inventory.LedgerEntry),
+		bills:          make(map[string]payable.Bill),
+		billsByPO:      make(map[string]string),
+		plans:          make(map[string]payable.PaymentPlan),
+		plansByBill:    make(map[string][]string),
+		receivables:    make(map[string]receivable.Bill),
+		reservations:   make(map[string][]inventory.Reservation),
+		transferOrders: make(map[string]inventory.TransferOrder),
+		salesOrders:    make(map[string]sales.Order),
 	}
 }
 
@@ -227,6 +229,37 @@ func (r *inventoryRepository) ListReservations(_ context.Context, tenantID, prod
 	out := make([]inventory.Reservation, 0, len(stored))
 	for _, reservation := range stored {
 		out = append(out, cloneReservation(reservation))
+	}
+	return out, nil
+}
+
+func (r *inventoryRepository) SaveTransferOrder(_ context.Context, order inventory.TransferOrder) error {
+	r.store.mu.Lock()
+	defer r.store.mu.Unlock()
+	r.store.transferOrders[key(order.TenantID, order.ID)] = cloneTransferOrder(order)
+	return nil
+}
+
+func (r *inventoryRepository) GetTransferOrder(_ context.Context, tenantID, transferOrderID string) (inventory.TransferOrder, error) {
+	r.store.mu.RLock()
+	defer r.store.mu.RUnlock()
+	order, ok := r.store.transferOrders[key(tenantID, transferOrderID)]
+	if !ok {
+		return inventory.TransferOrder{}, inventory.ErrTransferOrderNotFound
+	}
+	return cloneTransferOrder(order), nil
+}
+
+func (r *inventoryRepository) ListTransferOrdersByTenant(_ context.Context, tenantID string) ([]inventory.TransferOrder, error) {
+	r.store.mu.RLock()
+	defer r.store.mu.RUnlock()
+
+	out := make([]inventory.TransferOrder, 0)
+	prefix := tenantID + "/"
+	for k, order := range r.store.transferOrders {
+		if strings.HasPrefix(k, prefix) {
+			out = append(out, cloneTransferOrder(order))
+		}
 	}
 	return out, nil
 }
@@ -440,6 +473,10 @@ func cloneLedgerEntry(entry inventory.LedgerEntry) inventory.LedgerEntry {
 
 func cloneReservation(reservation inventory.Reservation) inventory.Reservation {
 	return reservation
+}
+
+func cloneTransferOrder(order inventory.TransferOrder) inventory.TransferOrder {
+	return order
 }
 
 func clonePayableBill(bill payable.Bill) payable.Bill {

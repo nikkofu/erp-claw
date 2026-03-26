@@ -474,6 +474,94 @@ func TestAdminInventoryTransferRejectsExcessQuantity(t *testing.T) {
 	}
 }
 
+func TestAdminInventoryTransferOrderWorkflow(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	container := bootstrap.NewContainer(bootstrap.DefaultConfig())
+	h := router.New(router.WithContainer(container))
+
+	supplierID := stringField(t, postJSONData(t, h, "/api/admin/v1/master-data/suppliers", map[string]any{
+		"code": "SUP-001",
+		"name": "Acme Supply",
+	}), "id")
+	productID := stringField(t, postJSONData(t, h, "/api/admin/v1/master-data/products", map[string]any{
+		"sku":  "SKU-001",
+		"name": "Copper Wire",
+		"unit": "roll",
+	}), "id")
+	sourceWarehouseID := stringField(t, postJSONData(t, h, "/api/admin/v1/master-data/warehouses", map[string]any{
+		"code": "WH-SH",
+		"name": "Shanghai Warehouse",
+	}), "id")
+	targetWarehouseID := stringField(t, postJSONData(t, h, "/api/admin/v1/master-data/warehouses", map[string]any{
+		"code": "WH-BJ",
+		"name": "Beijing Warehouse",
+	}), "id")
+
+	orderID := stringField(t, postJSONData(t, h, "/api/admin/v1/procurement/purchase-orders", map[string]any{
+		"supplier_id":  supplierID,
+		"warehouse_id": sourceWarehouseID,
+		"lines": []map[string]any{{
+			"product_id": productID,
+			"quantity":   5,
+		}},
+	}), "id")
+	submitResp := postJSONData(t, h, "/api/admin/v1/procurement/purchase-orders/"+orderID+"/submit", map[string]any{})
+	approvalID := stringField(t, nestedMap(t, submitResp, "approval"), "id")
+	postJSONData(t, h, "/api/admin/v1/approvals/"+approvalID+"/approve", map[string]any{})
+	postJSONData(t, h, "/api/admin/v1/procurement/purchase-orders/"+orderID+"/receive", map[string]any{
+		"lines": []map[string]any{{
+			"product_id": productID,
+			"quantity":   5,
+		}},
+	})
+
+	createResp := postJSONData(t, h, "/api/admin/v1/inventory/transfer-orders", map[string]any{
+		"product_id":        productID,
+		"from_warehouse_id": sourceWarehouseID,
+		"to_warehouse_id":   targetWarehouseID,
+		"quantity":          2,
+	})
+	transferOrderID := stringField(t, createResp, "id")
+	if got := stringField(t, createResp, "status"); got != "planned" {
+		t.Fatalf("expected transfer order status planned, got %s", got)
+	}
+
+	listResp := getJSONArrayData(t, h, "/api/admin/v1/inventory/transfer-orders")
+	if len(listResp) != 1 {
+		t.Fatalf("expected 1 transfer order in list, got %d", len(listResp))
+	}
+	if got := stringField(t, listResp[0], "id"); got != transferOrderID {
+		t.Fatalf("expected listed transfer order id %s, got %s", transferOrderID, got)
+	}
+
+	executeResp := postJSONData(t, h, "/api/admin/v1/inventory/transfer-orders/"+transferOrderID+"/execute", map[string]any{})
+	orderResp := nestedMap(t, executeResp, "order")
+	if got := stringField(t, orderResp, "status"); got != "executed" {
+		t.Fatalf("expected executed order status, got %s", got)
+	}
+	rawEntries, ok := executeResp["ledger_entries"].([]any)
+	if !ok {
+		t.Fatalf("expected execute ledger_entries array, got %#v", executeResp["ledger_entries"])
+	}
+	if len(rawEntries) != 2 {
+		t.Fatalf("expected 2 execute ledger entries, got %d", len(rawEntries))
+	}
+
+	orderDetail := getJSONData(t, h, "/api/admin/v1/inventory/transfer-orders/"+transferOrderID)
+	if got := stringField(t, orderDetail, "status"); got != "executed" {
+		t.Fatalf("expected transfer order detail status executed, got %s", got)
+	}
+
+	sourceBalanceResp := getJSONData(t, h, "/api/admin/v1/inventory/balances?product_id="+productID+"&warehouse_id="+sourceWarehouseID)
+	if got := intField(t, sourceBalanceResp, "on_hand"); got != 3 {
+		t.Fatalf("expected source on_hand 3, got %d", got)
+	}
+	targetBalanceResp := getJSONData(t, h, "/api/admin/v1/inventory/balances?product_id="+productID+"&warehouse_id="+targetWarehouseID)
+	if got := intField(t, targetBalanceResp, "on_hand"); got != 2 {
+		t.Fatalf("expected target on_hand 2, got %d", got)
+	}
+}
+
 func TestAdminInventoryLedgerListFlow(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	container := bootstrap.NewContainer(bootstrap.DefaultConfig())

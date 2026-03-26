@@ -69,7 +69,7 @@ Application commands flow through a shared pipeline before any domain mutation h
 - Audit recording wraps command execution so later observability and compliance hooks share one contract.
 - Later ERP domain modules will plug into this same pipeline instead of bypassing it.
 
-## Phase 2 Admin Flow (Wave 1-5 Baseline)
+## Phase 2 Admin Flow (Wave 1-6 Baseline)
 
 The first executable Phase 2 slice is now available through the admin surface. It currently uses in-memory repositories at runtime and forward-looking SQL migrations for the future PostgreSQL-backed implementation.
 
@@ -86,6 +86,10 @@ The first executable Phase 2 slice is now available through the admin surface. I
 - `POST /api/admin/v1/inventory/reservations`
 - `POST /api/admin/v1/inventory/outbounds`
 - `POST /api/admin/v1/inventory/transfers`
+- `POST /api/admin/v1/inventory/transfer-orders`
+- `GET /api/admin/v1/inventory/transfer-orders`
+- `GET /api/admin/v1/inventory/transfer-orders/:id`
+- `POST /api/admin/v1/inventory/transfer-orders/:id/execute`
 - `POST /api/admin/v1/receivables`
 - `GET /api/admin/v1/receivables`
 - `GET /api/admin/v1/receivables/:id`
@@ -100,7 +104,7 @@ The first executable Phase 2 slice is now available through the admin surface. I
 - `POST /api/admin/v1/approvals/:id/approve`
 - `POST /api/admin/v1/approvals/:id/reject`
 
-Run `go test ./test/integration -run 'TestAdminSupplyChainFlow|TestAdminInventoryReceiptFlow|TestAdminInventoryReservationFlow|TestAdminInventoryReservationRejectsExcessQuantity|TestAdminInventoryOutboundFlow|TestAdminInventoryOutboundRejectsExcessQuantity|TestAdminInventoryTransferFlow|TestAdminInventoryTransferRejectsExcessQuantity|TestAdminInventoryLedgerListFlow|TestAdminPayableFlow|TestAdminReceivableFlow|TestAdminSalesOrderShipFlow|TestAdminSalesOrderShipRejectsInsufficientInventory|TestAdminBackofficeOverviewReadModel' -v` to verify the end-to-end Phase 2 admin flow locally, including inventory reservation/outbound/transfer and ledger query, payable/receivable basics, minimal sales shipment loop, and the backoffice overview read model.
+Run `go test ./test/integration -run 'TestAdminSupplyChainFlow|TestAdminInventoryReceiptFlow|TestAdminInventoryReservationFlow|TestAdminInventoryReservationRejectsExcessQuantity|TestAdminInventoryOutboundFlow|TestAdminInventoryOutboundRejectsExcessQuantity|TestAdminInventoryTransferFlow|TestAdminInventoryTransferRejectsExcessQuantity|TestAdminInventoryTransferOrderWorkflow|TestAdminInventoryLedgerListFlow|TestAdminPayableFlow|TestAdminReceivableFlow|TestAdminSalesOrderShipFlow|TestAdminSalesOrderShipRejectsInsufficientInventory|TestAdminBackofficeOverviewReadModel' -v` to verify the end-to-end Phase 2 admin flow locally, including inventory reservation/outbound/transfer, transfer-order execution, and ledger query, payable/receivable basics, minimal sales shipment loop, and the backoffice overview read model.
 
 ## Workspace API (Phase 2 Minimal Query Slice)
 

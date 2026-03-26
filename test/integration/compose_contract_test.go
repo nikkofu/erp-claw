@@ -231,3 +231,32 @@ func TestPhase2Wave5SalesOrderMigrationContract(t *testing.T) {
 		}
 	}
 }
+
+func TestPhase2Wave6TransferOrderMigrationContract(t *testing.T) {
+	data, err := os.ReadFile("../../migrations/000009_init_phase2_wave6_transfer_order_tables.up.sql")
+	if err != nil {
+		t.Fatalf("read phase 2 wave 6 transfer order migration: %v", err)
+	}
+
+	content := string(data)
+	requiredTables := []string{
+		"transfer_order",
+	}
+	for _, table := range requiredTables {
+		if !strings.Contains(content, "create table if not exists "+table) {
+			t.Fatalf("expected migration to create table %q", table)
+		}
+	}
+
+	requiredConstraints := []string{
+		"unique (tenant_id, id)",
+		"foreign key (tenant_id, product_id) references product(tenant_id, id)",
+		"foreign key (tenant_id, from_warehouse_id) references warehouse(tenant_id, id)",
+		"foreign key (tenant_id, to_warehouse_id) references warehouse(tenant_id, id)",
+	}
+	for _, constraint := range requiredConstraints {
+		if !strings.Contains(content, constraint) {
+			t.Fatalf("expected migration to contain tenant-aware constraint %q", constraint)
+		}
+	}
+}
