@@ -534,6 +534,12 @@ func (s *Service) CancelTask(ctx context.Context, input AdvanceTaskInput) (platf
 	})
 }
 
+func (s *Service) RetryTask(ctx context.Context, input AdvanceTaskInput) (platformruntime.Task, error) {
+	return s.mutateTask(ctx, "runtime.tasks.retry", "runtime.task.requeued", input, func(task *platformruntime.Task) error {
+		return task.Retry(time.Now().UTC())
+	})
+}
+
 type GetSessionInput struct {
 	TenantID  string
 	ActorID   string

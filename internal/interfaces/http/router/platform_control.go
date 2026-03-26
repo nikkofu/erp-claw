@@ -439,6 +439,19 @@ func registerControlPlaneRoutes(rg *gin.RouterGroup, container *bootstrap.Contai
 		presenter.OK(c, taskResponse(task))
 	})
 
+	agentGroup.POST("/tasks/:id/retry", func(c *gin.Context) {
+		task, err := container.ControlPlane.RetryTask(c.Request.Context(), controlplane.AdvanceTaskInput{
+			TenantID: tenantIDFromContext(c),
+			ActorID:  actorIDFromContext(c),
+			TaskID:   c.Param("id"),
+		})
+		if err != nil {
+			renderControlPlaneError(c, err)
+			return
+		}
+		presenter.OK(c, taskResponse(task))
+	})
+
 	agentGroup.POST("/tasks/:id/cancel", func(c *gin.Context) {
 		var req cancelTaskRequest
 		if err := c.ShouldBindJSON(&req); err != nil {

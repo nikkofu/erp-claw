@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/nikkofu/erp-claw/internal/application/shared"
 	"github.com/nikkofu/erp-claw/internal/infrastructure/persistence/memory"
@@ -186,6 +187,93 @@ func TestServiceEmitsCanceledEventOnTaskCancel(t *testing.T) {
 		t.Fatalf("expected 3 workspace events, got %d", len(got))
 	}
 	assertWorkspaceEvent(t, got[2], "runtime.task.canceled", "tenant-a", session.ID, task.ID)
+}
+
+func TestServiceRetryTaskRequeuesFailedTaskAndEmitsEvent(t *testing.T) {
+	store := memory.NewControlPlaneStore()
+	sink := &recordingWorkspaceEventSink{}
+	svc := NewService(ServiceDeps{
+		TenantCatalog:   store.TenantCatalog(),
+		IAMDirectory:    store.IAMDirectory(),
+		Sessions:        store.SessionRepository(),
+		Tasks:           store.TaskRepository(),
+		WorkspaceEvents: sink,
+		Pipeline: shared.NewPipeline(shared.PipelineDeps{
+			Policy: policy.StaticEvaluator(policy.DecisionAllow),
+		}),
+	})
+
+	ctx := context.Background()
+	session, err := svc.OpenSession(ctx, OpenSessionInput{
+		TenantID:  "tenant-a",
+		ActorID:   "actor-a",
+		SessionID: "sess-001",
+	})
+	if err != nil {
+		t.Fatalf("open session: %v", err)
+	}
+	task, err := svc.EnqueueTask(ctx, EnqueueTaskInput{
+		TenantID:  "tenant-a",
+		ActorID:   "actor-a",
+		SessionID: session.ID,
+		TaskID:    "task-001",
+		TaskType:  "tool.call",
+	})
+	if err != nil {
+		t.Fatalf("enqueue task: %v", err)
+	}
+	if _, err := svc.StartTask(ctx, AdvanceTaskInput{
+		TenantID: "tenant-a",
+		ActorID:  "actor-a",
+		TaskID:   task.ID,
+	}); err != nil {
+		t.Fatalf("start task: %v", err)
+	}
+	if _, err := svc.FailTask(ctx, AdvanceTaskInput{
+		TenantID: "tenant-a",
+		ActorID:  "actor-a",
+		TaskID:   task.ID,
+		Reason:   "tool timeout",
+	}); err != nil {
+		t.Fatalf("fail task: %v", err)
+	}
+
+	retried, err := svc.RetryTask(ctx, AdvanceTaskInput{
+		TenantID: "tenant-a",
+		ActorID:  "actor-a",
+		TaskID:   task.ID,
+	})
+	if err != nil {
+		t.Fatalf("retry task: %v", err)
+	}
+	if retried.Status != platformruntime.TaskStatusPending {
+		t.Fatalf("expected task pending after retry, got %s", retried.Status)
+	}
+	if retried.FailureReason != "" {
+		t.Fatalf("expected empty failure reason after retry, got %q", retried.FailureReason)
+	}
+	if !retried.CompletedAt.IsZero() {
+		t.Fatalf("expected completed_at reset after retry, got %s", retried.CompletedAt.Format(time.RFC3339))
+	}
+
+	restarted, err := svc.StartTask(ctx, AdvanceTaskInput{
+		TenantID: "tenant-a",
+		ActorID:  "actor-a",
+		TaskID:   task.ID,
+	})
+	if err != nil {
+		t.Fatalf("restart task: %v", err)
+	}
+	if restarted.Attempts != 2 {
+		t.Fatalf("expected attempts to be 2 after retry and restart, got %d", restarted.Attempts)
+	}
+
+	got := sink.Events()
+	if len(got) != 6 {
+		t.Fatalf("expected 6 workspace events, got %d", len(got))
+	}
+	assertWorkspaceEvent(t, got[4], "runtime.task.requeued", "tenant-a", session.ID, task.ID)
+	assertWorkspaceEvent(t, got[5], "runtime.task.running", "tenant-a", session.ID, task.ID)
 }
 
 func TestServiceCloseSessionEmitsWorkspaceEventAndRejectsEnqueueOnClosedSession(t *testing.T) {

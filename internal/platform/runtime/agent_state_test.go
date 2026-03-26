@@ -111,3 +111,37 @@ func TestTaskCannotCancelAfterCompletion(t *testing.T) {
 		t.Fatalf("expected ErrInvalidTaskTransition, got %v", err)
 	}
 }
+
+func TestTaskCanRetryFromFailed(t *testing.T) {
+	now := time.Date(2026, 3, 26, 8, 0, 0, 0, time.UTC)
+	task, err := NewTask("task-001", "tenant-admin", "sess-001", "tool.call", nil, now)
+	if err != nil {
+		t.Fatalf("new task: %v", err)
+	}
+	if err := task.Start(now.Add(time.Minute)); err != nil {
+		t.Fatalf("start task: %v", err)
+	}
+	if err := task.Fail("tool timeout", now.Add(2*time.Minute)); err != nil {
+		t.Fatalf("fail task: %v", err)
+	}
+
+	requeuedAt := now.Add(3 * time.Minute)
+	if err := task.Retry(requeuedAt); err != nil {
+		t.Fatalf("retry task: %v", err)
+	}
+	if task.Status != TaskStatusPending {
+		t.Fatalf("expected pending after retry, got %s", task.Status)
+	}
+	if task.FailureReason != "" {
+		t.Fatalf("expected empty failure reason after retry, got %q", task.FailureReason)
+	}
+	if !task.QueuedAt.Equal(requeuedAt) {
+		t.Fatalf("expected queued_at to be reset to retry time, got %s", task.QueuedAt.Format(time.RFC3339))
+	}
+	if !task.StartedAt.IsZero() {
+		t.Fatalf("expected started_at reset on retry, got %s", task.StartedAt.Format(time.RFC3339))
+	}
+	if !task.CompletedAt.IsZero() {
+		t.Fatalf("expected completed_at reset on retry, got %s", task.CompletedAt.Format(time.RFC3339))
+	}
+}

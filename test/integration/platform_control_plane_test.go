@@ -205,6 +205,46 @@ func TestPlatformControlPlaneTaskCancelFlow(t *testing.T) {
 	}
 }
 
+func TestPlatformControlPlaneTaskRetryFlow(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	container := bootstrap.NewContainer(bootstrap.DefaultConfig())
+	h := router.New(router.WithContainer(container))
+
+	postJSONData(t, h, "/api/platform/v1/agent/sessions", map[string]any{
+		"session_id": "sess-retry-001",
+		"metadata": map[string]any{
+			"channel": "workspace",
+		},
+	})
+	postJSONData(t, h, "/api/platform/v1/agent/sessions/sess-retry-001/tasks", map[string]any{
+		"task_id":   "task-retry-001",
+		"task_type": "tool.call",
+		"input": map[string]any{
+			"tool": "search",
+		},
+	})
+	postJSONData(t, h, "/api/platform/v1/agent/tasks/task-retry-001/start", map[string]any{})
+	postJSONData(t, h, "/api/platform/v1/agent/tasks/task-retry-001/fail", map[string]any{
+		"reason": "tool timeout",
+	})
+
+	retried := postJSONData(t, h, "/api/platform/v1/agent/tasks/task-retry-001/retry", map[string]any{})
+	if got := stringField(t, retried, "status"); got != "pending" {
+		t.Fatalf("expected pending after retry, got %s", got)
+	}
+	if got := stringField(t, retried, "failure_reason"); got != "" {
+		t.Fatalf("expected empty failure reason after retry, got %s", got)
+	}
+
+	restarted := postJSONData(t, h, "/api/platform/v1/agent/tasks/task-retry-001/start", map[string]any{})
+	if got := stringField(t, restarted, "status"); got != "running" {
+		t.Fatalf("expected running after restart, got %s", got)
+	}
+	if got := intField(t, restarted, "attempts"); got != 2 {
+		t.Fatalf("expected attempts 2 after retry/restart, got %d", got)
+	}
+}
+
 func TestPlatformControlPlaneCloseSessionRejectedWhenTaskActive(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	container := bootstrap.NewContainer(bootstrap.DefaultConfig())

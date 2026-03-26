@@ -145,6 +145,19 @@ func (t *Task) Cancel(reason string, at time.Time) error {
 	return nil
 }
 
+func (t *Task) Retry(at time.Time) error {
+	if t.Status != TaskStatusFailed && t.Status != TaskStatusCanceled {
+		return ErrInvalidTaskTransition
+	}
+	t.Status = TaskStatusPending
+	t.Output = map[string]any{}
+	t.FailureReason = ""
+	t.QueuedAt = normalizeNow(at)
+	t.StartedAt = time.Time{}
+	t.CompletedAt = time.Time{}
+	return nil
+}
+
 func normalizeNow(ts time.Time) time.Time {
 	if ts.IsZero() {
 		return time.Now().UTC()
