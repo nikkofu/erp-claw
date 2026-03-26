@@ -54,3 +54,33 @@ func TestNewModelCatalogEntryPopulatesFields(t *testing.T) {
 		t.Fatalf("created at seems too old: %s", entry.CreatedAt)
 	}
 }
+
+func TestModelCatalogEntryStatusHelpers(t *testing.T) {
+	t.Parallel()
+
+	entry, err := NewModelCatalogEntry("tenant", "entry-1", "model-key", "Model Name", "provider", "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !entry.IsActive() {
+		t.Fatalf("expected empty status to normalize to active")
+	}
+
+	updatedAt := entry.UpdatedAt
+	if err := entry.SetStatus(CatalogStatusInactive); err != nil {
+		t.Fatalf("unexpected set status error: %v", err)
+	}
+	if entry.IsActive() {
+		t.Fatalf("expected entry to become inactive")
+	}
+	if entry.Status != CatalogStatusInactive {
+		t.Fatalf("unexpected status: %s", entry.Status)
+	}
+	if !entry.UpdatedAt.After(updatedAt) {
+		t.Fatalf("expected updated at to advance")
+	}
+
+	if err := entry.SetStatus("unsupported"); err != ErrCatalogEntryStatusInvalid {
+		t.Fatalf("expected invalid status error, got %v", err)
+	}
+}

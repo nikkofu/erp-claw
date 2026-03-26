@@ -110,12 +110,17 @@ func ensureModelEntryIDs(ctx context.Context, models modelCatalogReader, tenantI
 		return err
 	}
 	index := make(map[string]struct{}, len(available))
+	active := make(map[string]bool, len(available))
 	for _, entry := range available {
 		index[entry.EntryID] = struct{}{}
+		active[entry.EntryID] = entry.IsActive()
 	}
 	for _, entryID := range entryIDs {
 		if _, ok := index[entryID]; !ok {
 			return fmt.Errorf("model catalog entry %q not found", entryID)
+		}
+		if !active[entryID] {
+			return fmt.Errorf("model catalog entry %q is inactive", entryID)
 		}
 	}
 	return nil
@@ -127,12 +132,17 @@ func ensureToolEntryIDs(ctx context.Context, tools toolCatalogReader, tenantID s
 		return err
 	}
 	index := make(map[string]struct{}, len(available))
+	active := make(map[string]bool, len(available))
 	for _, entry := range available {
 		index[entry.EntryID] = struct{}{}
+		active[entry.EntryID] = entry.IsActive()
 	}
 	for _, entryID := range entryIDs {
 		if _, ok := index[entryID]; !ok {
 			return fmt.Errorf("tool catalog entry %q not found", entryID)
+		}
+		if !active[entryID] {
+			return fmt.Errorf("tool catalog entry %q is inactive", entryID)
 		}
 	}
 	return nil

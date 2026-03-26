@@ -76,6 +76,15 @@ The control plane now exposes a minimal governed allowlist surface for agent cap
 - Tenant-local validation for agent profile IDs, model catalog entry IDs, and tool catalog entry IDs
 - Replace semantics on write, with normalized and deduplicated model/tool entry reads
 
+The capability catalog also now has a tenant enablement baseline.
+
+- `POST /api/admin/v1/model-catalog-entries/:entry_id/activate`
+- `POST /api/admin/v1/model-catalog-entries/:entry_id/deactivate`
+- `POST /api/admin/v1/tool-catalog-entries/:entry_id/activate`
+- `POST /api/admin/v1/tool-catalog-entries/:entry_id/deactivate`
+- Future capability policy writes reject inactive catalog entries
+- Existing capability bindings remain queryable after deactivation; runtime-side enforcement is still a later Phase 1/Phase 3 concern
+
 This is still not the full capability governance system. Tenant enablement, plugin registry, quota, feature flags, and runtime-side enforcement remain outside this Phase 1 slice.
 
 ## Outbox Operator Slice (Phase 1)

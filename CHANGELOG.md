@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.8] - 2026-03-26
+
+### Added
+
+- Tenant-scoped activate/deactivate lifecycle for model catalog entries and tool catalog entries through the Admin API.
+- Capability application handlers that manage catalog entry status and reject future agent capability policy writes when referenced model/tool entries are inactive.
+- Integration coverage that pins tenant enablement behavior, unknown-tenant mutation rejection, inactive-binding rejection, and the explicit contract that deactivation does not rewrite existing capability bindings.
+
+### Changed
+
+- Phase 1 docs and README now reflect that capability governance includes a tenant enablement baseline, while plugin registry, feature flags, quota, and runtime-side capability enforcement remain pending.
+
 ## [0.2.7] - 2026-03-26
 
 ### Added

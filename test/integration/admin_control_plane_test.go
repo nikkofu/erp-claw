@@ -394,6 +394,74 @@ func TestAdminCapabilityCatalogRoutes(t *testing.T) {
 	}
 }
 
+func TestAdminCapabilityTenantEnablementRoutes(t *testing.T) {
+	h := router.New(router.WithContainer(bootstrap.NewTestContainer()))
+
+	tenantID := createAdminEntityAndReadID(t, h, http.MethodPost, "/api/admin/v1/tenants", `{"code":"tenant-capability-enable","name":"Tenant Capability Enablement"}`, "platform-root")
+	createAdminNoID(t, h, http.MethodPost, "/api/admin/v1/model-catalog-entries", `{"entry_id":"model-1","model_key":"gpt-5.4","display_name":"GPT 5.4","provider":"openai","status":"active"}`, tenantID)
+	createAdminNoID(t, h, http.MethodPost, "/api/admin/v1/tool-catalog-entries", `{"entry_id":"tool-1","tool_key":"purchase.submit","display_name":"Purchase Submit","risk_level":"medium","status":"active"}`, tenantID)
+
+	modelDeactivateReq := httptest.NewRequest(http.MethodPost, "/api/admin/v1/model-catalog-entries/model-1/deactivate", strings.NewReader(`{"tenant_id":"`+tenantID+`"}`))
+	modelDeactivateReq.Header.Set("Content-Type", "application/json")
+	modelDeactivateReq.Header.Set("X-Tenant-ID", tenantID)
+	modelDeactivateRec := httptest.NewRecorder()
+	h.ServeHTTP(modelDeactivateRec, modelDeactivateReq)
+	if modelDeactivateRec.Code != http.StatusCreated {
+		t.Fatalf("expected model deactivate 201, got %d: %s", modelDeactivateRec.Code, modelDeactivateRec.Body.String())
+	}
+
+	toolDeactivateReq := httptest.NewRequest(http.MethodPost, "/api/admin/v1/tool-catalog-entries/tool-1/deactivate", strings.NewReader(`{"tenant_id":"`+tenantID+`"}`))
+	toolDeactivateReq.Header.Set("Content-Type", "application/json")
+	toolDeactivateReq.Header.Set("X-Tenant-ID", tenantID)
+	toolDeactivateRec := httptest.NewRecorder()
+	h.ServeHTTP(toolDeactivateRec, toolDeactivateReq)
+	if toolDeactivateRec.Code != http.StatusCreated {
+		t.Fatalf("expected tool deactivate 201, got %d: %s", toolDeactivateRec.Code, toolDeactivateRec.Body.String())
+	}
+
+	modelsReq := httptest.NewRequest(http.MethodGet, "/api/admin/v1/model-catalog-entries?tenant_id="+tenantID, nil)
+	modelsReq.Header.Set("X-Tenant-ID", tenantID)
+	modelsRec := httptest.NewRecorder()
+	h.ServeHTTP(modelsRec, modelsReq)
+	if modelsRec.Code != http.StatusOK {
+		t.Fatalf("expected model catalog list 200, got %d: %s", modelsRec.Code, modelsRec.Body.String())
+	}
+	if !strings.Contains(modelsRec.Body.String(), `"Status":"inactive"`) {
+		t.Fatalf("expected model catalog response to contain inactive status, got %s", modelsRec.Body.String())
+	}
+
+	modelActivateReq := httptest.NewRequest(http.MethodPost, "/api/admin/v1/model-catalog-entries/model-1/activate", strings.NewReader(`{"tenant_id":"`+tenantID+`"}`))
+	modelActivateReq.Header.Set("Content-Type", "application/json")
+	modelActivateReq.Header.Set("X-Tenant-ID", tenantID)
+	modelActivateRec := httptest.NewRecorder()
+	h.ServeHTTP(modelActivateRec, modelActivateReq)
+	if modelActivateRec.Code != http.StatusCreated {
+		t.Fatalf("expected model activate 201, got %d: %s", modelActivateRec.Code, modelActivateRec.Body.String())
+	}
+
+	modelsRec = httptest.NewRecorder()
+	h.ServeHTTP(modelsRec, modelsReq)
+	if modelsRec.Code != http.StatusOK {
+		t.Fatalf("expected model catalog list 200 after activate, got %d: %s", modelsRec.Code, modelsRec.Body.String())
+	}
+	if !strings.Contains(modelsRec.Body.String(), `"Status":"active"`) {
+		t.Fatalf("expected model catalog response to contain active status, got %s", modelsRec.Body.String())
+	}
+}
+
+func TestAdminCapabilityTenantEnablementRejectsUnknownTenantMutation(t *testing.T) {
+	h := router.New(router.WithContainer(bootstrap.NewTestContainer()))
+
+	req := httptest.NewRequest(http.MethodPost, "/api/admin/v1/model-catalog-entries/model-missing/deactivate", strings.NewReader(`{"tenant_id":"tenant-missing"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Tenant-ID", "tenant-missing")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected unknown tenant capability mutation 400, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestAdminAgentCapabilityPolicyRoutes(t *testing.T) {
 	h := router.New(router.WithContainer(bootstrap.NewTestContainer()))
 
@@ -443,6 +511,74 @@ func TestAdminAgentCapabilityPolicyRejectsUnknownCatalogEntries(t *testing.T) {
 	}
 	if !strings.Contains(putRec.Body.String(), "model-missing") {
 		t.Fatalf("expected missing model id in error, got %s", putRec.Body.String())
+	}
+}
+
+func TestAdminAgentCapabilityPolicyRejectsInactiveCatalogEntries(t *testing.T) {
+	h := router.New(router.WithContainer(bootstrap.NewTestContainer()))
+
+	tenantID := createAdminEntityAndReadID(t, h, http.MethodPost, "/api/admin/v1/tenants", `{"code":"tenant-cap-policy-inactive","name":"Tenant Capability Policy Inactive"}`, "platform-root")
+	profileID := createAdminEntityAndReadID(t, h, http.MethodPost, "/api/admin/v1/agent-profiles", `{"tenant_id":"`+tenantID+`","name":"buyer-agent","model":"gpt-5.4"}`, tenantID)
+	createAdminNoID(t, h, http.MethodPost, "/api/admin/v1/model-catalog-entries", `{"entry_id":"model-1","model_key":"gpt-5.4","display_name":"GPT 5.4","provider":"openai","status":"active"}`, tenantID)
+	createAdminNoID(t, h, http.MethodPost, "/api/admin/v1/tool-catalog-entries", `{"entry_id":"tool-1","tool_key":"purchase.submit","display_name":"Purchase Submit","risk_level":"medium","status":"active"}`, tenantID)
+
+	modelDeactivateReq := httptest.NewRequest(http.MethodPost, "/api/admin/v1/model-catalog-entries/model-1/deactivate", strings.NewReader(`{"tenant_id":"`+tenantID+`"}`))
+	modelDeactivateReq.Header.Set("Content-Type", "application/json")
+	modelDeactivateReq.Header.Set("X-Tenant-ID", tenantID)
+	modelDeactivateRec := httptest.NewRecorder()
+	h.ServeHTTP(modelDeactivateRec, modelDeactivateReq)
+	if modelDeactivateRec.Code != http.StatusCreated {
+		t.Fatalf("expected model deactivate 201, got %d: %s", modelDeactivateRec.Code, modelDeactivateRec.Body.String())
+	}
+
+	putReq := httptest.NewRequest(http.MethodPut, "/api/admin/v1/agent-profiles/"+profileID+"/capability-policy", strings.NewReader(`{"allowed_model_entry_ids":["model-1"],"allowed_tool_entry_ids":["tool-1"]}`))
+	putReq.Header.Set("Content-Type", "application/json")
+	putReq.Header.Set("X-Tenant-ID", tenantID)
+	putRec := httptest.NewRecorder()
+	h.ServeHTTP(putRec, putReq)
+	if putRec.Code != http.StatusBadRequest {
+		t.Fatalf("expected capability policy put 400 for inactive model, got %d: %s", putRec.Code, putRec.Body.String())
+	}
+	if !strings.Contains(strings.ToLower(putRec.Body.String()), "inactive") {
+		t.Fatalf("expected inactive status in error, got %s", putRec.Body.String())
+	}
+}
+
+func TestAdminCapabilityTenantEnablementKeepsExistingBindingAfterDeactivation(t *testing.T) {
+	h := router.New(router.WithContainer(bootstrap.NewTestContainer()))
+
+	tenantID := createAdminEntityAndReadID(t, h, http.MethodPost, "/api/admin/v1/tenants", `{"code":"tenant-cap-policy-stale","name":"Tenant Capability Policy Stale"}`, "platform-root")
+	profileID := createAdminEntityAndReadID(t, h, http.MethodPost, "/api/admin/v1/agent-profiles", `{"tenant_id":"`+tenantID+`","name":"buyer-agent","model":"gpt-5.4"}`, tenantID)
+	createAdminNoID(t, h, http.MethodPost, "/api/admin/v1/model-catalog-entries", `{"entry_id":"model-1","model_key":"gpt-5.4","display_name":"GPT 5.4","provider":"openai","status":"active"}`, tenantID)
+	createAdminNoID(t, h, http.MethodPost, "/api/admin/v1/tool-catalog-entries", `{"entry_id":"tool-1","tool_key":"purchase.submit","display_name":"Purchase Submit","risk_level":"medium","status":"active"}`, tenantID)
+
+	putReq := httptest.NewRequest(http.MethodPut, "/api/admin/v1/agent-profiles/"+profileID+"/capability-policy", strings.NewReader(`{"allowed_model_entry_ids":["model-1"],"allowed_tool_entry_ids":["tool-1"]}`))
+	putReq.Header.Set("Content-Type", "application/json")
+	putReq.Header.Set("X-Tenant-ID", tenantID)
+	putRec := httptest.NewRecorder()
+	h.ServeHTTP(putRec, putReq)
+	if putRec.Code != http.StatusOK {
+		t.Fatalf("expected capability policy put 200, got %d: %s", putRec.Code, putRec.Body.String())
+	}
+
+	modelDeactivateReq := httptest.NewRequest(http.MethodPost, "/api/admin/v1/model-catalog-entries/model-1/deactivate", strings.NewReader(`{"tenant_id":"`+tenantID+`"}`))
+	modelDeactivateReq.Header.Set("Content-Type", "application/json")
+	modelDeactivateReq.Header.Set("X-Tenant-ID", tenantID)
+	modelDeactivateRec := httptest.NewRecorder()
+	h.ServeHTTP(modelDeactivateRec, modelDeactivateReq)
+	if modelDeactivateRec.Code != http.StatusCreated {
+		t.Fatalf("expected model deactivate 201, got %d: %s", modelDeactivateRec.Code, modelDeactivateRec.Body.String())
+	}
+
+	getReq := httptest.NewRequest(http.MethodGet, "/api/admin/v1/agent-profiles/"+profileID+"/capability-policy?tenant_id="+tenantID, nil)
+	getReq.Header.Set("X-Tenant-ID", tenantID)
+	getRec := httptest.NewRecorder()
+	h.ServeHTTP(getRec, getReq)
+	if getRec.Code != http.StatusOK {
+		t.Fatalf("expected capability policy get 200, got %d: %s", getRec.Code, getRec.Body.String())
+	}
+	if !strings.Contains(getRec.Body.String(), `"AllowedModelEntryIDs":["model-1"]`) {
+		t.Fatalf("expected existing binding to remain visible after deactivation, got %s", getRec.Body.String())
 	}
 }
 

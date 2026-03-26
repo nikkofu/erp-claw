@@ -39,8 +39,28 @@ func NewToolCatalogEntry(tenantID, entryID, toolKey, displayName, riskLevel, sta
 		ToolKey:     toolKey,
 		DisplayName: displayName,
 		RiskLevel:   riskLevel,
-		Status:      status,
+		Status:      normalizeCatalogEntryStatus(status),
 		CreatedAt:   now,
 		UpdatedAt:   now,
 	}, nil
+}
+
+func (e *ToolCatalogEntry) IsActive() bool {
+	if e == nil {
+		return false
+	}
+	return normalizeCatalogEntryStatus(e.Status) == CatalogStatusActive
+}
+
+func (e *ToolCatalogEntry) SetStatus(status string) error {
+	if e == nil {
+		return errors.New("tool catalog entry is required")
+	}
+	normalized, err := validateCatalogEntryStatus(status)
+	if err != nil {
+		return err
+	}
+	e.Status = normalized
+	e.UpdatedAt = time.Now().UTC()
+	return nil
 }

@@ -102,6 +102,33 @@ func TestSaveAgentCapabilityPolicyHandlerRejectsUnknownTenantLocalReferences(t *
 	}
 }
 
+func TestSaveAgentCapabilityPolicyHandlerRejectsInactiveEntries(t *testing.T) {
+	t.Parallel()
+
+	repo := &fakeAgentCapabilityPolicyRepository{
+		profiles: []controlplane.AgentProfile{{TenantID: "tenant-a", ID: "profile-1"}},
+		models: []*domaincap.ModelCatalogEntry{
+			{TenantID: "tenant-a", EntryID: "model-1", Status: domaincap.CatalogStatusInactive},
+		},
+		tools: []*domaincap.ToolCatalogEntry{
+			{TenantID: "tenant-a", EntryID: "tool-1", Status: domaincap.CatalogStatusActive},
+		},
+	}
+	handler, err := NewSaveAgentCapabilityPolicyHandler(repo, repo, repo, repo)
+	if err != nil {
+		t.Fatalf("handler init failed: %v", err)
+	}
+
+	_, err = handler.Handle(context.Background(), "tenant-a", SaveAgentCapabilityPolicyPayload{
+		AgentProfileID:       "profile-1",
+		AllowedModelEntryIDs: []string{"model-1"},
+		AllowedToolEntryIDs:  []string{"tool-1"},
+	})
+	if err == nil {
+		t.Fatal("expected inactive model rejection")
+	}
+}
+
 type fakeAgentCapabilityPolicyRepository struct {
 	saved       []*domaincap.AgentCapabilityPolicy
 	getPolicy   *domaincap.AgentCapabilityPolicy

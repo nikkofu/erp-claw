@@ -121,6 +121,10 @@ type setPolicyRuleActiveRequest struct {
 	TenantID string `json:"tenant_id"`
 }
 
+type setCatalogEntryStatusRequest struct {
+	TenantID string `json:"tenant_id"`
+}
+
 type requeueOutboxMessagesRequest struct {
 	TenantID string  `json:"tenant_id"`
 	IDs      []int64 `json:"ids"`
@@ -188,6 +192,10 @@ func registerAdminRoutes(rg *gin.RouterGroup, container *bootstrap.Container) {
 	if err != nil {
 		panic("router: model catalog list handler init failed: " + err.Error())
 	}
+	setModelCatalogEntryStatusHandler, err := capabilityapp.NewSetModelCatalogEntryStatusHandler(capabilityCatalog)
+	if err != nil {
+		panic("router: model catalog status handler init failed: " + err.Error())
+	}
 	createToolCatalogEntryHandler, err := capabilityapp.NewCreateToolCatalogEntryHandler(capabilityCatalog)
 	if err != nil {
 		panic("router: tool catalog handler init failed: " + err.Error())
@@ -195,6 +203,10 @@ func registerAdminRoutes(rg *gin.RouterGroup, container *bootstrap.Container) {
 	listToolCatalogEntriesHandler, err := capabilityapp.NewListToolCatalogEntriesHandler(capabilityCatalog)
 	if err != nil {
 		panic("router: tool catalog list handler init failed: " + err.Error())
+	}
+	setToolCatalogEntryStatusHandler, err := capabilityapp.NewSetToolCatalogEntryStatusHandler(capabilityCatalog)
+	if err != nil {
+		panic("router: tool catalog status handler init failed: " + err.Error())
 	}
 	saveAgentCapabilityPolicyHandler, err := capabilityapp.NewSaveAgentCapabilityPolicyHandler(capabilityCatalog, catalog, capabilityCatalog, capabilityCatalog)
 	if err != nil {
@@ -588,6 +600,48 @@ func registerAdminRoutes(rg *gin.RouterGroup, container *bootstrap.Container) {
 		presenter.OK(c, entries)
 	})
 
+	rg.POST("/model-catalog-entries/:entry_id/activate", func(c *gin.Context) {
+		var req setCatalogEntryStatusRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			adminError(c, http.StatusBadRequest, err)
+			return
+		}
+
+		updated, err := setModelCatalogEntryStatusHandler.Handle(
+			c.Request.Context(),
+			tenantIDFromValueOrHeader(req.TenantID, c),
+			c.Param("entry_id"),
+			true,
+		)
+		if err != nil {
+			adminError(c, http.StatusBadRequest, err)
+			return
+		}
+
+		adminCreated(c, updated)
+	})
+
+	rg.POST("/model-catalog-entries/:entry_id/deactivate", func(c *gin.Context) {
+		var req setCatalogEntryStatusRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			adminError(c, http.StatusBadRequest, err)
+			return
+		}
+
+		updated, err := setModelCatalogEntryStatusHandler.Handle(
+			c.Request.Context(),
+			tenantIDFromValueOrHeader(req.TenantID, c),
+			c.Param("entry_id"),
+			false,
+		)
+		if err != nil {
+			adminError(c, http.StatusBadRequest, err)
+			return
+		}
+
+		adminCreated(c, updated)
+	})
+
 	rg.POST("/tool-catalog-entries", func(c *gin.Context) {
 		var req createToolCatalogEntryRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
@@ -625,6 +679,48 @@ func registerAdminRoutes(rg *gin.RouterGroup, container *bootstrap.Container) {
 		}
 
 		presenter.OK(c, entries)
+	})
+
+	rg.POST("/tool-catalog-entries/:entry_id/activate", func(c *gin.Context) {
+		var req setCatalogEntryStatusRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			adminError(c, http.StatusBadRequest, err)
+			return
+		}
+
+		updated, err := setToolCatalogEntryStatusHandler.Handle(
+			c.Request.Context(),
+			tenantIDFromValueOrHeader(req.TenantID, c),
+			c.Param("entry_id"),
+			true,
+		)
+		if err != nil {
+			adminError(c, http.StatusBadRequest, err)
+			return
+		}
+
+		adminCreated(c, updated)
+	})
+
+	rg.POST("/tool-catalog-entries/:entry_id/deactivate", func(c *gin.Context) {
+		var req setCatalogEntryStatusRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			adminError(c, http.StatusBadRequest, err)
+			return
+		}
+
+		updated, err := setToolCatalogEntryStatusHandler.Handle(
+			c.Request.Context(),
+			tenantIDFromValueOrHeader(req.TenantID, c),
+			c.Param("entry_id"),
+			false,
+		)
+		if err != nil {
+			adminError(c, http.StatusBadRequest, err)
+			return
+		}
+
+		adminCreated(c, updated)
 	})
 
 	rg.PUT("/agent-profiles/:profile_id/capability-policy", func(c *gin.Context) {

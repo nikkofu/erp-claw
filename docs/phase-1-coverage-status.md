@@ -77,7 +77,7 @@
 以下能力虽然在设计范围内，但当前仍未达到可交付状态：
 
 - 更完整的 Tenant / IAM / Policy 控制面模型
-- 插件注册、租户启用、model/tool policy binding、quota / feature flag 与租户级能力治理的剩余部分
+- 插件注册、tool schema/runtime、quota / feature flag 与 runtime-side capability enforcement 的剩余部分
 - Agent session / task 的真实 WebSocket 协议、跨进程流式回放、执行记录、证据模型与 live integration
 - Approval / Workflow 的更完整业务流程、多级编排与 runtime orchestration
 - 供应链闭环所需的主数据、销售、采购、库存、应收应付上下文
@@ -129,8 +129,8 @@
 | Control Plane | Policy Engine | 策略决策枚举、评估接口、规则生命周期、命令治理缝合点 | P1 | 部分实现 | `internal/platform/policy/*`、`internal/application/governance/*`、`internal/infrastructure/persistence/postgres/policy_audit_repository.go`、`internal/bootstrap/governance_catalog.go`；当前已具备 repository-backed rule evaluator、activate/deactivate 生命周期、治理命令处理器，以及最小 Admin create/list/activate/deactivate 管理面，但还没有真实 ABAC / RBAC / rules engine |
 | Control Plane | Audit 基线 | 审计记录模型、Recorder / Store、持久化查询 | P1 | 部分实现 | `internal/platform/audit/*`、`internal/infrastructure/persistence/postgres/policy_audit_repository.go`、`internal/bootstrap/governance_catalog.go`；已具备持久化 store、查询服务和最小 Admin audit list 接口，但还没有更完整的审计治理、分页和 retention 策略 |
 | Control Plane | Agent session/task 元数据 | session/task 表、仓储、状态机、workspace event identity | P1 | 部分实现 | `internal/domain/agentruntime/*`、`internal/application/agentruntime/*`、`internal/infrastructure/persistence/postgres/agent_runtime_repository.go`、`migrations/000004_phase1_agent_runtime_control.*`；已具备仓储、状态流转、close/fail/cancel 流程，以及以 `session_key` 为查询契约的 create/list/update/replay/stream workspace 最小 HTTP surface，但还没有真实 WebSocket 协议、跨进程流式回放与执行记录模型。 |
-| Control Plane | Plugin / Tool Registry | 插件注册、工具目录、租户启用、风险级别、输入输出 schema | P1 | 部分实现 | 已补 `internal/domain/capability/tool_catalog_entry.go`、`internal/application/capability/*tool*`、`internal/application/capability/*agent_capability_policy*`、`internal/infrastructure/persistence/postgres/capability_repository.go`、`internal/bootstrap/capability_catalog.go`、`internal/interfaces/http/router/admin.go` 与 `migrations/000008_phase1_tool_catalog.*`、`migrations/000010_phase1_agent_capability_policy.*`，落地 tenant-scoped tool catalog baseline 以及 agent profile -> allowed tools 最小 Admin 管理/查询面；但 plugin registry、tenant enablement、tool schema/runtime 仍未完成。 |
-| Control Plane | Quota / Feature Flag / Model Catalog | 配额、租户特性开关、模型与工具可用性治理 | P2 | 部分实现 | `internal/domain/capability/*`、`internal/application/capability/*`、`internal/infrastructure/persistence/postgres/capability_repository.go`、`internal/bootstrap/capability_catalog.go`、`internal/interfaces/http/router/admin.go`、`migrations/000005_phase1_capability_governance.*`、`migrations/000008_phase1_tool_catalog.*`、`migrations/000010_phase1_agent_capability_policy.*`；当前已经落地 tenant-scoped model catalog、tool catalog 与最小 agent capability policy binding（按 agent profile 管理 allowed models/tools）Admin 面，quota、feature flag、tenant enablement 与 runtime-side capability enforcement 仍未开始。 |
+| Control Plane | Plugin / Tool Registry | 插件注册、工具目录、租户启用、风险级别、输入输出 schema | P1 | 部分实现 | 已补 `internal/domain/capability/tool_catalog_entry.go`、`internal/application/capability/*tool*`、`internal/application/capability/*agent_capability_policy*`、`internal/application/capability/*set*_status.go`、`internal/infrastructure/persistence/postgres/capability_repository.go`、`internal/bootstrap/capability_catalog.go`、`internal/interfaces/http/router/admin.go` 与 `migrations/000008_phase1_tool_catalog.*`、`migrations/000010_phase1_agent_capability_policy.*`，落地 tenant-scoped tool catalog baseline、activate/deactivate tenant enablement baseline，以及 agent profile -> allowed tools 最小 Admin 管理/查询面；但 plugin registry、tool schema/runtime 与 runtime-side tool enforcement 仍未完成。 |
+| Control Plane | Quota / Feature Flag / Model Catalog | 配额、租户特性开关、模型与工具可用性治理 | P2 | 部分实现 | `internal/domain/capability/*`、`internal/application/capability/*`、`internal/infrastructure/persistence/postgres/capability_repository.go`、`internal/bootstrap/capability_catalog.go`、`internal/interfaces/http/router/admin.go`、`migrations/000005_phase1_capability_governance.*`、`migrations/000008_phase1_tool_catalog.*`、`migrations/000010_phase1_agent_capability_policy.*`；当前已经落地 tenant-scoped model catalog、tool catalog、activate/deactivate tenant enablement baseline，以及最小 agent capability policy binding（按 agent profile 管理 allowed models/tools，且未来新绑定拒绝 inactive entry）；quota、feature flag、plugin registry 与 runtime-side capability enforcement 仍未开始。 |
 
 ### 5.3 Execution Plane / Agent 与自动化执行面
 
@@ -195,7 +195,7 @@
 - Workspace HTTP surface、真实 WebSocket 协议、跨进程事件回放与更完整的事件订阅
 - Approval 的多级审批与 workflow orchestration
 - Outbox 的 consumer-side idempotency、DLQ 与 live DB contention 验证
-- 插件注册、租户启用、model/tool policy binding、quota / feature flag 与能力治理剩余部分
+- 插件注册、tool schema/runtime、quota / feature flag 与 runtime-side capability enforcement 的剩余部分
 
 ### 6.3 P2：Phase 1 边界内但可顺延的能力
 
