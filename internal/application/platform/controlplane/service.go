@@ -133,6 +133,23 @@ func (s *Service) ListTenants(ctx context.Context, input ListTenantsInput) ([]te
 	return values, err
 }
 
+type DeleteTenantInput struct {
+	OperatorTenantID string
+	OperatorActorID  string
+	Code             string
+}
+
+func (s *Service) DeleteTenant(ctx context.Context, input DeleteTenantInput) error {
+	return s.pipeline.Execute(ctx, shared.Command{
+		Name:     "controlplane.tenants.delete",
+		TenantID: input.OperatorTenantID,
+		ActorID:  input.OperatorActorID,
+		Payload:  input,
+	}, func(txCtx context.Context, _ shared.Command) error {
+		return s.tenantCatalog.Delete(txCtx, strings.TrimSpace(input.Code))
+	})
+}
+
 type UpsertActorInput struct {
 	OperatorTenantID string
 	OperatorActorID  string

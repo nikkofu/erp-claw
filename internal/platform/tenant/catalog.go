@@ -41,6 +41,7 @@ type Catalog interface {
 	Save(ctx context.Context, tenant Tenant) error
 	Get(ctx context.Context, code string) (Tenant, error)
 	List(ctx context.Context) ([]Tenant, error)
+	Delete(ctx context.Context, code string) error
 }
 
 type InMemoryCatalog struct {
@@ -100,6 +101,22 @@ func (c *InMemoryCatalog) List(_ context.Context) ([]Tenant, error) {
 		return out[i].Code < out[j].Code
 	})
 	return out, nil
+}
+
+func (c *InMemoryCatalog) Delete(_ context.Context, code string) error {
+	code = strings.TrimSpace(code)
+	if code == "" {
+		return ErrTenantNotFound
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if _, ok := c.byCode[code]; !ok {
+		return ErrTenantNotFound
+	}
+	delete(c.byCode, code)
+	return nil
 }
 
 // CatalogResolver resolves tenant routing information from a tenant catalog.

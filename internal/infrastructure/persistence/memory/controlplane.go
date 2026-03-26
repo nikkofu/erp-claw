@@ -85,6 +85,18 @@ func (r tenantCatalogRepository) List(_ context.Context) ([]tenant.Tenant, error
 	return out, nil
 }
 
+func (r tenantCatalogRepository) Delete(_ context.Context, code string) error {
+	code = strings.TrimSpace(code)
+	r.store.mu.Lock()
+	defer r.store.mu.Unlock()
+
+	if _, ok := r.store.tenants[code]; !ok {
+		return tenant.ErrTenantNotFound
+	}
+	delete(r.store.tenants, code)
+	return nil
+}
+
 type iamDirectoryRepository struct {
 	store *ControlPlaneStore
 }

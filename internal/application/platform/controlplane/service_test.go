@@ -10,6 +10,7 @@ import (
 	"github.com/nikkofu/erp-claw/internal/platform/iam"
 	"github.com/nikkofu/erp-claw/internal/platform/policy"
 	platformruntime "github.com/nikkofu/erp-claw/internal/platform/runtime"
+	"github.com/nikkofu/erp-claw/internal/platform/tenant"
 )
 
 func TestServiceEmitsWorkspaceEventsForSessionAndTaskLifecycle(t *testing.T) {
@@ -750,6 +751,46 @@ func TestServiceDeleteActorRemovesActorFromDirectory(t *testing.T) {
 	})
 	if !errors.Is(err, iam.ErrActorNotFound) {
 		t.Fatalf("expected ErrActorNotFound, got %v", err)
+	}
+}
+
+func TestServiceDeleteTenantRemovesTenantFromCatalog(t *testing.T) {
+	store := memory.NewControlPlaneStore()
+	svc := NewService(ServiceDeps{
+		TenantCatalog: store.TenantCatalog(),
+		IAMDirectory:  store.IAMDirectory(),
+		Sessions:      store.SessionRepository(),
+		Tasks:         store.TaskRepository(),
+		Pipeline: shared.NewPipeline(shared.PipelineDeps{
+			Policy: policy.StaticEvaluator(policy.DecisionAllow),
+		}),
+	})
+
+	ctx := context.Background()
+	if _, err := svc.RegisterTenant(ctx, RegisterTenantInput{
+		OperatorTenantID: "tenant-admin",
+		ActorID:          "actor-admin",
+		Code:             "tenant-delete-me",
+		Name:             "Tenant Delete Me",
+	}); err != nil {
+		t.Fatalf("register tenant: %v", err)
+	}
+
+	if err := svc.DeleteTenant(ctx, DeleteTenantInput{
+		OperatorTenantID: "tenant-admin",
+		OperatorActorID:  "actor-admin",
+		Code:             "tenant-delete-me",
+	}); err != nil {
+		t.Fatalf("delete tenant: %v", err)
+	}
+
+	_, err := svc.GetTenant(ctx, GetTenantInput{
+		OperatorTenantID: "tenant-admin",
+		OperatorActorID:  "actor-admin",
+		Code:             "tenant-delete-me",
+	})
+	if !errors.Is(err, tenant.ErrTenantNotFound) {
+		t.Fatalf("expected ErrTenantNotFound, got %v", err)
 	}
 }
 

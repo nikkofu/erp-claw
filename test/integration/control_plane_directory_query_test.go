@@ -89,6 +89,35 @@ func TestControlPlaneCanListTenantsAndActors(t *testing.T) {
 		404,
 		nil,
 	)
+
+	doJSONWithHeaders(
+		t,
+		h,
+		"DELETE",
+		"/api/platform/v1/control/tenants/tenant-directory-b",
+		nil,
+		200,
+		nil,
+	)
+
+	doJSONWithHeaders(
+		t,
+		h,
+		"GET",
+		"/api/platform/v1/control/tenants/tenant-directory-b",
+		nil,
+		404,
+		nil,
+	)
+
+	tenantsAfterDelete := getJSONData(t, h, "/api/platform/v1/control/tenants")
+	tenantsItemsAfterDelete, ok := tenantsAfterDelete["tenants"].([]any)
+	if !ok {
+		t.Fatalf("expected tenants array, got %#v", tenantsAfterDelete["tenants"])
+	}
+	if len(tenantsItemsAfterDelete) != 1 {
+		t.Fatalf("expected 1 tenant after delete, got %d", len(tenantsItemsAfterDelete))
+	}
 }
 
 func TestControlPlaneCanFilterAndPaginateActors(t *testing.T) {

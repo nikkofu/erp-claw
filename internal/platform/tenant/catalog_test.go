@@ -64,6 +64,26 @@ func TestInMemoryCatalogListsTenants(t *testing.T) {
 	}
 }
 
+func TestInMemoryCatalogDeleteRemovesTenant(t *testing.T) {
+	catalog := NewInMemoryCatalog()
+	value, err := NewTenant("tenant-001", "tenant-delete", "Tenant Delete")
+	if err != nil {
+		t.Fatalf("new tenant: %v", err)
+	}
+	if err := catalog.Save(context.Background(), value); err != nil {
+		t.Fatalf("save tenant: %v", err)
+	}
+
+	if err := catalog.Delete(context.Background(), "tenant-delete"); err != nil {
+		t.Fatalf("delete tenant: %v", err)
+	}
+
+	_, err = catalog.Get(context.Background(), "tenant-delete")
+	if !errors.Is(err, ErrTenantNotFound) {
+		t.Fatalf("expected ErrTenantNotFound, got %v", err)
+	}
+}
+
 func TestCatalogResolverUsesCatalogRoute(t *testing.T) {
 	catalog := NewInMemoryCatalog()
 	created, err := NewTenant("tenant-001", "tenant-admin", "Admin Tenant")
