@@ -11,6 +11,7 @@ import (
 	"github.com/nikkofu/erp-claw/internal/domain/masterdata"
 	"github.com/nikkofu/erp-claw/internal/domain/payable"
 	"github.com/nikkofu/erp-claw/internal/domain/procurement"
+	"github.com/nikkofu/erp-claw/internal/domain/receivable"
 	"github.com/nikkofu/erp-claw/internal/infrastructure/persistence/memory"
 )
 
@@ -610,6 +611,74 @@ func TestServiceListPayableBillsReturnsTenantScopedBills(t *testing.T) {
 	}
 }
 
+func TestServiceCreatesReceivableBill(t *testing.T) {
+	ctx := context.Background()
+	svc := newTestService()
+
+	bill, err := svc.CreateReceivableBill(ctx, CreateReceivableBillInput{
+		TenantID:    "tenant-a",
+		ActorID:     "finance-a",
+		ExternalRef: "SO-001",
+	})
+	if err != nil {
+		t.Fatalf("create receivable bill: %v", err)
+	}
+	if bill.Status != receivable.BillStatusOpen {
+		t.Fatalf("expected open receivable bill, got %s", bill.Status)
+	}
+	if bill.ExternalRef != "SO-001" {
+		t.Fatalf("expected external_ref SO-001, got %s", bill.ExternalRef)
+	}
+}
+
+func TestServiceCreateReceivableBillFailsForInvalidInput(t *testing.T) {
+	ctx := context.Background()
+	svc := newTestService()
+
+	_, err := svc.CreateReceivableBill(ctx, CreateReceivableBillInput{
+		TenantID:    "tenant-a",
+		ActorID:     "finance-a",
+		ExternalRef: "   ",
+	})
+	if !errors.Is(err, receivable.ErrInvalidBill) {
+		t.Fatalf("expected invalid receivable bill, got %v", err)
+	}
+}
+
+func TestServiceListReceivableBillsReturnsTenantScopedBills(t *testing.T) {
+	ctx := context.Background()
+	svc := newTestService()
+
+	billA, err := svc.CreateReceivableBill(ctx, CreateReceivableBillInput{
+		TenantID:    "tenant-a",
+		ActorID:     "finance-a",
+		ExternalRef: "SO-001",
+	})
+	if err != nil {
+		t.Fatalf("create tenant-a receivable bill: %v", err)
+	}
+	if _, err := svc.CreateReceivableBill(ctx, CreateReceivableBillInput{
+		TenantID:    "tenant-b",
+		ActorID:     "finance-b",
+		ExternalRef: "SO-B-001",
+	}); err != nil {
+		t.Fatalf("create tenant-b receivable bill: %v", err)
+	}
+
+	bills, err := svc.ListReceivableBills(ctx, ListReceivableBillsInput{
+		TenantID: "tenant-a",
+	})
+	if err != nil {
+		t.Fatalf("list tenant-a receivable bills: %v", err)
+	}
+	if len(bills) != 1 {
+		t.Fatalf("expected 1 tenant-a receivable bill, got %d", len(bills))
+	}
+	if bills[0].ID != billA.ID {
+		t.Fatalf("expected tenant-a receivable bill id %s, got %s", billA.ID, bills[0].ID)
+	}
+}
+
 func newTestService() *Service {
 	return NewService(ServiceDeps{
 		MasterData:     memory.NewMasterDataRepository(),
@@ -617,6 +686,7 @@ func newTestService() *Service {
 		Approvals:      memory.NewApprovalRepository(),
 		Inventory:      memory.NewInventoryRepository(),
 		Payables:       memory.NewPayableRepository(),
+		Receivables:    memory.NewReceivableRepository(),
 		Pipeline:       shared.NewPipeline(shared.PipelineDeps{}),
 	})
 }

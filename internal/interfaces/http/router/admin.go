@@ -13,6 +13,7 @@ import (
 	"github.com/nikkofu/erp-claw/internal/domain/masterdata"
 	"github.com/nikkofu/erp-claw/internal/domain/payable"
 	"github.com/nikkofu/erp-claw/internal/domain/procurement"
+	"github.com/nikkofu/erp-claw/internal/domain/receivable"
 	"github.com/nikkofu/erp-claw/internal/interfaces/http/presenter"
 )
 
@@ -217,6 +218,47 @@ func registerAdminRoutes(rg *gin.RouterGroup, container *bootstrap.Container) {
 		presenter.OK(c, inventoryBalanceResponse(balance))
 	})
 
+	receivableGroup := rg.Group("/receivables")
+	receivableGroup.POST("", func(c *gin.Context) {
+		var req createReceivableBillRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			presenter.Error(c, http.StatusBadRequest, err.Error())
+			return
+		}
+
+		bill, err := container.SupplyChain.CreateReceivableBill(c.Request.Context(), supplychain.CreateReceivableBillInput{
+			TenantID:    tenantIDFromContext(c),
+			ActorID:     actorIDFromContext(c),
+			ExternalRef: req.ExternalRef,
+		})
+		if err != nil {
+			renderSupplyChainError(c, err)
+			return
+		}
+		presenter.OK(c, receivableBillResponse(bill))
+	})
+	receivableGroup.GET("", func(c *gin.Context) {
+		bills, err := container.SupplyChain.ListReceivableBills(c.Request.Context(), supplychain.ListReceivableBillsInput{
+			TenantID: tenantIDFromContext(c),
+		})
+		if err != nil {
+			renderSupplyChainError(c, err)
+			return
+		}
+		presenter.OK(c, receivableBillsResponse(bills))
+	})
+	receivableGroup.GET("/:id", func(c *gin.Context) {
+		bill, err := container.SupplyChain.GetReceivableBill(c.Request.Context(), supplychain.GetReceivableBillInput{
+			TenantID: tenantIDFromContext(c),
+			BillID:   c.Param("id"),
+		})
+		if err != nil {
+			renderSupplyChainError(c, err)
+			return
+		}
+		presenter.OK(c, receivableBillResponse(bill))
+	})
+
 	payableGroup := rg.Group("/payables")
 	payableGroup.GET("", func(c *gin.Context) {
 		bills, err := container.SupplyChain.ListPayableBills(c.Request.Context(), supplychain.ListPayableBillsInput{
@@ -309,6 +351,10 @@ type createPayablePaymentPlanRequest struct {
 	DueDate string `json:"due_date"`
 }
 
+type createReceivableBillRequest struct {
+	ExternalRef string `json:"external_ref"`
+}
+
 func tenantIDFromContext(c *gin.Context) string {
 	return c.GetString("tenant_id")
 }
@@ -324,7 +370,8 @@ func renderSupplyChainError(c *gin.Context, err error) {
 		errors.Is(err, masterdata.ErrWarehouseNotFound),
 		errors.Is(err, procurement.ErrPurchaseOrderNotFound),
 		errors.Is(err, approval.ErrRequestNotFound),
-		errors.Is(err, payable.ErrBillNotFound):
+		errors.Is(err, payable.ErrBillNotFound),
+		errors.Is(err, receivable.ErrBillNotFound):
 		presenter.Error(c, http.StatusNotFound, err.Error())
 	case errors.Is(err, masterdata.ErrInvalidSupplier),
 		errors.Is(err, masterdata.ErrInvalidProduct),
@@ -337,6 +384,7 @@ func renderSupplyChainError(c *gin.Context, err error) {
 		errors.Is(err, payable.ErrBillAlreadyExists),
 		errors.Is(err, payable.ErrOrderNotBillable),
 		errors.Is(err, payable.ErrInvalidPaymentPlan),
+		errors.Is(err, receivable.ErrInvalidBill),
 		errors.Is(err, approval.ErrInvalidRequest),
 		errors.Is(err, approval.ErrApprovalNotPending):
 		presenter.Error(c, http.StatusBadRequest, err.Error())
@@ -510,6 +558,24 @@ func payableBillsResponse(bills []payable.Bill) []gin.H {
 	out := make([]gin.H, 0, len(bills))
 	for _, bill := range bills {
 		out = append(out, payableBillResponse(bill))
+	}
+	return out
+}
+
+func receivableBillResponse(bill receivable.Bill) gin.H {
+	return gin.H{
+		"id":           bill.ID,
+		"tenant_id":    bill.TenantID,
+		"external_ref": bill.ExternalRef,
+		"status":       bill.Status,
+		"created_by":   bill.CreatedBy,
+	}
+}
+
+func receivableBillsResponse(bills []receivable.Bill) []gin.H {
+	out := make([]gin.H, 0, len(bills))
+	for _, bill := range bills {
+		out = append(out, receivableBillResponse(bill))
 	}
 	return out
 }

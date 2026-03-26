@@ -12,6 +12,7 @@ import (
 	"github.com/nikkofu/erp-claw/internal/domain/masterdata"
 	"github.com/nikkofu/erp-claw/internal/domain/payable"
 	"github.com/nikkofu/erp-claw/internal/domain/procurement"
+	"github.com/nikkofu/erp-claw/internal/domain/receivable"
 )
 
 type ServiceDeps struct {
@@ -20,6 +21,7 @@ type ServiceDeps struct {
 	Approvals      approval.Repository
 	Inventory      inventory.Repository
 	Payables       payable.Repository
+	Receivables    receivable.Repository
 	Pipeline       *shared.Pipeline
 }
 
@@ -29,6 +31,7 @@ type Service struct {
 	approvals      approval.Repository
 	inventory      inventory.Repository
 	payables       payable.Repository
+	receivables    receivable.Repository
 	pipeline       *shared.Pipeline
 }
 
@@ -44,6 +47,7 @@ func NewService(deps ServiceDeps) *Service {
 		approvals:      deps.Approvals,
 		inventory:      deps.Inventory,
 		payables:       deps.Payables,
+		receivables:    deps.Receivables,
 		pipeline:       deps.Pipeline,
 	}
 }
@@ -368,6 +372,35 @@ func (s *Service) CreatePayablePaymentPlan(ctx context.Context, input CreatePaya
 
 func (s *Service) ListPayablePaymentPlans(ctx context.Context, input ListPayablePaymentPlansInput) ([]payable.PaymentPlan, error) {
 	return s.payables.ListPaymentPlansByBill(ctx, input.TenantID, input.PayableBillID)
+}
+
+func (s *Service) CreateReceivableBill(ctx context.Context, input CreateReceivableBillInput) (receivable.Bill, error) {
+	var bill receivable.Bill
+	err := s.pipeline.Execute(ctx, shared.Command{
+		Name:     "receivable.bills.create",
+		TenantID: input.TenantID,
+		ActorID:  input.ActorID,
+		Payload:  input,
+	}, func(txCtx context.Context, _ shared.Command) error {
+		created, err := receivable.NewBill(nextID("reb"), input.TenantID, input.ExternalRef, input.ActorID)
+		if err != nil {
+			return err
+		}
+		if err := s.receivables.Save(txCtx, created); err != nil {
+			return err
+		}
+		bill = created
+		return nil
+	})
+	return bill, err
+}
+
+func (s *Service) GetReceivableBill(ctx context.Context, input GetReceivableBillInput) (receivable.Bill, error) {
+	return s.receivables.Get(ctx, input.TenantID, input.BillID)
+}
+
+func (s *Service) ListReceivableBills(ctx context.Context, input ListReceivableBillsInput) ([]receivable.Bill, error) {
+	return s.receivables.ListByTenant(ctx, input.TenantID)
 }
 
 func (s *Service) resolveRequest(

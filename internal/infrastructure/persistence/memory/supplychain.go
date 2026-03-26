@@ -10,6 +10,7 @@ import (
 	"github.com/nikkofu/erp-claw/internal/domain/masterdata"
 	"github.com/nikkofu/erp-claw/internal/domain/payable"
 	"github.com/nikkofu/erp-claw/internal/domain/procurement"
+	"github.com/nikkofu/erp-claw/internal/domain/receivable"
 )
 
 type masterDataRepository struct {
@@ -29,6 +30,7 @@ type SupplyChainStore struct {
 	billsByPO   map[string]string
 	plans       map[string]payable.PaymentPlan
 	plansByBill map[string][]string
+	receivables map[string]receivable.Bill
 }
 
 func NewSupplyChainStore() *SupplyChainStore {
@@ -44,6 +46,7 @@ func NewSupplyChainStore() *SupplyChainStore {
 		billsByPO:   make(map[string]string),
 		plans:       make(map[string]payable.PaymentPlan),
 		plansByBill: make(map[string][]string),
+		receivables: make(map[string]receivable.Bill),
 	}
 }
 
@@ -300,6 +303,51 @@ func (r *payableRepository) ListPaymentPlansByBill(_ context.Context, tenantID, 
 	return out, nil
 }
 
+type receivableRepository struct {
+	store *SupplyChainStore
+}
+
+func NewReceivableRepository() receivable.Repository {
+	return NewSupplyChainStore().ReceivableRepository()
+}
+
+func (s *SupplyChainStore) ReceivableRepository() receivable.Repository {
+	return &receivableRepository{store: s}
+}
+
+func (r *receivableRepository) Save(_ context.Context, bill receivable.Bill) error {
+	r.store.mu.Lock()
+	defer r.store.mu.Unlock()
+
+	r.store.receivables[key(bill.TenantID, bill.ID)] = cloneReceivableBill(bill)
+	return nil
+}
+
+func (r *receivableRepository) Get(_ context.Context, tenantID, billID string) (receivable.Bill, error) {
+	r.store.mu.RLock()
+	defer r.store.mu.RUnlock()
+
+	bill, ok := r.store.receivables[key(tenantID, billID)]
+	if !ok {
+		return receivable.Bill{}, receivable.ErrBillNotFound
+	}
+	return cloneReceivableBill(bill), nil
+}
+
+func (r *receivableRepository) ListByTenant(_ context.Context, tenantID string) ([]receivable.Bill, error) {
+	r.store.mu.RLock()
+	defer r.store.mu.RUnlock()
+
+	out := make([]receivable.Bill, 0)
+	prefix := tenantID + "/"
+	for k, bill := range r.store.receivables {
+		if strings.HasPrefix(k, prefix) {
+			out = append(out, cloneReceivableBill(bill))
+		}
+	}
+	return out, nil
+}
+
 func key(tenantID, id string) string {
 	return tenantID + "/" + id
 }
@@ -328,4 +376,8 @@ func clonePayableBill(bill payable.Bill) payable.Bill {
 
 func clonePayablePaymentPlan(plan payable.PaymentPlan) payable.PaymentPlan {
 	return plan
+}
+
+func cloneReceivableBill(bill receivable.Bill) receivable.Bill {
+	return bill
 }

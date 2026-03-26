@@ -8,6 +8,7 @@ import (
 	"github.com/nikkofu/erp-claw/internal/domain/inventory"
 	"github.com/nikkofu/erp-claw/internal/domain/payable"
 	"github.com/nikkofu/erp-claw/internal/domain/procurement"
+	"github.com/nikkofu/erp-claw/internal/domain/receivable"
 )
 
 func TestPurchaseOrderRepositoryGetReturnsDetachedCopy(t *testing.T) {
@@ -229,5 +230,64 @@ func TestPayableRepositoryListByTenantScopesResults(t *testing.T) {
 	}
 	if got[0].ID != billA.ID {
 		t.Fatalf("expected tenant-a bill id %s, got %s", billA.ID, got[0].ID)
+	}
+}
+
+func TestReceivableRepositoryGetReturnsDetachedCopy(t *testing.T) {
+	ctx := context.Background()
+	repo := NewSupplyChainStore().ReceivableRepository()
+
+	bill, err := receivable.NewBill("reb-001", "tenant-a", "SO-001", "finance-a")
+	if err != nil {
+		t.Fatalf("new receivable bill: %v", err)
+	}
+	if err := repo.Save(ctx, bill); err != nil {
+		t.Fatalf("save receivable bill: %v", err)
+	}
+
+	got, err := repo.Get(ctx, bill.TenantID, bill.ID)
+	if err != nil {
+		t.Fatalf("get receivable bill: %v", err)
+	}
+	got.ExternalRef = "tampered"
+
+	reloaded, err := repo.Get(ctx, bill.TenantID, bill.ID)
+	if err != nil {
+		t.Fatalf("reload receivable bill: %v", err)
+	}
+	if reloaded.ExternalRef != "SO-001" {
+		t.Fatalf("expected stored external_ref SO-001, got %s", reloaded.ExternalRef)
+	}
+}
+
+func TestReceivableRepositoryListByTenantScopesResults(t *testing.T) {
+	ctx := context.Background()
+	repo := NewSupplyChainStore().ReceivableRepository()
+
+	billA, err := receivable.NewBill("reb-001", "tenant-a", "SO-001", "finance-a")
+	if err != nil {
+		t.Fatalf("new tenant-a receivable bill: %v", err)
+	}
+	if err := repo.Save(ctx, billA); err != nil {
+		t.Fatalf("save tenant-a receivable bill: %v", err)
+	}
+
+	billB, err := receivable.NewBill("reb-002", "tenant-b", "SO-B-001", "finance-b")
+	if err != nil {
+		t.Fatalf("new tenant-b receivable bill: %v", err)
+	}
+	if err := repo.Save(ctx, billB); err != nil {
+		t.Fatalf("save tenant-b receivable bill: %v", err)
+	}
+
+	got, err := repo.ListByTenant(ctx, "tenant-a")
+	if err != nil {
+		t.Fatalf("list tenant-a receivable bills: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("expected 1 tenant-a receivable bill, got %d", len(got))
+	}
+	if got[0].ID != billA.ID {
+		t.Fatalf("expected tenant-a receivable bill id %s, got %s", billA.ID, got[0].ID)
 	}
 }

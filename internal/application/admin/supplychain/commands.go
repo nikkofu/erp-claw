@@ -91,3 +91,18 @@ type ListPayablePaymentPlansInput struct {
 	TenantID      string
 	PayableBillID string
 }
+
+type CreateReceivableBillInput struct {
+	TenantID    string
+	ActorID     string
+	ExternalRef string
+}
+
+type GetReceivableBillInput struct {
+	TenantID string
+	BillID   string
+}
+
+type ListReceivableBillsInput struct {
+	TenantID string
+}
