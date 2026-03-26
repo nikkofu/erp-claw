@@ -8,6 +8,7 @@ import (
 	"github.com/nikkofu/erp-claw/internal/application/platform/controlplane"
 	"github.com/nikkofu/erp-claw/internal/application/shared"
 	"github.com/nikkofu/erp-claw/internal/infrastructure/persistence/memory"
+	"github.com/nikkofu/erp-claw/internal/interfaces/ws"
 	"github.com/nikkofu/erp-claw/internal/platform/audit"
 	"github.com/nikkofu/erp-claw/internal/platform/health"
 	"github.com/nikkofu/erp-claw/internal/platform/iam"
@@ -16,17 +17,19 @@ import (
 )
 
 type Container struct {
-	Config        Config
-	Health        *health.Service
-	SupplyChain   *supplychain.Service
-	ControlPlane  *controlplane.Service
-	TenantCatalog tenant.Catalog
+	Config           Config
+	Health           *health.Service
+	SupplyChain      *supplychain.Service
+	ControlPlane     *controlplane.Service
+	TenantCatalog    tenant.Catalog
+	WorkspaceGateway *ws.WorkspaceGateway
 }
 
 func NewContainer(cfg Config) *Container {
 	supplyChainStore := memory.NewSupplyChainStore()
 	controlPlaneStore := memory.NewControlPlaneStore()
 	auditRecorder := audit.NewInMemoryRecorder()
+	workspaceGateway := ws.NewWorkspaceGateway()
 
 	lookupRoles := func(ctx context.Context, tenantID, actorID string) ([]string, error) {
 		if actorID == iam.SystemActor.ID {
@@ -71,13 +74,15 @@ func NewContainer(cfg Config) *Container {
 			Pipeline:       pipeline,
 		}),
 		ControlPlane: controlplane.NewService(controlplane.ServiceDeps{
-			TenantCatalog: tenantCatalog,
-			IAMDirectory:  controlPlaneStore.IAMDirectory(),
-			Sessions:      controlPlaneStore.SessionRepository(),
-			Tasks:         controlPlaneStore.TaskRepository(),
-			AuditReader:   auditRecorder,
-			Pipeline:      pipeline,
+			TenantCatalog:   tenantCatalog,
+			IAMDirectory:    controlPlaneStore.IAMDirectory(),
+			Sessions:        controlPlaneStore.SessionRepository(),
+			Tasks:           controlPlaneStore.TaskRepository(),
+			AuditReader:     auditRecorder,
+			WorkspaceEvents: workspaceGateway,
+			Pipeline:        pipeline,
 		}),
-		TenantCatalog: tenantCatalog,
+		TenantCatalog:    tenantCatalog,
+		WorkspaceGateway: workspaceGateway,
 	}
 }

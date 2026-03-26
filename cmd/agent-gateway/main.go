@@ -8,7 +8,6 @@ import (
 	"syscall"
 
 	"github.com/nikkofu/erp-claw/internal/bootstrap"
-	"github.com/nikkofu/erp-claw/internal/interfaces/ws"
 )
 
 func main() {
@@ -25,14 +24,13 @@ func main() {
 	bootstrap.StartRuntime(bootstrap.AgentGatewayRole)
 
 	container := bootstrap.NewContainer(cfg)
-	gateway := ws.NewWorkspaceGateway()
 
 	log.Printf(
 		"agent gateway started (env=%s, config=%s, health_service=%t, workspace_channels=%d)",
 		cfg.Env,
 		configPath,
 		container.Health != nil,
-		gateway.ChannelCount(),
+		container.WorkspaceGateway.ChannelCount(),
 	)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

@@ -15,21 +15,23 @@ import (
 )
 
 type ServiceDeps struct {
-	TenantCatalog tenant.Catalog
-	IAMDirectory  iam.Directory
-	Sessions      platformruntime.SessionRepository
-	Tasks         platformruntime.TaskRepository
-	AuditReader   audit.Reader
-	Pipeline      *shared.Pipeline
+	TenantCatalog   tenant.Catalog
+	IAMDirectory    iam.Directory
+	Sessions        platformruntime.SessionRepository
+	Tasks           platformruntime.TaskRepository
+	AuditReader     audit.Reader
+	WorkspaceEvents platformruntime.WorkspaceEventSink
+	Pipeline        *shared.Pipeline
 }
 
 type Service struct {
-	tenantCatalog tenant.Catalog
-	iamDirectory  iam.Directory
-	sessions      platformruntime.SessionRepository
-	tasks         platformruntime.TaskRepository
-	auditReader   audit.Reader
-	pipeline      *shared.Pipeline
+	tenantCatalog   tenant.Catalog
+	iamDirectory    iam.Directory
+	sessions        platformruntime.SessionRepository
+	tasks           platformruntime.TaskRepository
+	auditReader     audit.Reader
+	workspaceEvents platformruntime.WorkspaceEventSink
+	pipeline        *shared.Pipeline
 }
 
 var ids atomic.Uint64
@@ -39,12 +41,13 @@ func NewService(deps ServiceDeps) *Service {
 		deps.Pipeline = shared.NewPipeline(shared.PipelineDeps{})
 	}
 	return &Service{
-		tenantCatalog: deps.TenantCatalog,
-		iamDirectory:  deps.IAMDirectory,
-		sessions:      deps.Sessions,
-		tasks:         deps.Tasks,
-		auditReader:   deps.AuditReader,
-		pipeline:      deps.Pipeline,
+		tenantCatalog:   deps.TenantCatalog,
+		iamDirectory:    deps.IAMDirectory,
+		sessions:        deps.Sessions,
+		tasks:           deps.Tasks,
+		auditReader:     deps.AuditReader,
+		workspaceEvents: deps.WorkspaceEvents,
+		pipeline:        deps.Pipeline,
 	}
 }
 
@@ -143,6 +146,17 @@ func (s *Service) OpenSession(ctx context.Context, input OpenSessionInput) (plat
 		if err := s.sessions.Save(txCtx, next); err != nil {
 			return err
 		}
+		if err := s.emitWorkspaceEvent(platformruntime.WorkspaceEvent{
+			Type:      "runtime.session.opened",
+			TenantID:  next.TenantID,
+			SessionID: next.ID,
+			Payload: map[string]any{
+				"actor_id": next.ActorID,
+				"status":   string(next.Status),
+			},
+		}); err != nil {
+			return err
+		}
 		session = next
 		return nil
 	})
@@ -188,6 +202,18 @@ func (s *Service) EnqueueTask(ctx context.Context, input EnqueueTaskInput) (plat
 		if err := s.tasks.Save(txCtx, created); err != nil {
 			return err
 		}
+		if err := s.emitWorkspaceEvent(platformruntime.WorkspaceEvent{
+			Type:      "runtime.task.enqueued",
+			TenantID:  created.TenantID,
+			SessionID: created.SessionID,
+			TaskID:    created.ID,
+			Payload: map[string]any{
+				"task_type": created.Type,
+				"status":    string(created.Status),
+			},
+		}); err != nil {
+			return err
+		}
 		task = created
 		return nil
 	})
@@ -203,19 +229,19 @@ type AdvanceTaskInput struct {
 }
 
 func (s *Service) StartTask(ctx context.Context, input AdvanceTaskInput) (platformruntime.Task, error) {
-	return s.mutateTask(ctx, "runtime.tasks.start", input, func(task *platformruntime.Task) error {
+	return s.mutateTask(ctx, "runtime.tasks.start", "runtime.task.running", input, func(task *platformruntime.Task) error {
 		return task.Start(time.Now().UTC())
 	})
 }
 
 func (s *Service) CompleteTask(ctx context.Context, input AdvanceTaskInput) (platformruntime.Task, error) {
-	return s.mutateTask(ctx, "runtime.tasks.complete", input, func(task *platformruntime.Task) error {
+	return s.mutateTask(ctx, "runtime.tasks.complete", "runtime.task.succeeded", input, func(task *platformruntime.Task) error {
 		return task.Complete(input.Output, time.Now().UTC())
 	})
 }
 
 func (s *Service) FailTask(ctx context.Context, input AdvanceTaskInput) (platformruntime.Task, error) {
-	return s.mutateTask(ctx, "runtime.tasks.fail", input, func(task *platformruntime.Task) error {
+	return s.mutateTask(ctx, "runtime.tasks.fail", "runtime.task.failed", input, func(task *platformruntime.Task) error {
 		return task.Fail(input.Reason, time.Now().UTC())
 	})
 }
@@ -256,6 +282,7 @@ func (s *Service) ListAudit(ctx context.Context, input ListAuditInput) ([]audit.
 func (s *Service) mutateTask(
 	ctx context.Context,
 	commandName string,
+	eventType string,
 	input AdvanceTaskInput,
 	mutate func(task *platformruntime.Task) error,
 ) (platformruntime.Task, error) {
@@ -276,10 +303,29 @@ func (s *Service) mutateTask(
 		if err := s.tasks.Save(txCtx, current); err != nil {
 			return err
 		}
+		if err := s.emitWorkspaceEvent(platformruntime.WorkspaceEvent{
+			Type:      eventType,
+			TenantID:  current.TenantID,
+			SessionID: current.SessionID,
+			TaskID:    current.ID,
+			Payload: map[string]any{
+				"status":   string(current.Status),
+				"attempts": current.Attempts,
+			},
+		}); err != nil {
+			return err
+		}
 		task = current
 		return nil
 	})
 	return task, err
+}
+
+func (s *Service) emitWorkspaceEvent(evt platformruntime.WorkspaceEvent) error {
+	if s.workspaceEvents == nil {
+		return nil
+	}
+	return s.workspaceEvents.Broadcast(evt)
 }
 
 func normalizeRoles(roles []string) []string {
