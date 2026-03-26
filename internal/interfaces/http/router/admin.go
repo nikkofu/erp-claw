@@ -239,6 +239,28 @@ func registerAdminRoutes(rg *gin.RouterGroup, container *bootstrap.Container) {
 		}
 		presenter.OK(c, inventoryReservationResponse(reservation))
 	})
+	inventoryGroup.POST("/outbounds", func(c *gin.Context) {
+		var req createInventoryOutboundRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			presenter.Error(c, http.StatusBadRequest, err.Error())
+			return
+		}
+
+		outbound, err := container.SupplyChain.IssueInventory(c.Request.Context(), supplychain.IssueInventoryInput{
+			TenantID:      tenantIDFromContext(c),
+			ActorID:       actorIDFromContext(c),
+			ProductID:     req.ProductID,
+			WarehouseID:   req.WarehouseID,
+			Quantity:      req.Quantity,
+			ReferenceType: req.ReferenceType,
+			ReferenceID:   req.ReferenceID,
+		})
+		if err != nil {
+			renderSupplyChainError(c, err)
+			return
+		}
+		presenter.OK(c, inventoryOutboundResponse(outbound))
+	})
 
 	receivableGroup := rg.Group("/receivables")
 	receivableGroup.POST("", func(c *gin.Context) {
@@ -370,6 +392,14 @@ type receivePurchaseOrderLineRequest struct {
 }
 
 type createInventoryReservationRequest struct {
+	ProductID     string `json:"product_id"`
+	WarehouseID   string `json:"warehouse_id"`
+	Quantity      int    `json:"quantity"`
+	ReferenceType string `json:"reference_type"`
+	ReferenceID   string `json:"reference_id"`
+}
+
+type createInventoryOutboundRequest struct {
 	ProductID     string `json:"product_id"`
 	WarehouseID   string `json:"warehouse_id"`
 	Quantity      int    `json:"quantity"`
@@ -564,6 +594,19 @@ func inventoryReservationResponse(reservation inventory.Reservation) gin.H {
 		"status":         reservation.Status,
 		"created_by":     reservation.CreatedBy,
 		"quantity":       reservation.Quantity,
+	}
+}
+
+func inventoryOutboundResponse(entry inventory.LedgerEntry) gin.H {
+	return gin.H{
+		"id":             entry.ID,
+		"tenant_id":      entry.TenantID,
+		"product_id":     entry.ProductID,
+		"warehouse_id":   entry.WarehouseID,
+		"movement_type":  entry.MovementType,
+		"quantity_delta": entry.QuantityDelta,
+		"reference_type": entry.ReferenceType,
+		"reference_id":   entry.ReferenceID,
 	}
 }
 

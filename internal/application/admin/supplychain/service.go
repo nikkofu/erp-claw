@@ -363,6 +363,54 @@ func (s *Service) ReserveInventory(ctx context.Context, input ReserveInventoryIn
 	return reservation, err
 }
 
+func (s *Service) IssueInventory(ctx context.Context, input IssueInventoryInput) (inventory.LedgerEntry, error) {
+	var outbound inventory.LedgerEntry
+	err := s.pipeline.Execute(ctx, shared.Command{
+		Name:     "inventory.outbounds.create",
+		TenantID: input.TenantID,
+		ActorID:  input.ActorID,
+		Payload:  input,
+	}, func(txCtx context.Context, _ shared.Command) error {
+		if _, err := s.masterData.GetProduct(txCtx, input.TenantID, input.ProductID); err != nil {
+			return err
+		}
+		if _, err := s.masterData.GetWarehouse(txCtx, input.TenantID, input.WarehouseID); err != nil {
+			return err
+		}
+
+		balance, err := s.GetInventoryBalance(txCtx, GetInventoryBalanceInput{
+			TenantID:    input.TenantID,
+			ProductID:   input.ProductID,
+			WarehouseID: input.WarehouseID,
+		})
+		if err != nil {
+			return err
+		}
+		if input.Quantity > balance.Available {
+			return inventory.ErrInsufficientAvailableInventory
+		}
+
+		entry, err := inventory.NewOutboundLedgerEntry(
+			nextID("led"),
+			input.TenantID,
+			input.ProductID,
+			input.WarehouseID,
+			input.ReferenceType,
+			input.ReferenceID,
+			input.Quantity,
+		)
+		if err != nil {
+			return err
+		}
+		if err := s.inventory.AppendLedgerEntries(txCtx, []inventory.LedgerEntry{entry}); err != nil {
+			return err
+		}
+		outbound = entry
+		return nil
+	})
+	return outbound, err
+}
+
 func (s *Service) CreatePayableBill(ctx context.Context, input CreatePayableBillInput) (payable.Bill, error) {
 	var bill payable.Bill
 	err := s.pipeline.Execute(ctx, shared.Command{

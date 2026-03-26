@@ -50,6 +50,7 @@ func NewContainer(cfg Config) *Container {
 		[]policy.Rule{
 			{CommandPrefix: "masterdata.", AnyOfRoles: []string{"platform_admin", "supplychain_operator"}},
 			{CommandPrefix: "procurement.", AnyOfRoles: []string{"platform_admin", "supplychain_operator"}},
+			{CommandPrefix: "inventory.", AnyOfRoles: []string{"platform_admin", "supplychain_operator"}},
 			{CommandPrefix: "approval.", AnyOfRoles: []string{"platform_admin", "supplychain_operator", "approver"}},
 			{CommandPrefix: "controlplane.", AnyOfRoles: []string{"platform_admin"}},
 			{CommandPrefix: "runtime.", AnyOfRoles: []string{"platform_admin", "workspace_operator"}},
