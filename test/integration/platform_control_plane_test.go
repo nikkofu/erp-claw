@@ -376,6 +376,37 @@ func TestPlatformControlPlaneListTasksSupportsPagination(t *testing.T) {
 	}
 }
 
+func TestPlatformControlPlaneListSessionsSupportsPagination(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	container := bootstrap.NewContainer(bootstrap.DefaultConfig())
+	h := router.New(router.WithContainer(container))
+
+	for _, sessionID := range []string{"sess-page-001", "sess-page-002", "sess-page-003"} {
+		postJSONData(t, h, "/api/platform/v1/agent/sessions", map[string]any{
+			"session_id": sessionID,
+			"metadata": map[string]any{
+				"channel": "workspace",
+			},
+		})
+	}
+
+	paged := getJSONData(t, h, "/api/platform/v1/agent/sessions?offset=1&limit=1")
+	items, ok := paged["sessions"].([]any)
+	if !ok {
+		t.Fatalf("expected sessions array, got %#v", paged["sessions"])
+	}
+	if len(items) != 1 {
+		t.Fatalf("expected 1 paged session, got %d", len(items))
+	}
+	session, ok := items[0].(map[string]any)
+	if !ok {
+		t.Fatalf("expected session object, got %#v", items[0])
+	}
+	if got := stringField(t, session, "id"); got != "sess-page-002" {
+		t.Fatalf("expected sess-page-002, got %s", got)
+	}
+}
+
 func doJSONWithHeaders(
 	t *testing.T,
 	h http.Handler,

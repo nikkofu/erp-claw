@@ -602,6 +602,46 @@ func TestServiceListTasksSupportsOffsetAndLimit(t *testing.T) {
 	}
 }
 
+func TestServiceListSessionsSupportsOffsetAndLimit(t *testing.T) {
+	store := memory.NewControlPlaneStore()
+	svc := NewService(ServiceDeps{
+		TenantCatalog: store.TenantCatalog(),
+		IAMDirectory:  store.IAMDirectory(),
+		Sessions:      store.SessionRepository(),
+		Tasks:         store.TaskRepository(),
+		Pipeline: shared.NewPipeline(shared.PipelineDeps{
+			Policy: policy.StaticEvaluator(policy.DecisionAllow),
+		}),
+	})
+
+	ctx := context.Background()
+	for _, sessionID := range []string{"sess-page-001", "sess-page-002", "sess-page-003"} {
+		if _, err := svc.OpenSession(ctx, OpenSessionInput{
+			TenantID:  "tenant-a",
+			ActorID:   "actor-a",
+			SessionID: sessionID,
+		}); err != nil {
+			t.Fatalf("open %s: %v", sessionID, err)
+		}
+	}
+
+	paged, err := svc.ListSessions(ctx, ListSessionsInput{
+		TenantID: "tenant-a",
+		ActorID:  "actor-a",
+		Offset:   1,
+		Limit:    1,
+	})
+	if err != nil {
+		t.Fatalf("list paged sessions: %v", err)
+	}
+	if len(paged) != 1 {
+		t.Fatalf("expected 1 paged session, got %d", len(paged))
+	}
+	if paged[0].ID != "sess-page-002" {
+		t.Fatalf("expected sess-page-002, got %s", paged[0].ID)
+	}
+}
+
 type recordingWorkspaceEventSink struct {
 	events []platformruntime.WorkspaceEvent
 }

@@ -389,6 +389,8 @@ type ListSessionsInput struct {
 	TenantID string
 	ActorID  string
 	Status   platformruntime.SessionStatus
+	Offset   int
+	Limit    int
 }
 
 func (s *Service) ListSessions(ctx context.Context, input ListSessionsInput) ([]platformruntime.Session, error) {
@@ -411,7 +413,21 @@ func (s *Service) ListSessions(ctx context.Context, input ListSessionsInput) ([]
 			}
 			filtered = append(filtered, session)
 		}
-		sessions = filtered
+
+		start := input.Offset
+		if start < 0 {
+			start = 0
+		}
+		if start >= len(filtered) {
+			sessions = []platformruntime.Session{}
+			return nil
+		}
+
+		end := len(filtered)
+		if input.Limit > 0 && start+input.Limit < end {
+			end = start + input.Limit
+		}
+		sessions = append([]platformruntime.Session(nil), filtered[start:end]...)
 		return nil
 	})
 	return sessions, err

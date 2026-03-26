@@ -194,11 +194,23 @@ func registerControlPlaneRoutes(rg *gin.RouterGroup, container *bootstrap.Contai
 			renderControlPlaneError(c, err)
 			return
 		}
+		limit, err := parseLimit(c.Query("limit"), 20)
+		if err != nil {
+			presenter.Error(c, http.StatusBadRequest, err.Error())
+			return
+		}
+		offset, err := parseOffset(c.Query("offset"))
+		if err != nil {
+			presenter.Error(c, http.StatusBadRequest, err.Error())
+			return
+		}
 
 		sessions, err := container.ControlPlane.ListSessions(c.Request.Context(), controlplane.ListSessionsInput{
 			TenantID: tenantIDFromContext(c),
 			ActorID:  actorIDFromContext(c),
 			Status:   status,
+			Offset:   offset,
+			Limit:    limit,
 		})
 		if err != nil {
 			renderControlPlaneError(c, err)
