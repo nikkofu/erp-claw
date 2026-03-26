@@ -407,10 +407,14 @@ func (s *Service) ListPolicyRules(ctx context.Context, input ListPolicyRulesInpu
 }
 
 type ListAuditInput struct {
-	TenantID    string
-	ActorID     string
-	CommandName string
-	Limit       int
+	TenantID      string
+	ActorID       string
+	CommandName   string
+	QueryActorID  string
+	QueryDecision policy.Decision
+	QueryOutcome  string
+	Offset        int
+	Limit         int
 }
 
 func (s *Service) ListAudit(ctx context.Context, input ListAuditInput) ([]audit.Record, error) {
@@ -427,7 +431,11 @@ func (s *Service) ListAudit(ctx context.Context, input ListAuditInput) ([]audit.
 	}, func(txCtx context.Context, _ shared.Command) error {
 		listed, err := s.auditReader.List(txCtx, audit.Query{
 			TenantID:    strings.TrimSpace(input.TenantID),
+			ActorID:     strings.TrimSpace(input.QueryActorID),
+			Decision:    input.QueryDecision,
+			Outcome:     strings.TrimSpace(input.QueryOutcome),
 			CommandName: strings.TrimSpace(input.CommandName),
+			Offset:      input.Offset,
 			Limit:       input.Limit,
 		})
 		if err != nil {

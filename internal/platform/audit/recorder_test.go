@@ -89,3 +89,59 @@ func TestInMemoryRecorderListsByCommandName(t *testing.T) {
 		t.Fatalf("expected create command, got %s", records[0].CommandName)
 	}
 }
+
+func TestInMemoryRecorderListsByActorDecisionOutcomeAndOffset(t *testing.T) {
+	recorder := NewInMemoryRecorder()
+	for _, record := range []Record{
+		{
+			CommandName: "procurement.purchase_orders.create",
+			TenantID:    "tenant-a",
+			ActorID:     "actor-a",
+			Decision:    policy.DecisionAllow,
+			Outcome:     "succeeded",
+		},
+		{
+			CommandName: "procurement.purchase_orders.submit",
+			TenantID:    "tenant-a",
+			ActorID:     "actor-a",
+			Decision:    policy.DecisionAllow,
+			Outcome:     "failed",
+		},
+		{
+			CommandName: "procurement.purchase_orders.approve",
+			TenantID:    "tenant-a",
+			ActorID:     "actor-a",
+			Decision:    policy.DecisionAllow,
+			Outcome:     "succeeded",
+		},
+		{
+			CommandName: "procurement.purchase_orders.create",
+			TenantID:    "tenant-a",
+			ActorID:     "actor-b",
+			Decision:    policy.DecisionDeny,
+			Outcome:     "rejected",
+		},
+	} {
+		if err := recorder.Record(context.Background(), record); err != nil {
+			t.Fatalf("record audit: %v", err)
+		}
+	}
+
+	records, err := recorder.List(context.Background(), Query{
+		TenantID: "tenant-a",
+		ActorID:  "actor-a",
+		Decision: policy.DecisionAllow,
+		Outcome:  "succeeded",
+		Offset:   1,
+		Limit:    10,
+	})
+	if err != nil {
+		t.Fatalf("list audit: %v", err)
+	}
+	if len(records) != 1 {
+		t.Fatalf("expected 1 record after offset, got %d", len(records))
+	}
+	if records[0].CommandName != "procurement.purchase_orders.create" {
+		t.Fatalf("expected offset record to be create, got %s", records[0].CommandName)
+	}
+}

@@ -243,12 +243,26 @@ func registerControlPlaneRoutes(rg *gin.RouterGroup, container *bootstrap.Contai
 			presenter.Error(c, http.StatusBadRequest, err.Error())
 			return
 		}
+		offset, err := parseOffset(c.Query("offset"))
+		if err != nil {
+			presenter.Error(c, http.StatusBadRequest, err.Error())
+			return
+		}
+		decision, err := parseDecision(c.Query("decision"))
+		if err != nil {
+			presenter.Error(c, http.StatusBadRequest, err.Error())
+			return
+		}
 
 		records, err := container.ControlPlane.ListAudit(c.Request.Context(), controlplane.ListAuditInput{
-			TenantID:    tenantIDFromContext(c),
-			ActorID:     actorIDFromContext(c),
-			CommandName: c.Query("command"),
-			Limit:       limit,
+			TenantID:      tenantIDFromContext(c),
+			ActorID:       actorIDFromContext(c),
+			CommandName:   c.Query("command"),
+			QueryActorID:  c.Query("actor_id"),
+			QueryDecision: decision,
+			QueryOutcome:  c.Query("outcome"),
+			Offset:        offset,
+			Limit:         limit,
 		})
 		if err != nil {
 			renderControlPlaneError(c, err)
@@ -426,4 +440,34 @@ func parseLimit(raw string, fallback int) (int, error) {
 		return 0, errors.New("limit must be greater than 0")
 	}
 	return limit, nil
+}
+
+func parseOffset(raw string) (int, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return 0, nil
+	}
+	offset, err := strconv.Atoi(raw)
+	if err != nil {
+		return 0, err
+	}
+	if offset < 0 {
+		return 0, errors.New("offset must be greater than or equal to 0")
+	}
+	return offset, nil
+}
+
+func parseDecision(raw string) (policy.Decision, error) {
+	value := strings.ToUpper(strings.TrimSpace(raw))
+	if value == "" {
+		return "", nil
+	}
+
+	decision := policy.Decision(value)
+	switch decision {
+	case policy.DecisionAllow, policy.DecisionAllowWithGuard, policy.DecisionRequireApproval, policy.DecisionDeny:
+		return decision, nil
+	default:
+		return "", errors.New("invalid decision filter")
+	}
 }
