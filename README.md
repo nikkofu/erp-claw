@@ -111,6 +111,14 @@ Run `go test ./test/integration -run 'TestAdminSupplyChainFlow|TestAdminInventor
 
 Run `go test ./test/integration -run 'TestWorkspaceInventoryQueriesReturnBalanceAndLedger|TestWorkspaceSalesOrderQueriesReturnListAndDetail' -v` to verify workspace inventory/sales query routing and response shape.
 
+## Integration API (Phase 2 Minimal Query Slice)
+
+- `GET /api/integration/v1/read-models/overview`
+- `GET /api/integration/v1/sales-orders`
+- `GET /api/integration/v1/sales-orders/:id`
+
+Run `go test ./test/integration -run 'TestIntegrationReadModelAndSalesQueries' -v` to verify integration overview and sales query routing.
+
 ## Smoke Run
 
 Start the API server and hit the health endpoint to confirm the router boots:
