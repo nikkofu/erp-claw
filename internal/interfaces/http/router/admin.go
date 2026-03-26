@@ -218,6 +218,16 @@ func registerAdminRoutes(rg *gin.RouterGroup, container *bootstrap.Container) {
 	})
 
 	payableGroup := rg.Group("/payables")
+	payableGroup.GET("", func(c *gin.Context) {
+		bills, err := container.SupplyChain.ListPayableBills(c.Request.Context(), supplychain.ListPayableBillsInput{
+			TenantID: tenantIDFromContext(c),
+		})
+		if err != nil {
+			renderSupplyChainError(c, err)
+			return
+		}
+		presenter.OK(c, payableBillsResponse(bills))
+	})
 	payableGroup.GET("/:id", func(c *gin.Context) {
 		bill, err := container.SupplyChain.GetPayableBill(c.Request.Context(), supplychain.GetPayableBillInput{
 			TenantID: tenantIDFromContext(c),
@@ -494,4 +504,12 @@ func payableBillDetailResponse(bill payable.Bill, plans []payable.PaymentPlan) g
 	resp := payableBillResponse(bill)
 	resp["payment_plans"] = payablePaymentPlansResponse(plans)
 	return resp
+}
+
+func payableBillsResponse(bills []payable.Bill) []gin.H {
+	out := make([]gin.H, 0, len(bills))
+	for _, bill := range bills {
+		out = append(out, payableBillResponse(bill))
+	}
+	return out
 }
