@@ -217,6 +217,28 @@ func registerAdminRoutes(rg *gin.RouterGroup, container *bootstrap.Container) {
 		}
 		presenter.OK(c, inventoryBalanceResponse(balance))
 	})
+	inventoryGroup.POST("/reservations", func(c *gin.Context) {
+		var req createInventoryReservationRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			presenter.Error(c, http.StatusBadRequest, err.Error())
+			return
+		}
+
+		reservation, err := container.SupplyChain.ReserveInventory(c.Request.Context(), supplychain.ReserveInventoryInput{
+			TenantID:      tenantIDFromContext(c),
+			ActorID:       actorIDFromContext(c),
+			ProductID:     req.ProductID,
+			WarehouseID:   req.WarehouseID,
+			Quantity:      req.Quantity,
+			ReferenceType: req.ReferenceType,
+			ReferenceID:   req.ReferenceID,
+		})
+		if err != nil {
+			renderSupplyChainError(c, err)
+			return
+		}
+		presenter.OK(c, inventoryReservationResponse(reservation))
+	})
 
 	receivableGroup := rg.Group("/receivables")
 	receivableGroup.POST("", func(c *gin.Context) {
@@ -347,6 +369,14 @@ type receivePurchaseOrderLineRequest struct {
 	Quantity  int    `json:"quantity"`
 }
 
+type createInventoryReservationRequest struct {
+	ProductID     string `json:"product_id"`
+	WarehouseID   string `json:"warehouse_id"`
+	Quantity      int    `json:"quantity"`
+	ReferenceType string `json:"reference_type"`
+	ReferenceID   string `json:"reference_id"`
+}
+
 type createPayablePaymentPlanRequest struct {
 	DueDate string `json:"due_date"`
 }
@@ -377,6 +407,8 @@ func renderSupplyChainError(c *gin.Context, err error) {
 		errors.Is(err, masterdata.ErrInvalidProduct),
 		errors.Is(err, masterdata.ErrInvalidWarehouse),
 		errors.Is(err, inventory.ErrInvalidReceipt),
+		errors.Is(err, inventory.ErrInvalidReservation),
+		errors.Is(err, inventory.ErrInsufficientAvailableInventory),
 		errors.Is(err, procurement.ErrInvalidPurchaseOrder),
 		errors.Is(err, procurement.ErrPurchaseOrderAlreadySubmitted),
 		errors.Is(err, procurement.ErrPurchaseOrderNotReceivable),
@@ -516,6 +548,22 @@ func inventoryBalanceResponse(balance inventory.Balance) gin.H {
 		"product_id":   balance.ProductID,
 		"warehouse_id": balance.WarehouseID,
 		"on_hand":      balance.OnHand,
+		"reserved":     balance.Reserved,
+		"available":    balance.Available,
+	}
+}
+
+func inventoryReservationResponse(reservation inventory.Reservation) gin.H {
+	return gin.H{
+		"id":             reservation.ID,
+		"tenant_id":      reservation.TenantID,
+		"product_id":     reservation.ProductID,
+		"warehouse_id":   reservation.WarehouseID,
+		"reference_type": reservation.ReferenceType,
+		"reference_id":   reservation.ReferenceID,
+		"status":         reservation.Status,
+		"created_by":     reservation.CreatedBy,
+		"quantity":       reservation.Quantity,
 	}
 }
 

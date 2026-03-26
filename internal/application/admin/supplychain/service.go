@@ -292,6 +292,10 @@ func (s *Service) GetInventoryBalance(ctx context.Context, input GetInventoryBal
 	if err != nil {
 		return inventory.Balance{}, err
 	}
+	reservations, err := s.inventory.ListReservations(ctx, input.TenantID, input.ProductID, input.WarehouseID)
+	if err != nil {
+		return inventory.Balance{}, err
+	}
 	balance := inventory.Balance{
 		TenantID:    input.TenantID,
 		ProductID:   input.ProductID,
@@ -300,7 +304,63 @@ func (s *Service) GetInventoryBalance(ctx context.Context, input GetInventoryBal
 	for _, entry := range entries {
 		balance.OnHand += entry.QuantityDelta
 	}
+	for _, reservation := range reservations {
+		if reservation.Status != inventory.ReservationStatusActive {
+			continue
+		}
+		balance.Reserved += reservation.Quantity
+	}
+	balance.Available = balance.OnHand - balance.Reserved
 	return balance, nil
+}
+
+func (s *Service) ReserveInventory(ctx context.Context, input ReserveInventoryInput) (inventory.Reservation, error) {
+	var reservation inventory.Reservation
+	err := s.pipeline.Execute(ctx, shared.Command{
+		Name:     "inventory.reservations.create",
+		TenantID: input.TenantID,
+		ActorID:  input.ActorID,
+		Payload:  input,
+	}, func(txCtx context.Context, _ shared.Command) error {
+		if _, err := s.masterData.GetProduct(txCtx, input.TenantID, input.ProductID); err != nil {
+			return err
+		}
+		if _, err := s.masterData.GetWarehouse(txCtx, input.TenantID, input.WarehouseID); err != nil {
+			return err
+		}
+
+		balance, err := s.GetInventoryBalance(txCtx, GetInventoryBalanceInput{
+			TenantID:    input.TenantID,
+			ProductID:   input.ProductID,
+			WarehouseID: input.WarehouseID,
+		})
+		if err != nil {
+			return err
+		}
+		if input.Quantity > balance.Available {
+			return inventory.ErrInsufficientAvailableInventory
+		}
+
+		created, err := inventory.NewReservation(
+			nextID("rsv"),
+			input.TenantID,
+			input.ProductID,
+			input.WarehouseID,
+			input.ReferenceType,
+			input.ReferenceID,
+			input.ActorID,
+			input.Quantity,
+		)
+		if err != nil {
+			return err
+		}
+		if err := s.inventory.SaveReservation(txCtx, created); err != nil {
+			return err
+		}
+		reservation = created
+		return nil
+	})
+	return reservation, err
 }
 
 func (s *Service) CreatePayableBill(ctx context.Context, input CreatePayableBillInput) (payable.Bill, error) {

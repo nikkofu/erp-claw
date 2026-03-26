@@ -291,3 +291,30 @@ func TestReceivableRepositoryListByTenantScopesResults(t *testing.T) {
 		t.Fatalf("expected tenant-a receivable bill id %s, got %s", billA.ID, got[0].ID)
 	}
 }
+
+func TestInventoryRepositoryListReservationsReturnsDetachedCopy(t *testing.T) {
+	ctx := context.Background()
+	repo := NewSupplyChainStore().InventoryRepository()
+
+	reservation, err := inventory.NewReservation("rsv-001", "tenant-a", "prd-001", "wh-001", "sales_order", "so-001", "planner-a", 2)
+	if err != nil {
+		t.Fatalf("new reservation: %v", err)
+	}
+	if err := repo.SaveReservation(ctx, reservation); err != nil {
+		t.Fatalf("save reservation: %v", err)
+	}
+
+	got, err := repo.ListReservations(ctx, "tenant-a", "prd-001", "wh-001")
+	if err != nil {
+		t.Fatalf("list reservations: %v", err)
+	}
+	got[0].Quantity = 99
+
+	reloaded, err := repo.ListReservations(ctx, "tenant-a", "prd-001", "wh-001")
+	if err != nil {
+		t.Fatalf("reload reservations: %v", err)
+	}
+	if reloaded[0].Quantity != 2 {
+		t.Fatalf("expected stored reservation quantity 2, got %d", reloaded[0].Quantity)
+	}
+}

@@ -336,6 +336,97 @@ func TestServiceReturnsInventoryBalanceFromPostedReceipts(t *testing.T) {
 	if balance.OnHand != approvedOrder.Lines[0].Quantity {
 		t.Fatalf("expected on hand %d, got %d", approvedOrder.Lines[0].Quantity, balance.OnHand)
 	}
+	if balance.Reserved != 0 {
+		t.Fatalf("expected reserved 0, got %d", balance.Reserved)
+	}
+	if balance.Available != approvedOrder.Lines[0].Quantity {
+		t.Fatalf("expected available %d, got %d", approvedOrder.Lines[0].Quantity, balance.Available)
+	}
+}
+
+func TestServiceReservesInventoryAndUpdatesAvailableBalance(t *testing.T) {
+	ctx := context.Background()
+	svc := newTestService()
+	approvedOrder := createApprovedOrder(t, ctx, svc)
+
+	_, _, _, err := svc.ReceivePurchaseOrder(ctx, ReceivePurchaseOrderInput{
+		TenantID:        "tenant-a",
+		ActorID:         "receiver-a",
+		PurchaseOrderID: approvedOrder.ID,
+		Lines: []ReceivePurchaseOrderLine{{
+			ProductID: approvedOrder.Lines[0].ProductID,
+			Quantity:  approvedOrder.Lines[0].Quantity,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("receive purchase order: %v", err)
+	}
+
+	reservation, err := svc.ReserveInventory(ctx, ReserveInventoryInput{
+		TenantID:      "tenant-a",
+		ActorID:       "planner-a",
+		ProductID:     approvedOrder.Lines[0].ProductID,
+		WarehouseID:   approvedOrder.WarehouseID,
+		Quantity:      2,
+		ReferenceType: "sales_order",
+		ReferenceID:   "so-001",
+	})
+	if err != nil {
+		t.Fatalf("reserve inventory: %v", err)
+	}
+	if reservation.Status != inventory.ReservationStatusActive {
+		t.Fatalf("expected active reservation, got %s", reservation.Status)
+	}
+
+	balance, err := svc.GetInventoryBalance(ctx, GetInventoryBalanceInput{
+		TenantID:    "tenant-a",
+		ProductID:   approvedOrder.Lines[0].ProductID,
+		WarehouseID: approvedOrder.WarehouseID,
+	})
+	if err != nil {
+		t.Fatalf("get inventory balance: %v", err)
+	}
+	if balance.OnHand != approvedOrder.Lines[0].Quantity {
+		t.Fatalf("expected on hand %d, got %d", approvedOrder.Lines[0].Quantity, balance.OnHand)
+	}
+	if balance.Reserved != 2 {
+		t.Fatalf("expected reserved 2, got %d", balance.Reserved)
+	}
+	if balance.Available != approvedOrder.Lines[0].Quantity-2 {
+		t.Fatalf("expected available %d, got %d", approvedOrder.Lines[0].Quantity-2, balance.Available)
+	}
+}
+
+func TestServiceReserveInventoryFailsWhenQuantityExceedsAvailable(t *testing.T) {
+	ctx := context.Background()
+	svc := newTestService()
+	approvedOrder := createApprovedOrder(t, ctx, svc)
+
+	_, _, _, err := svc.ReceivePurchaseOrder(ctx, ReceivePurchaseOrderInput{
+		TenantID:        "tenant-a",
+		ActorID:         "receiver-a",
+		PurchaseOrderID: approvedOrder.ID,
+		Lines: []ReceivePurchaseOrderLine{{
+			ProductID: approvedOrder.Lines[0].ProductID,
+			Quantity:  approvedOrder.Lines[0].Quantity,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("receive purchase order: %v", err)
+	}
+
+	_, err = svc.ReserveInventory(ctx, ReserveInventoryInput{
+		TenantID:      "tenant-a",
+		ActorID:       "planner-a",
+		ProductID:     approvedOrder.Lines[0].ProductID,
+		WarehouseID:   approvedOrder.WarehouseID,
+		Quantity:      approvedOrder.Lines[0].Quantity + 1,
+		ReferenceType: "sales_order",
+		ReferenceID:   "so-002",
+	})
+	if !errors.Is(err, inventory.ErrInsufficientAvailableInventory) {
+		t.Fatalf("expected insufficient available inventory, got %v", err)
+	}
 }
 
 func TestServiceReceivePurchaseOrderFailsWhenOrderNotApproved(t *testing.T) {

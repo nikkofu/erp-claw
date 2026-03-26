@@ -24,6 +24,8 @@ type Balance struct {
 	ProductID   string
 	WarehouseID string
 	OnHand      int
+	Reserved    int
+	Available   int
 }
 
 func NewInboundLedgerEntry(id, tenantID, productID, warehouseID, referenceType, referenceID string, quantity int) (LedgerEntry, error) {

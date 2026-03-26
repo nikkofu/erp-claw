@@ -18,35 +18,37 @@ type masterDataRepository struct {
 }
 
 type SupplyChainStore struct {
-	mu          sync.RWMutex
-	suppliers   map[string]masterdata.Supplier
-	products    map[string]masterdata.Product
-	warehouses  map[string]masterdata.Warehouse
-	orders      map[string]procurement.PurchaseOrder
-	requests    map[string]approval.Request
-	receipts    map[string]inventory.Receipt
-	ledger      map[string][]inventory.LedgerEntry
-	bills       map[string]payable.Bill
-	billsByPO   map[string]string
-	plans       map[string]payable.PaymentPlan
-	plansByBill map[string][]string
-	receivables map[string]receivable.Bill
+	mu           sync.RWMutex
+	suppliers    map[string]masterdata.Supplier
+	products     map[string]masterdata.Product
+	warehouses   map[string]masterdata.Warehouse
+	orders       map[string]procurement.PurchaseOrder
+	requests     map[string]approval.Request
+	receipts     map[string]inventory.Receipt
+	ledger       map[string][]inventory.LedgerEntry
+	bills        map[string]payable.Bill
+	billsByPO    map[string]string
+	plans        map[string]payable.PaymentPlan
+	plansByBill  map[string][]string
+	receivables  map[string]receivable.Bill
+	reservations map[string][]inventory.Reservation
 }
 
 func NewSupplyChainStore() *SupplyChainStore {
 	return &SupplyChainStore{
-		suppliers:   make(map[string]masterdata.Supplier),
-		products:    make(map[string]masterdata.Product),
-		warehouses:  make(map[string]masterdata.Warehouse),
-		orders:      make(map[string]procurement.PurchaseOrder),
-		requests:    make(map[string]approval.Request),
-		receipts:    make(map[string]inventory.Receipt),
-		ledger:      make(map[string][]inventory.LedgerEntry),
-		bills:       make(map[string]payable.Bill),
-		billsByPO:   make(map[string]string),
-		plans:       make(map[string]payable.PaymentPlan),
-		plansByBill: make(map[string][]string),
-		receivables: make(map[string]receivable.Bill),
+		suppliers:    make(map[string]masterdata.Supplier),
+		products:     make(map[string]masterdata.Product),
+		warehouses:   make(map[string]masterdata.Warehouse),
+		orders:       make(map[string]procurement.PurchaseOrder),
+		requests:     make(map[string]approval.Request),
+		receipts:     make(map[string]inventory.Receipt),
+		ledger:       make(map[string][]inventory.LedgerEntry),
+		bills:        make(map[string]payable.Bill),
+		billsByPO:    make(map[string]string),
+		plans:        make(map[string]payable.PaymentPlan),
+		plansByBill:  make(map[string][]string),
+		receivables:  make(map[string]receivable.Bill),
+		reservations: make(map[string][]inventory.Reservation),
 	}
 }
 
@@ -203,6 +205,25 @@ func (r *inventoryRepository) ListLedgerEntries(_ context.Context, tenantID, pro
 	out := make([]inventory.LedgerEntry, 0, len(stored))
 	for _, entry := range stored {
 		out = append(out, cloneLedgerEntry(entry))
+	}
+	return out, nil
+}
+
+func (r *inventoryRepository) SaveReservation(_ context.Context, reservation inventory.Reservation) error {
+	r.store.mu.Lock()
+	defer r.store.mu.Unlock()
+	k := inventoryKey(reservation.TenantID, reservation.ProductID, reservation.WarehouseID)
+	r.store.reservations[k] = append(r.store.reservations[k], cloneReservation(reservation))
+	return nil
+}
+
+func (r *inventoryRepository) ListReservations(_ context.Context, tenantID, productID, warehouseID string) ([]inventory.Reservation, error) {
+	r.store.mu.RLock()
+	defer r.store.mu.RUnlock()
+	stored := r.store.reservations[inventoryKey(tenantID, productID, warehouseID)]
+	out := make([]inventory.Reservation, 0, len(stored))
+	for _, reservation := range stored {
+		out = append(out, cloneReservation(reservation))
 	}
 	return out, nil
 }
@@ -368,6 +389,10 @@ func cloneReceipt(receipt inventory.Receipt) inventory.Receipt {
 
 func cloneLedgerEntry(entry inventory.LedgerEntry) inventory.LedgerEntry {
 	return entry
+}
+
+func cloneReservation(reservation inventory.Reservation) inventory.Reservation {
+	return reservation
 }
 
 func clonePayableBill(bill payable.Bill) payable.Bill {
