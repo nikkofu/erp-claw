@@ -655,6 +655,55 @@ func TestServiceTransferInventoryFailsWhenQuantityExceedsAvailable(t *testing.T)
 	}
 }
 
+func TestServiceListsInventoryLedgerEntriesForWarehouseProduct(t *testing.T) {
+	ctx := context.Background()
+	svc := newTestService()
+	approvedOrder := createApprovedOrder(t, ctx, svc)
+
+	_, _, _, err := svc.ReceivePurchaseOrder(ctx, ReceivePurchaseOrderInput{
+		TenantID:        "tenant-a",
+		ActorID:         "receiver-a",
+		PurchaseOrderID: approvedOrder.ID,
+		Lines: []ReceivePurchaseOrderLine{{
+			ProductID: approvedOrder.Lines[0].ProductID,
+			Quantity:  approvedOrder.Lines[0].Quantity,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("receive purchase order: %v", err)
+	}
+	_, err = svc.IssueInventory(ctx, IssueInventoryInput{
+		TenantID:      "tenant-a",
+		ActorID:       "warehouse-a",
+		ProductID:     approvedOrder.Lines[0].ProductID,
+		WarehouseID:   approvedOrder.WarehouseID,
+		Quantity:      2,
+		ReferenceType: "shipment",
+		ReferenceID:   "shp-ledger-001",
+	})
+	if err != nil {
+		t.Fatalf("issue inventory: %v", err)
+	}
+
+	entries, err := svc.ListInventoryLedger(ctx, ListInventoryLedgerInput{
+		TenantID:    "tenant-a",
+		ProductID:   approvedOrder.Lines[0].ProductID,
+		WarehouseID: approvedOrder.WarehouseID,
+	})
+	if err != nil {
+		t.Fatalf("list inventory ledger: %v", err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("expected 2 ledger entries, got %d", len(entries))
+	}
+	if entries[0].MovementType != inventory.MovementTypeInbound || entries[0].QuantityDelta != approvedOrder.Lines[0].Quantity {
+		t.Fatalf("expected first ledger entry inbound %d, got %s %d", approvedOrder.Lines[0].Quantity, entries[0].MovementType, entries[0].QuantityDelta)
+	}
+	if entries[1].MovementType != inventory.MovementTypeOutbound || entries[1].QuantityDelta != -2 {
+		t.Fatalf("expected second ledger entry outbound -2, got %s %d", entries[1].MovementType, entries[1].QuantityDelta)
+	}
+}
+
 func TestServiceReceivePurchaseOrderFailsWhenOrderNotApproved(t *testing.T) {
 	ctx := context.Background()
 	svc := newTestService()

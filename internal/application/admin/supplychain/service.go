@@ -314,6 +314,10 @@ func (s *Service) GetInventoryBalance(ctx context.Context, input GetInventoryBal
 	return balance, nil
 }
 
+func (s *Service) ListInventoryLedger(ctx context.Context, input ListInventoryLedgerInput) ([]inventory.LedgerEntry, error) {
+	return s.inventory.ListLedgerEntries(ctx, input.TenantID, input.ProductID, input.WarehouseID)
+}
+
 func (s *Service) ReserveInventory(ctx context.Context, input ReserveInventoryInput) (inventory.Reservation, error) {
 	var reservation inventory.Reservation
 	err := s.pipeline.Execute(ctx, shared.Command{

@@ -81,6 +81,7 @@ The first executable Phase 2 slice is now available through the admin surface. I
 - `POST /api/admin/v1/procurement/purchase-orders/:id/receive`
 - `POST /api/admin/v1/procurement/purchase-orders/:id/payable-bills`
 - `GET /api/admin/v1/procurement/purchase-orders/:id`
+- `GET /api/admin/v1/inventory/ledger?product_id=<id>&warehouse_id=<id>`
 - `GET /api/admin/v1/inventory/balances?product_id=<id>&warehouse_id=<id>` (returns `on_hand` / `reserved` / `available`)
 - `POST /api/admin/v1/inventory/reservations`
 - `POST /api/admin/v1/inventory/outbounds`
@@ -94,7 +95,7 @@ The first executable Phase 2 slice is now available through the admin surface. I
 - `POST /api/admin/v1/approvals/:id/approve`
 - `POST /api/admin/v1/approvals/:id/reject`
 
-Run `go test ./test/integration -run 'TestAdminSupplyChainFlow|TestAdminInventoryReceiptFlow|TestAdminInventoryReservationFlow|TestAdminInventoryReservationRejectsExcessQuantity|TestAdminInventoryOutboundFlow|TestAdminInventoryOutboundRejectsExcessQuantity|TestAdminInventoryTransferFlow|TestAdminInventoryTransferRejectsExcessQuantity|TestAdminPayableFlow|TestAdminReceivableFlow' -v` to verify the end-to-end Phase 2 admin flow locally, including inventory reservation/outbound/transfer, payable, and receivable basics.
+Run `go test ./test/integration -run 'TestAdminSupplyChainFlow|TestAdminInventoryReceiptFlow|TestAdminInventoryReservationFlow|TestAdminInventoryReservationRejectsExcessQuantity|TestAdminInventoryOutboundFlow|TestAdminInventoryOutboundRejectsExcessQuantity|TestAdminInventoryTransferFlow|TestAdminInventoryTransferRejectsExcessQuantity|TestAdminInventoryLedgerListFlow|TestAdminPayableFlow|TestAdminReceivableFlow' -v` to verify the end-to-end Phase 2 admin flow locally, including inventory reservation/outbound/transfer and ledger query, payable, and receivable basics.
 
 ## Smoke Run
 
