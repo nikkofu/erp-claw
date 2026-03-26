@@ -3,6 +3,7 @@ package integration
 import (
 	"context"
 	"errors"
+	"sort"
 	"testing"
 
 	appapproval "github.com/nikkofu/erp-claw/internal/application/approval"
@@ -95,6 +96,19 @@ func (r *integrationApprovalRepo) SaveDefinition(_ context.Context, definition d
 	return definition, nil
 }
 
+func (r *integrationApprovalRepo) ListDefinitions(_ context.Context, tenantID string) ([]domainapproval.Definition, error) {
+	definitions := make([]domainapproval.Definition, 0)
+	for _, definition := range r.definitions {
+		if definition.TenantID == tenantID {
+			definitions = append(definitions, definition)
+		}
+	}
+	sort.Slice(definitions, func(i, j int) bool {
+		return definitions[i].ID < definitions[j].ID
+	})
+	return definitions, nil
+}
+
 func (r *integrationApprovalRepo) GetDefinitionByID(_ context.Context, tenantID, definitionID string) (domainapproval.Definition, error) {
 	definition, ok := r.definitions[tenantID+"|"+definitionID]
 	if !ok {
@@ -109,6 +123,19 @@ func (r *integrationApprovalRepo) CreateInstance(_ context.Context, instance dom
 	}
 	r.instances[instance.TenantID+"|"+instance.ID] = instance
 	return instance, nil
+}
+
+func (r *integrationApprovalRepo) ListInstances(_ context.Context, tenantID string) ([]domainapproval.Instance, error) {
+	instances := make([]domainapproval.Instance, 0)
+	for _, instance := range r.instances {
+		if instance.TenantID == tenantID {
+			instances = append(instances, instance)
+		}
+	}
+	sort.Slice(instances, func(i, j int) bool {
+		return instances[i].ID < instances[j].ID
+	})
+	return instances, nil
 }
 
 func (r *integrationApprovalRepo) GetInstanceByID(_ context.Context, tenantID, instanceID string) (domainapproval.Instance, error) {
@@ -140,6 +167,19 @@ func (r *integrationApprovalRepo) CreateTask(_ context.Context, task domainappro
 	}
 	r.tasks[task.TenantID+"|"+task.ID] = task
 	return task, nil
+}
+
+func (r *integrationApprovalRepo) ListTasks(_ context.Context, tenantID string) ([]domainapproval.Task, error) {
+	tasks := make([]domainapproval.Task, 0)
+	for _, task := range r.tasks {
+		if task.TenantID == tenantID {
+			tasks = append(tasks, task)
+		}
+	}
+	sort.Slice(tasks, func(i, j int) bool {
+		return tasks[i].ID < tasks[j].ID
+	})
+	return tasks, nil
 }
 
 func (r *integrationApprovalRepo) GetTaskByID(_ context.Context, tenantID, taskID string) (domainapproval.Task, error) {

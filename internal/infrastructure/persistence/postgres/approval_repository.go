@@ -51,6 +51,35 @@ func (r *ApprovalRepository) SaveDefinition(ctx context.Context, definition doma
 	return definition, nil
 }
 
+func (r *ApprovalRepository) ListDefinitions(ctx context.Context, tenantID string) ([]domainapproval.Definition, error) {
+	rows, err := r.db.QueryContext(
+		ctx,
+		`select id, name, approver_id, active, created_at, updated_at
+		 from approval_definition
+		 where tenant_id = $1
+		 order by created_at asc, id asc`,
+		tenantID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	definitions := make([]domainapproval.Definition, 0)
+	for rows.Next() {
+		definition := domainapproval.Definition{TenantID: tenantID}
+		if err := rows.Scan(&definition.ID, &definition.Name, &definition.ApproverID, &definition.Active, &definition.CreatedAt, &definition.UpdatedAt); err != nil {
+			return nil, err
+		}
+		definitions = append(definitions, definition)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return definitions, nil
+}
+
 func (r *ApprovalRepository) GetDefinitionByID(ctx context.Context, tenantID, definitionID string) (domainapproval.Definition, error) {
 	definition := domainapproval.Definition{TenantID: tenantID}
 	if err := r.db.QueryRowContext(
@@ -96,6 +125,41 @@ func (r *ApprovalRepository) CreateInstance(ctx context.Context, instance domain
 	}
 
 	return instance, nil
+}
+
+func (r *ApprovalRepository) ListInstances(ctx context.Context, tenantID string) ([]domainapproval.Instance, error) {
+	rows, err := r.db.QueryContext(
+		ctx,
+		`select id, definition_id, resource_type, resource_id, requested_by, status, created_at, decided_at
+		 from approval_instance
+		 where tenant_id = $1
+		 order by created_at asc, id asc`,
+		tenantID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	instances := make([]domainapproval.Instance, 0)
+	for rows.Next() {
+		instance := domainapproval.Instance{TenantID: tenantID}
+		var status string
+		var decidedAt sql.NullTime
+		if err := rows.Scan(&instance.ID, &instance.DefinitionID, &instance.ResourceType, &instance.ResourceID, &instance.RequestedBy, &status, &instance.CreatedAt, &decidedAt); err != nil {
+			return nil, err
+		}
+		instance.Status = domainapproval.InstanceStatus(status)
+		if decidedAt.Valid {
+			instance.DecidedAt = &decidedAt.Time
+		}
+		instances = append(instances, instance)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return instances, nil
 }
 
 func (r *ApprovalRepository) GetInstanceByID(ctx context.Context, tenantID, instanceID string) (domainapproval.Instance, error) {
@@ -195,6 +259,41 @@ func (r *ApprovalRepository) CreateTask(ctx context.Context, task domainapproval
 	}
 
 	return task, nil
+}
+
+func (r *ApprovalRepository) ListTasks(ctx context.Context, tenantID string) ([]domainapproval.Task, error) {
+	rows, err := r.db.QueryContext(
+		ctx,
+		`select id, instance_id, approver_id, status, coalesce(decided_by, ''), coalesce(comment, ''), created_at, decided_at
+		 from approval_task
+		 where tenant_id = $1
+		 order by created_at asc, id asc`,
+		tenantID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	tasks := make([]domainapproval.Task, 0)
+	for rows.Next() {
+		task := domainapproval.Task{TenantID: tenantID}
+		var status string
+		var decidedAt sql.NullTime
+		if err := rows.Scan(&task.ID, &task.InstanceID, &task.ApproverID, &status, &task.DecidedBy, &task.Comment, &task.CreatedAt, &decidedAt); err != nil {
+			return nil, err
+		}
+		task.Status = domainapproval.TaskStatus(status)
+		if decidedAt.Valid {
+			task.DecidedAt = &decidedAt.Time
+		}
+		tasks = append(tasks, task)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return tasks, nil
 }
 
 func (r *ApprovalRepository) GetTaskByID(ctx context.Context, tenantID, taskID string) (domainapproval.Task, error) {

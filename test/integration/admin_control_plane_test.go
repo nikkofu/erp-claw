@@ -218,6 +218,132 @@ func TestAdminCreateUserRouteRejectsUnknownTenant(t *testing.T) {
 	}
 }
 
+func TestAdminApprovalLifecycleRoutes(t *testing.T) {
+	h := router.New(router.WithContainer(bootstrap.NewTestContainer()))
+
+	tenantID := createAdminEntityAndReadID(t, h, http.MethodPost, "/api/admin/v1/tenants", `{"code":"tenant-approval","name":"Tenant Approval"}`, "platform-root")
+
+	definitionID := createAdminEntityAndReadID(
+		t,
+		h,
+		http.MethodPost,
+		"/api/admin/v1/approval-definitions",
+		`{"tenant_id":"`+tenantID+`","id":"def-a","name":"purchase approval","approver_id":"manager-a","active":true}`,
+		tenantID,
+	)
+	if definitionID != "def-a" {
+		t.Fatalf("expected definition id def-a, got %s", definitionID)
+	}
+
+	instanceID := createAdminEntityAndReadID(
+		t,
+		h,
+		http.MethodPost,
+		"/api/admin/v1/approval-instances",
+		`{"tenant_id":"`+tenantID+`","definition_id":"def-a","resource_type":"purchase_order","resource_id":"po-1","requested_by":"user-a"}`,
+		tenantID,
+	)
+	if instanceID == "" {
+		t.Fatal("expected approval instance id")
+	}
+
+	definitionsReq := httptest.NewRequest(http.MethodGet, "/api/admin/v1/approval-definitions?tenant_id="+tenantID, nil)
+	definitionsReq.Header.Set("X-Tenant-ID", tenantID)
+	definitionsRec := httptest.NewRecorder()
+	h.ServeHTTP(definitionsRec, definitionsReq)
+	if definitionsRec.Code != http.StatusOK {
+		t.Fatalf("expected approval definitions 200, got %d: %s", definitionsRec.Code, definitionsRec.Body.String())
+	}
+	if !strings.Contains(definitionsRec.Body.String(), "purchase approval") {
+		t.Fatalf("expected definitions response to contain purchase approval, got %s", definitionsRec.Body.String())
+	}
+
+	tasksReq := httptest.NewRequest(http.MethodGet, "/api/admin/v1/approval-tasks?tenant_id="+tenantID, nil)
+	tasksReq.Header.Set("X-Tenant-ID", tenantID)
+	tasksRec := httptest.NewRecorder()
+	h.ServeHTTP(tasksRec, tasksReq)
+	if tasksRec.Code != http.StatusOK {
+		t.Fatalf("expected approval tasks 200, got %d: %s", tasksRec.Code, tasksRec.Body.String())
+	}
+
+	taskID := firstIDFromListResponse(t, tasksRec.Body.Bytes())
+	approveReq := httptest.NewRequest(http.MethodPost, "/api/admin/v1/approval-tasks/"+taskID+"/approve", strings.NewReader(`{"actor_id":"manager-a","comment":"approved"}`))
+	approveReq.Header.Set("Content-Type", "application/json")
+	approveReq.Header.Set("X-Tenant-ID", tenantID)
+	approveRec := httptest.NewRecorder()
+	h.ServeHTTP(approveRec, approveReq)
+	if approveRec.Code != http.StatusCreated {
+		t.Fatalf("expected task approve 201, got %d: %s", approveRec.Code, approveRec.Body.String())
+	}
+
+	instancesReq := httptest.NewRequest(http.MethodGet, "/api/admin/v1/approval-instances?tenant_id="+tenantID, nil)
+	instancesReq.Header.Set("X-Tenant-ID", tenantID)
+	instancesRec := httptest.NewRecorder()
+	h.ServeHTTP(instancesRec, instancesReq)
+	if instancesRec.Code != http.StatusOK {
+		t.Fatalf("expected approval instances 200, got %d: %s", instancesRec.Code, instancesRec.Body.String())
+	}
+	if !strings.Contains(instancesRec.Body.String(), instanceID) {
+		t.Fatalf("expected instances response to contain %s, got %s", instanceID, instancesRec.Body.String())
+	}
+	if !strings.Contains(instancesRec.Body.String(), "approved") {
+		t.Fatalf("expected instances response to contain approved status, got %s", instancesRec.Body.String())
+	}
+}
+
+func TestAdminApprovalRejectRoutes(t *testing.T) {
+	h := router.New(router.WithContainer(bootstrap.NewTestContainer()))
+
+	tenantID := createAdminEntityAndReadID(t, h, http.MethodPost, "/api/admin/v1/tenants", `{"code":"tenant-reject","name":"Tenant Reject"}`, "platform-root")
+
+	createAdminEntityAndReadID(
+		t,
+		h,
+		http.MethodPost,
+		"/api/admin/v1/approval-definitions",
+		`{"tenant_id":"`+tenantID+`","id":"def-r","name":"expense approval","approver_id":"manager-r","active":true}`,
+		tenantID,
+	)
+
+	createAdminEntityAndReadID(
+		t,
+		h,
+		http.MethodPost,
+		"/api/admin/v1/approval-instances",
+		`{"tenant_id":"`+tenantID+`","definition_id":"def-r","resource_type":"expense_claim","resource_id":"exp-1","requested_by":"user-r"}`,
+		tenantID,
+	)
+
+	tasksReq := httptest.NewRequest(http.MethodGet, "/api/admin/v1/approval-tasks?tenant_id="+tenantID, nil)
+	tasksReq.Header.Set("X-Tenant-ID", tenantID)
+	tasksRec := httptest.NewRecorder()
+	h.ServeHTTP(tasksRec, tasksReq)
+	if tasksRec.Code != http.StatusOK {
+		t.Fatalf("expected approval tasks 200, got %d: %s", tasksRec.Code, tasksRec.Body.String())
+	}
+
+	taskID := firstIDFromListResponse(t, tasksRec.Body.Bytes())
+	rejectReq := httptest.NewRequest(http.MethodPost, "/api/admin/v1/approval-tasks/"+taskID+"/reject", strings.NewReader(`{"actor_id":"manager-r","comment":"rejected"}`))
+	rejectReq.Header.Set("Content-Type", "application/json")
+	rejectReq.Header.Set("X-Tenant-ID", tenantID)
+	rejectRec := httptest.NewRecorder()
+	h.ServeHTTP(rejectRec, rejectReq)
+	if rejectRec.Code != http.StatusCreated {
+		t.Fatalf("expected task reject 201, got %d: %s", rejectRec.Code, rejectRec.Body.String())
+	}
+
+	instancesReq := httptest.NewRequest(http.MethodGet, "/api/admin/v1/approval-instances?tenant_id="+tenantID, nil)
+	instancesReq.Header.Set("X-Tenant-ID", tenantID)
+	instancesRec := httptest.NewRecorder()
+	h.ServeHTTP(instancesRec, instancesReq)
+	if instancesRec.Code != http.StatusOK {
+		t.Fatalf("expected approval instances 200, got %d: %s", instancesRec.Code, instancesRec.Body.String())
+	}
+	if !strings.Contains(instancesRec.Body.String(), "rejected") {
+		t.Fatalf("expected instances response to contain rejected status, got %s", instancesRec.Body.String())
+	}
+}
+
 func createAdminEntityAndReadID(t *testing.T, h http.Handler, method, path, payload, tenantID string) string {
 	t.Helper()
 
@@ -240,6 +366,26 @@ func createAdminEntityAndReadID(t *testing.T, h http.Handler, method, path, payl
 	id, _ := envelope.Data["ID"].(string)
 	if id == "" {
 		t.Fatalf("expected ID in response, got %+v", envelope.Data)
+	}
+	return id
+}
+
+func firstIDFromListResponse(t *testing.T, payload []byte) string {
+	t.Helper()
+
+	var envelope struct {
+		Data []map[string]any `json:"data"`
+	}
+	if err := json.Unmarshal(payload, &envelope); err != nil {
+		t.Fatalf("decode list response: %v", err)
+	}
+	if len(envelope.Data) == 0 {
+		t.Fatalf("expected at least one list item, got %s", string(payload))
+	}
+
+	id, _ := envelope.Data[0]["ID"].(string)
+	if id == "" {
+		t.Fatalf("expected ID in first list item, got %+v", envelope.Data[0])
 	}
 	return id
 }

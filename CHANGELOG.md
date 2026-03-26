@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.1] - 2026-03-26
+
+### Added
+
+- Approval management application handlers for saving definitions and listing tenant-scoped approval definitions, instances, and tasks.
+- Approval catalog bootstrap with Postgres runtime wiring and in-memory test fallback, aligned with the existing control-plane and agent-runtime catalog contracts.
+- Admin API routes for approval definitions, approval instances, approval task lists, and task approve/reject actions.
+- Integration and bootstrap tests that cover approval admin lifecycle flows and approval catalog fail-fast behavior.
+
+### Changed
+
+- Phase 1 coverage documentation now reflects that the approval baseline includes an Admin HTTP management surface instead of only domain-level pipeline integration.
+
 ## [0.2.0] - 2026-03-26
 
 ### Added

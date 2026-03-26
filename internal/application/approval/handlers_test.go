@@ -3,6 +3,7 @@ package approval
 import (
 	"context"
 	"errors"
+	"sort"
 	"testing"
 
 	domainapproval "github.com/nikkofu/erp-claw/internal/domain/approval"
@@ -124,10 +125,10 @@ func TestRejectTaskHandlerRejectsTaskAndInstance(t *testing.T) {
 }
 
 type fakeRepository struct {
-	nextID      int
-	definitions map[string]domainapproval.Definition
-	instances   map[string]domainapproval.Instance
-	tasks       map[string]domainapproval.Task
+	nextID        int
+	definitions   map[string]domainapproval.Definition
+	instances     map[string]domainapproval.Instance
+	tasks         map[string]domainapproval.Task
 	createTaskErr error
 }
 
@@ -164,6 +165,19 @@ func (r *fakeRepository) SaveDefinition(_ context.Context, definition domainappr
 	return definition, nil
 }
 
+func (r *fakeRepository) ListDefinitions(_ context.Context, tenantID string) ([]domainapproval.Definition, error) {
+	definitions := make([]domainapproval.Definition, 0)
+	for _, definition := range r.definitions {
+		if definition.TenantID == tenantID {
+			definitions = append(definitions, definition)
+		}
+	}
+	sort.Slice(definitions, func(i, j int) bool {
+		return definitions[i].ID < definitions[j].ID
+	})
+	return definitions, nil
+}
+
 func (r *fakeRepository) GetDefinitionByID(_ context.Context, tenantID, definitionID string) (domainapproval.Definition, error) {
 	definition, ok := r.definitions[tenantID+"|"+definitionID]
 	if !ok {
@@ -179,6 +193,19 @@ func (r *fakeRepository) CreateInstance(_ context.Context, instance domainapprov
 	}
 	r.instances[instance.TenantID+"|"+instance.ID] = instance
 	return instance, nil
+}
+
+func (r *fakeRepository) ListInstances(_ context.Context, tenantID string) ([]domainapproval.Instance, error) {
+	instances := make([]domainapproval.Instance, 0)
+	for _, instance := range r.instances {
+		if instance.TenantID == tenantID {
+			instances = append(instances, instance)
+		}
+	}
+	sort.Slice(instances, func(i, j int) bool {
+		return instances[i].ID < instances[j].ID
+	})
+	return instances, nil
 }
 
 func (r *fakeRepository) GetInstanceByID(_ context.Context, tenantID, instanceID string) (domainapproval.Instance, error) {
@@ -208,6 +235,19 @@ func (r *fakeRepository) CreateTask(_ context.Context, task domainapproval.Task)
 	}
 	r.tasks[task.TenantID+"|"+task.ID] = task
 	return task, nil
+}
+
+func (r *fakeRepository) ListTasks(_ context.Context, tenantID string) ([]domainapproval.Task, error) {
+	tasks := make([]domainapproval.Task, 0)
+	for _, task := range r.tasks {
+		if task.TenantID == tenantID {
+			tasks = append(tasks, task)
+		}
+	}
+	sort.Slice(tasks, func(i, j int) bool {
+		return tasks[i].ID < tasks[j].ID
+	})
+	return tasks, nil
 }
 
 func (r *fakeRepository) DeleteInstance(_ context.Context, tenantID, instanceID string) error {

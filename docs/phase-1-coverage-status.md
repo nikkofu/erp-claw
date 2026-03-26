@@ -28,7 +28,7 @@
 - 平台底座已经具备可运行骨架
 - 控制面已经落地 tenant/user/role/department/agent profile 目录、user-role/user-department 绑定、policy/audit 持久化查询，以及 capability 的 model/tool catalog 基线
 - Agent 执行与工作台入口已经具备 session/task 仓储、状态机、workspace event seam，以及最小 read side/replay query
-- Approval baseline 已经具备 definition / instance / task 模型、start / approve / reject 闭环，以及 `REQUIRE_APPROVAL` 的最小接线
+- Approval baseline 已经具备 definition / instance / task 模型、start / approve / reject 闭环、最小 Admin HTTP 管理面，以及 `REQUIRE_APPROVAL` 的最小接线
 - Outbox 已经具备 dispatcher、重试、终态失败与人工 recovery 基线
 - 供应链交易闭环仍处于设计完成、代码未开始阶段
 
@@ -79,7 +79,7 @@
 - 更完整的 Tenant / IAM / Policy 控制面模型
 - 插件注册、租户启用、model/tool policy binding、quota / feature flag 与租户级能力治理的剩余部分
 - Agent session / task 的流式协议、执行记录、证据模型与 live integration
-- Approval / Workflow 的更完整业务流程与 route/runtime 接面
+- Approval / Workflow 的更完整业务流程、多级编排与 runtime orchestration
 - 供应链闭环所需的主数据、销售、采购、库存、应收应付上下文
 
 ### 3.3 当前阶段判断
@@ -102,7 +102,7 @@
 | Procurement | 请购、采购订单、供应商事务状态、收货计划 | P1 | 仅设计 | 设计已定义，当前没有采购上下文代码。 |
 | Inventory | 入库、出库、预留、调拨、库存台账、可用/预留库存状态 | P1 | 仅设计 | 设计已定义，当前没有库存聚合、库存流水或库存查询模型。 |
 | Receivable and Payable | 应收单、应付单、开票申请、付款计划 | P2 | 仅设计 | 设计已定义，当前没有应收应付上下文实现。 |
-| Approval and Workflow | 审批定义、审批实例、人工任务、流程推进 | P1 | 部分实现 | 已补 `internal/domain/approval/*`、`internal/application/approval/*`、`internal/infrastructure/persistence/postgres/approval_repository.go` 和 `migrations/000009_phase1_approval_baseline.*`，落地 definition / instance / task 模型与 start / approve / reject 闭环，并通过 `internal/application/shared/pipeline.go` 的 approval starter seam 把 `REQUIRE_APPROVAL` 接到了审批实例创建；但仍没有 workflow engine、HTTP 管理面或更复杂的多级审批编排。 |
+| Approval and Workflow | 审批定义、审批实例、人工任务、流程推进 | P1 | 部分实现 | 已补 `internal/domain/approval/*`、`internal/application/approval/*`、`internal/infrastructure/persistence/postgres/approval_repository.go`、`internal/bootstrap/approval_catalog.go` 与 `migrations/000009_phase1_approval_baseline.*`，落地 definition / instance / task 模型、start / approve / reject 闭环、租户级 list query，以及最小 Admin HTTP create/list/approve/reject 管理面，并通过 `internal/application/shared/pipeline.go` 的 approval starter seam 把 `REQUIRE_APPROVAL` 接到了审批实例创建；但仍没有 workflow engine 或更复杂的多级审批编排。 |
 | Agent Task and Automation | Agent profile、session、task、execution plan、tool record、policy decision record | P1 | 部分实现 | 已有 agent profile 目录、`agent_session` / `agent_task` 迁移、runtime service、状态流转、workspace event 广播 seam，以及围绕 `session_key` 统一的 workspace read-side/query 契约，但还没有流式协议、执行记录、tool record 与完整证据模型。 |
 
 ## 5. Phase 1 模块覆盖矩阵
@@ -114,7 +114,7 @@
 | 领域 | 模块 | 功能清单 | 优先级 | 当前实现情况 | 代码锚点 |
 | --- | --- | --- | --- | --- | --- |
 | Experience Plane | API Server 运行时 | 加载配置、装配容器、启动 Gin HTTP 服务 | P0 | 已实现 | `cmd/api-server/main.go` |
-| Experience Plane | HTTP 路由分组 | `Admin API`、`Workspace API`、`Platform API`、`Integration API` 的分组入口 | P0 | 部分实现 | `internal/interfaces/http/router/router.go`、`admin.go`、`workspace.go`、`platform.go`、`integration.go`；当前 `Platform API` 已提供健康检查，`Admin API` 已提供控制面目录写入/查询接口，`Workspace API` 已提供 sessions/tasks/events 最小只读接口，`Integration API` 仍是占位 |
+| Experience Plane | HTTP 路由分组 | `Admin API`、`Workspace API`、`Platform API`、`Integration API` 的分组入口 | P0 | 部分实现 | `internal/interfaces/http/router/router.go`、`admin.go`、`workspace.go`、`platform.go`、`integration.go`；当前 `Platform API` 已提供健康检查，`Admin API` 已提供控制面目录与审批定义/实例/任务的最小写入/查询接口，`Workspace API` 已提供 sessions/tasks/events 最小只读接口，`Integration API` 仍是占位 |
 | Experience Plane | 健康检查接口 | `/api/platform/v1/health/livez`、`/readyz` | P0 | 已实现 | `internal/interfaces/http/router/health.go`、`internal/platform/health/service.go` |
 | Experience Plane | 中间件链 | request ID、logging、tenant、auth、audit | P0 | 已实现 | `internal/interfaces/http/middleware/*` |
 | Experience Plane | Workspace Gateway seam | 工作台会话注册、事件广播骨架 | P1 | 部分实现 | `internal/interfaces/ws/workspace_gateway.go`；已经具备 session channel 注册、广播和最小事件 replay/query seam，并已通过 `internal/interfaces/http/router/workspace.go` 暴露最小只读 HTTP surface；但仍未实现真实 WebSocket 协议和跨进程回放。 |
@@ -193,7 +193,7 @@
 - 更完整的审计治理、分页、retention 与合规能力
 - Agent session/task 的流式协议、执行记录、证据模型与 live integration
 - Workspace HTTP surface、真正的流式协议与更完整的事件订阅
-- Approval 的 HTTP 管理面、多级审批与 workflow orchestration
+- Approval 的多级审批与 workflow orchestration
 - Outbox 的 consumer-side idempotency、DLQ 与 live DB contention 验证
 - 插件注册、租户启用、model/tool policy binding、quota / feature flag 与能力治理剩余部分
 
@@ -221,7 +221,7 @@
 - 销售：未开始
 - 采购：未开始
 - 库存：未开始
-- 审批：未开始
+- 审批：平台级审批基线与 Admin 管理面已实现，但与供应链业务单据耦合的审批编排仍未开始
 - 应收应付基础：未开始
 
 也就是说，当前代码库还不能被视为“已进入供应链 ERP 功能开发阶段”，而应被视为“已经完成平台底座并进入 Phase 1 控制面实体化阶段”。

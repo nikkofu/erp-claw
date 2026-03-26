@@ -189,11 +189,13 @@ func (t *Task) Decide(status TaskStatus, decidedBy, comment string) error {
 
 type DefinitionRepository interface {
 	SaveDefinition(ctx context.Context, definition Definition) (Definition, error)
+	ListDefinitions(ctx context.Context, tenantID string) ([]Definition, error)
 	GetDefinitionByID(ctx context.Context, tenantID, definitionID string) (Definition, error)
 }
 
 type InstanceRepository interface {
 	CreateInstance(ctx context.Context, instance Instance) (Instance, error)
+	ListInstances(ctx context.Context, tenantID string) ([]Instance, error)
 	GetInstanceByID(ctx context.Context, tenantID, instanceID string) (Instance, error)
 	UpdateInstanceStatus(ctx context.Context, tenantID, instanceID string, status InstanceStatus) error
 	DeleteInstance(ctx context.Context, tenantID, instanceID string) error
@@ -201,6 +203,7 @@ type InstanceRepository interface {
 
 type TaskRepository interface {
 	CreateTask(ctx context.Context, task Task) (Task, error)
+	ListTasks(ctx context.Context, tenantID string) ([]Task, error)
 	GetTaskByID(ctx context.Context, tenantID, taskID string) (Task, error)
 	UpdateTaskDecision(ctx context.Context, tenantID, taskID string, status TaskStatus, decidedBy, comment string) error
 	ListTasksByInstance(ctx context.Context, tenantID, instanceID string) ([]Task, error)
