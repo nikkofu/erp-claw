@@ -101,6 +101,12 @@ type createToolCatalogEntryRequest struct {
 	Status      string `json:"status"`
 }
 
+type saveAgentCapabilityPolicyRequest struct {
+	TenantID             string   `json:"tenant_id"`
+	AllowedModelEntryIDs []string `json:"allowed_model_entry_ids"`
+	AllowedToolEntryIDs  []string `json:"allowed_tool_entry_ids"`
+}
+
 type createPolicyRuleRequest struct {
 	TenantID    string `json:"tenant_id"`
 	ID          string `json:"id"`
@@ -189,6 +195,14 @@ func registerAdminRoutes(rg *gin.RouterGroup, container *bootstrap.Container) {
 	listToolCatalogEntriesHandler, err := capabilityapp.NewListToolCatalogEntriesHandler(capabilityCatalog)
 	if err != nil {
 		panic("router: tool catalog list handler init failed: " + err.Error())
+	}
+	saveAgentCapabilityPolicyHandler, err := capabilityapp.NewSaveAgentCapabilityPolicyHandler(capabilityCatalog, catalog, capabilityCatalog, capabilityCatalog)
+	if err != nil {
+		panic("router: agent capability policy save handler init failed: " + err.Error())
+	}
+	getAgentCapabilityPolicyHandler, err := capabilityapp.NewGetAgentCapabilityPolicyHandler(capabilityCatalog, catalog)
+	if err != nil {
+		panic("router: agent capability policy get handler init failed: " + err.Error())
 	}
 	ruleService, err := policy.NewRuleService(governanceCatalog)
 	if err != nil {
@@ -611,6 +625,40 @@ func registerAdminRoutes(rg *gin.RouterGroup, container *bootstrap.Container) {
 		}
 
 		presenter.OK(c, entries)
+	})
+
+	rg.PUT("/agent-profiles/:profile_id/capability-policy", func(c *gin.Context) {
+		var req saveAgentCapabilityPolicyRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			adminError(c, http.StatusBadRequest, err)
+			return
+		}
+
+		tenantID := tenantIDFromValueOrHeader(req.TenantID, c)
+		profileID := strings.TrimSpace(c.Param("profile_id"))
+		policy, err := saveAgentCapabilityPolicyHandler.Handle(c.Request.Context(), tenantID, capabilityapp.SaveAgentCapabilityPolicyPayload{
+			AgentProfileID:       profileID,
+			AllowedModelEntryIDs: req.AllowedModelEntryIDs,
+			AllowedToolEntryIDs:  req.AllowedToolEntryIDs,
+		})
+		if err != nil {
+			adminError(c, http.StatusBadRequest, err)
+			return
+		}
+
+		presenter.OK(c, policy)
+	})
+
+	rg.GET("/agent-profiles/:profile_id/capability-policy", func(c *gin.Context) {
+		tenantID := tenantIDFromQueryOrHeader(c)
+		profileID := strings.TrimSpace(c.Param("profile_id"))
+		policy, err := getAgentCapabilityPolicyHandler.Handle(c.Request.Context(), tenantID, profileID)
+		if err != nil {
+			adminError(c, http.StatusBadRequest, err)
+			return
+		}
+
+		presenter.OK(c, policy)
 	})
 
 	rg.POST("/policy-rules", func(c *gin.Context) {

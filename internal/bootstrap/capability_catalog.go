@@ -50,15 +50,17 @@ func newPostgresCapabilityCatalog(cfg DatabaseConfig) (CapabilityCatalog, error)
 }
 
 type inMemoryCapabilityCatalog struct {
-	mu     sync.RWMutex
-	models map[string]*domaincap.ModelCatalogEntry
-	tools  map[string]*domaincap.ToolCatalogEntry
+	mu       sync.RWMutex
+	models   map[string]*domaincap.ModelCatalogEntry
+	tools    map[string]*domaincap.ToolCatalogEntry
+	policies map[string]*domaincap.AgentCapabilityPolicy
 }
 
 func newInMemoryCapabilityCatalog() *inMemoryCapabilityCatalog {
 	return &inMemoryCapabilityCatalog{
-		models: make(map[string]*domaincap.ModelCatalogEntry),
-		tools:  make(map[string]*domaincap.ToolCatalogEntry),
+		models:   make(map[string]*domaincap.ModelCatalogEntry),
+		tools:    make(map[string]*domaincap.ToolCatalogEntry),
+		policies: make(map[string]*domaincap.AgentCapabilityPolicy),
 	}
 }
 
@@ -134,10 +136,48 @@ func (r *inMemoryCapabilityCatalog) ListToolsByTenant(_ context.Context, tenantI
 	return entries, nil
 }
 
+func (r *inMemoryCapabilityCatalog) SaveAgentCapabilityPolicy(_ context.Context, policy *domaincap.AgentCapabilityPolicy) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if policy == nil {
+		return fmt.Errorf("agent capability policy is required")
+	}
+
+	copied := *policy
+	copied.AllowedModelEntryIDs = cloneStringSlice(policy.AllowedModelEntryIDs)
+	copied.AllowedToolEntryIDs = cloneStringSlice(policy.AllowedToolEntryIDs)
+	r.policies[r.policyKey(copied.TenantID, copied.AgentProfileID)] = &copied
+	return nil
+}
+
+func (r *inMemoryCapabilityCatalog) GetAgentCapabilityPolicy(_ context.Context, tenantID, agentProfileID string) (*domaincap.AgentCapabilityPolicy, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	key := r.policyKey(tenantID, agentProfileID)
+	if existing, ok := r.policies[key]; ok {
+		copied := *existing
+		copied.AllowedModelEntryIDs = cloneStringSlice(existing.AllowedModelEntryIDs)
+		copied.AllowedToolEntryIDs = cloneStringSlice(existing.AllowedToolEntryIDs)
+		return &copied, nil
+	}
+
+	return domaincap.NewAgentCapabilityPolicy(tenantID, agentProfileID, nil, nil)
+}
+
 func (r *inMemoryCapabilityCatalog) modelKey(tenantID, entryID string) string {
 	return tenantID + "|" + entryID
 }
 
 func (r *inMemoryCapabilityCatalog) toolKey(tenantID, entryID string) string {
 	return tenantID + "|" + entryID
+}
+
+func (r *inMemoryCapabilityCatalog) policyKey(tenantID, agentProfileID string) string {
+	return tenantID + "|" + agentProfileID
+}
+
+func cloneStringSlice(values []string) []string {
+	return append([]string{}, values...)
 }

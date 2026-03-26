@@ -18,7 +18,7 @@
 - 目标分支：`feature/phase1-control-plane`
 - 目标工作树：`.worktrees/phase1-control-plane`
 - 根仓库状态：`main` 工作区已清理干净，不再残留误落的未跟踪 `Phase 1` 文件
-- 版本号：`0.2.6`
+- 版本号：`0.2.7`
 - bootstrap 合同：运行时 catalog 在非测试路径下失败即中止，不再静默回退为内存存储
 - Fresh 验证命令：`GOCACHE=$(pwd)/.cache/go-build go test ./... -count=1`
 
@@ -45,6 +45,7 @@
 
 - tenant-scoped model catalog baseline
 - tenant-scoped tool catalog baseline
+- agent profile capability policy binding baseline
 - approval definition / instance / task baseline
 - `REQUIRE_APPROVAL` 到 approval instance/task 的最小 pipeline 接线
 - outbox dispatch / retry / failed recovery / stale `publishing` reclaim / poll instrumentation baseline
@@ -56,7 +57,7 @@
 - `Admin API` 已存在控制面目录型接口，不需要重新从零搭 tenant/iam catalog
 - `Workspace API` 已存在 sessions/tasks/events/stream 最小写入/查询/SSE 面，可作为后续更深 workspace protocol 的依赖底座
 - `policy` / `audit` / `approval starter seam` 已存在，可在业务命令中继续复用
-- `model catalog` / `tool catalog` 已存在，不需要重新设计租户级 capability 主键和仓储边界
+- `model catalog` / `tool catalog` / `agent capability policy binding` 已存在，不需要重新设计租户级 capability 主键和仓储边界
 - `outbox reliability baseline` 已存在，后续业务事件发布应沿用该路径，而不是绕开它
 - tenant-scoped admin mutations 已要求 tenant root 先存在，后续业务建模应沿用这一边界
 
@@ -65,7 +66,7 @@
 以下内容仍然不能被误判为已完成：
 
 - Phase 2 供应链业务闭环，包括 master data、procurement、inventory、sales 与 receivable/payable
-- 更完整的 capability policy binding、tenant enablement、plugin registry、quota / feature flag
+- tenant enablement、plugin registry、quota / feature flag，以及 runtime-side capability enforcement
 - 更完整的 workflow orchestration、approval admin surface、多级审批与 approver resolution
 - 真实 WebSocket / streaming protocol、跨进程 event replay 与更完整的 stream durability
 - live DB round-trip、consumer-side idempotency、DLQ 与更完整的 reliability hardening
@@ -87,14 +88,15 @@
 - `13e5f1f` `feat: add phase1 workspace write surface`
 - `a366ac1` `feat: add phase1 governance admin surface`
 - `0281578` `feat: add phase1 outbox operator surface`
-- 当前这次 workspace streaming slice 与其配套文档/版本同步提交
+- `c20d484` `feat: add phase1 workspace streaming surface`
+- 当前这次 agent capability policy slice 与其配套文档/版本同步提交
 
 ## 8. 建议的下一步
 
 1. 以当前稳定基线为起点邀请 Claude 在独立分支推进 `Phase 2`
 2. 当前分支继续只处理 `Phase 1` 剩余项，不与 `Phase 2` 业务建模混写
 3. Phase 1 后续优先顺序保持为：
-   - capability policy binding / tenant enablement
+   - tenant enablement / runtime-side capability enforcement
    - approval / workflow orchestration
    - workspace WebSocket / cross-process streaming protocol
    - live DB reliability hardening

@@ -39,6 +39,7 @@ type ApprovalCatalog interface {
 type CapabilityCatalog interface {
 	domaincap.ModelCatalogRepository
 	domaincap.ToolCatalogRepository
+	domaincap.AgentCapabilityPolicyRepository
 }
 
 type GovernanceCatalog interface {

@@ -40,6 +40,7 @@ Catalog entities in this slice:
 - Agent Profiles (governed AI agent definitions per tenant)
 - Approval Definitions / Instances / Tasks (tenant-scoped governance workflow baseline)
 - Model Catalog Entries / Tool Catalog Entries (tenant-scoped capability governance baseline)
+- Agent Capability Policies (tenant-scoped allowed model/tool binding per agent profile)
 - Policy Rules / Audit Events (tenant-scoped governance control baseline)
 - Outbox Messages (tenant-scoped operator list/requeue surface for failed delivery recovery)
 
@@ -47,7 +48,7 @@ Bootstrap behavior for `bootstrap.NewContainer(cfg)`:
 
 - Uses a Postgres-backed control-plane catalog repository when the configured database is reachable.
 - Uses a Postgres-backed approval catalog repository for approval definitions, instances, and tasks when the configured database is reachable.
-- Uses a Postgres-backed capability catalog repository for model catalog and tool catalog entries when the configured database is reachable.
+- Uses a Postgres-backed capability catalog repository for model catalog entries, tool catalog entries, and agent capability policy bindings when the configured database is reachable.
 - Uses a Postgres-backed governance catalog repository for policy rules and audit events when the configured database is reachable.
 - Uses a Postgres-backed outbox catalog repository for tenant-scoped message inspection and failed-message requeue operations when the configured database is reachable.
 - Fails fast when a runtime Postgres catalog cannot be initialized, so control-plane and workspace state do not silently degrade into ephemeral storage.
@@ -65,6 +66,17 @@ The Workspace API now exposes a minimal command surface in addition to the exist
 - Stream session-scoped workspace events over SSE
 
 This is still not a full real-time workspace protocol. It now includes the smallest session-scoped SSE seam that replays stored events and streams live updates over HTTP, but it does not yet provide a full WebSocket protocol or cross-process stream durability.
+
+## Capability Policy Slice (Phase 1)
+
+The control plane now exposes a minimal governed allowlist surface for agent capability binding.
+
+- `PUT /api/admin/v1/agent-profiles/:profile_id/capability-policy`
+- `GET /api/admin/v1/agent-profiles/:profile_id/capability-policy`
+- Tenant-local validation for agent profile IDs, model catalog entry IDs, and tool catalog entry IDs
+- Replace semantics on write, with normalized and deduplicated model/tool entry reads
+
+This is still not the full capability governance system. Tenant enablement, plugin registry, quota, feature flags, and runtime-side enforcement remain outside this Phase 1 slice.
 
 ## Outbox Operator Slice (Phase 1)
 

@@ -394,6 +394,137 @@ func TestAdminCapabilityCatalogRoutes(t *testing.T) {
 	}
 }
 
+func TestAdminAgentCapabilityPolicyRoutes(t *testing.T) {
+	h := router.New(router.WithContainer(bootstrap.NewTestContainer()))
+
+	tenantID := createAdminEntityAndReadID(t, h, http.MethodPost, "/api/admin/v1/tenants", `{"code":"tenant-cap-policy","name":"Tenant Capability Policy"}`, "platform-root")
+	profileID := createAdminEntityAndReadID(t, h, http.MethodPost, "/api/admin/v1/agent-profiles", `{"tenant_id":"`+tenantID+`","name":"buyer-agent","model":"gpt-5.4"}`, tenantID)
+
+	createAdminNoID(t, h, http.MethodPost, "/api/admin/v1/model-catalog-entries", `{"entry_id":"model-1","model_key":"gpt-5.4","display_name":"GPT 5.4","provider":"openai","status":"active"}`, tenantID)
+	createAdminNoID(t, h, http.MethodPost, "/api/admin/v1/tool-catalog-entries", `{"entry_id":"tool-1","tool_key":"purchase.submit","display_name":"Purchase Submit","risk_level":"medium","status":"active"}`, tenantID)
+
+	putReq := httptest.NewRequest(http.MethodPut, "/api/admin/v1/agent-profiles/"+profileID+"/capability-policy", strings.NewReader(`{"allowed_model_entry_ids":["model-1","model-1"],"allowed_tool_entry_ids":["tool-1"]}`))
+	putReq.Header.Set("Content-Type", "application/json")
+	putReq.Header.Set("X-Tenant-ID", tenantID)
+	putRec := httptest.NewRecorder()
+	h.ServeHTTP(putRec, putReq)
+	if putRec.Code != http.StatusOK {
+		t.Fatalf("expected capability policy put 200, got %d: %s", putRec.Code, putRec.Body.String())
+	}
+	if !strings.Contains(putRec.Body.String(), `"AllowedModelEntryIDs":["model-1"]`) {
+		t.Fatalf("expected normalized model ids in response, got %s", putRec.Body.String())
+	}
+
+	getReq := httptest.NewRequest(http.MethodGet, "/api/admin/v1/agent-profiles/"+profileID+"/capability-policy?tenant_id="+tenantID, nil)
+	getReq.Header.Set("X-Tenant-ID", tenantID)
+	getRec := httptest.NewRecorder()
+	h.ServeHTTP(getRec, getReq)
+	if getRec.Code != http.StatusOK {
+		t.Fatalf("expected capability policy get 200, got %d: %s", getRec.Code, getRec.Body.String())
+	}
+	if !strings.Contains(getRec.Body.String(), `"AllowedToolEntryIDs":["tool-1"]`) {
+		t.Fatalf("expected tool ids in response, got %s", getRec.Body.String())
+	}
+}
+
+func TestAdminAgentCapabilityPolicyRejectsUnknownCatalogEntries(t *testing.T) {
+	h := router.New(router.WithContainer(bootstrap.NewTestContainer()))
+
+	tenantID := createAdminEntityAndReadID(t, h, http.MethodPost, "/api/admin/v1/tenants", `{"code":"tenant-cap-policy-bad","name":"Tenant Capability Policy Bad"}`, "platform-root")
+	profileID := createAdminEntityAndReadID(t, h, http.MethodPost, "/api/admin/v1/agent-profiles", `{"tenant_id":"`+tenantID+`","name":"buyer-agent","model":"gpt-5.4"}`, tenantID)
+
+	putReq := httptest.NewRequest(http.MethodPut, "/api/admin/v1/agent-profiles/"+profileID+"/capability-policy", strings.NewReader(`{"allowed_model_entry_ids":["model-missing"],"allowed_tool_entry_ids":["tool-missing"]}`))
+	putReq.Header.Set("Content-Type", "application/json")
+	putReq.Header.Set("X-Tenant-ID", tenantID)
+	putRec := httptest.NewRecorder()
+	h.ServeHTTP(putRec, putReq)
+	if putRec.Code != http.StatusBadRequest {
+		t.Fatalf("expected capability policy put 400, got %d: %s", putRec.Code, putRec.Body.String())
+	}
+	if !strings.Contains(putRec.Body.String(), "model-missing") {
+		t.Fatalf("expected missing model id in error, got %s", putRec.Body.String())
+	}
+}
+
+func TestAdminAgentCapabilityPolicyReplacesBindings(t *testing.T) {
+	h := router.New(router.WithContainer(bootstrap.NewTestContainer()))
+
+	tenantID := createAdminEntityAndReadID(t, h, http.MethodPost, "/api/admin/v1/tenants", `{"code":"tenant-cap-policy-replace","name":"Tenant Capability Policy Replace"}`, "platform-root")
+	profileID := createAdminEntityAndReadID(t, h, http.MethodPost, "/api/admin/v1/agent-profiles", `{"tenant_id":"`+tenantID+`","name":"buyer-agent","model":"gpt-5.4"}`, tenantID)
+
+	createAdminNoID(t, h, http.MethodPost, "/api/admin/v1/model-catalog-entries", `{"entry_id":"model-1","model_key":"gpt-5.4","display_name":"GPT 5.4","provider":"openai","status":"active"}`, tenantID)
+	createAdminNoID(t, h, http.MethodPost, "/api/admin/v1/model-catalog-entries", `{"entry_id":"model-2","model_key":"gpt-4.1","display_name":"GPT 4.1","provider":"openai","status":"active"}`, tenantID)
+	createAdminNoID(t, h, http.MethodPost, "/api/admin/v1/tool-catalog-entries", `{"entry_id":"tool-1","tool_key":"purchase.submit","display_name":"Purchase Submit","risk_level":"medium","status":"active"}`, tenantID)
+
+	firstPutReq := httptest.NewRequest(http.MethodPut, "/api/admin/v1/agent-profiles/"+profileID+"/capability-policy", strings.NewReader(`{"allowed_model_entry_ids":["model-1","model-1"],"allowed_tool_entry_ids":["tool-1"]}`))
+	firstPutReq.Header.Set("Content-Type", "application/json")
+	firstPutReq.Header.Set("X-Tenant-ID", tenantID)
+	firstPutRec := httptest.NewRecorder()
+	h.ServeHTTP(firstPutRec, firstPutReq)
+	if firstPutRec.Code != http.StatusOK {
+		t.Fatalf("expected first capability policy put 200, got %d: %s", firstPutRec.Code, firstPutRec.Body.String())
+	}
+
+	secondPutReq := httptest.NewRequest(http.MethodPut, "/api/admin/v1/agent-profiles/"+profileID+"/capability-policy", strings.NewReader(`{"allowed_model_entry_ids":["model-2"],"allowed_tool_entry_ids":[]}`))
+	secondPutReq.Header.Set("Content-Type", "application/json")
+	secondPutReq.Header.Set("X-Tenant-ID", tenantID)
+	secondPutRec := httptest.NewRecorder()
+	h.ServeHTTP(secondPutRec, secondPutReq)
+	if secondPutRec.Code != http.StatusOK {
+		t.Fatalf("expected second capability policy put 200, got %d: %s", secondPutRec.Code, secondPutRec.Body.String())
+	}
+
+	getReq := httptest.NewRequest(http.MethodGet, "/api/admin/v1/agent-profiles/"+profileID+"/capability-policy?tenant_id="+tenantID, nil)
+	getReq.Header.Set("X-Tenant-ID", tenantID)
+	getRec := httptest.NewRecorder()
+	h.ServeHTTP(getRec, getReq)
+	if getRec.Code != http.StatusOK {
+		t.Fatalf("expected capability policy get 200, got %d: %s", getRec.Code, getRec.Body.String())
+	}
+	if !strings.Contains(getRec.Body.String(), `"AllowedModelEntryIDs":["model-2"]`) {
+		t.Fatalf("expected replacement model ids in response, got %s", getRec.Body.String())
+	}
+	if strings.Contains(getRec.Body.String(), "model-1") {
+		t.Fatalf("did not expect replaced model-1 in response, got %s", getRec.Body.String())
+	}
+	if !strings.Contains(getRec.Body.String(), `"AllowedToolEntryIDs":[]`) {
+		t.Fatalf("expected empty tool ids after replacement, got %s", getRec.Body.String())
+	}
+}
+
+func TestAdminAgentCapabilityPolicyRejectsForeignTenantBindings(t *testing.T) {
+	h := router.New(router.WithContainer(bootstrap.NewTestContainer()))
+
+	tenantA := createAdminEntityAndReadID(t, h, http.MethodPost, "/api/admin/v1/tenants", `{"code":"tenant-cap-policy-a","name":"Tenant Capability Policy A"}`, "platform-root")
+	tenantB := createAdminEntityAndReadID(t, h, http.MethodPost, "/api/admin/v1/tenants", `{"code":"tenant-cap-policy-b","name":"Tenant Capability Policy B"}`, "platform-root")
+	profileA := createAdminEntityAndReadID(t, h, http.MethodPost, "/api/admin/v1/agent-profiles", `{"tenant_id":"`+tenantA+`","name":"buyer-agent-a","model":"gpt-5.4"}`, tenantA)
+	profileB := createAdminEntityAndReadID(t, h, http.MethodPost, "/api/admin/v1/agent-profiles", `{"tenant_id":"`+tenantB+`","name":"buyer-agent-b","model":"gpt-5.4"}`, tenantB)
+
+	createAdminNoID(t, h, http.MethodPost, "/api/admin/v1/model-catalog-entries", `{"entry_id":"model-b","model_key":"gpt-5.4","display_name":"GPT 5.4","provider":"openai","status":"active"}`, tenantB)
+	createAdminNoID(t, h, http.MethodPost, "/api/admin/v1/tool-catalog-entries", `{"entry_id":"tool-b","tool_key":"purchase.submit","display_name":"Purchase Submit","risk_level":"medium","status":"active"}`, tenantB)
+
+	foreignProfileReq := httptest.NewRequest(http.MethodPut, "/api/admin/v1/agent-profiles/"+profileB+"/capability-policy", strings.NewReader(`{"allowed_model_entry_ids":[],"allowed_tool_entry_ids":[]}`))
+	foreignProfileReq.Header.Set("Content-Type", "application/json")
+	foreignProfileReq.Header.Set("X-Tenant-ID", tenantA)
+	foreignProfileRec := httptest.NewRecorder()
+	h.ServeHTTP(foreignProfileRec, foreignProfileReq)
+	if foreignProfileRec.Code != http.StatusBadRequest {
+		t.Fatalf("expected foreign profile put 400, got %d: %s", foreignProfileRec.Code, foreignProfileRec.Body.String())
+	}
+
+	foreignCatalogReq := httptest.NewRequest(http.MethodPut, "/api/admin/v1/agent-profiles/"+profileA+"/capability-policy", strings.NewReader(`{"allowed_model_entry_ids":["model-b"],"allowed_tool_entry_ids":["tool-b"]}`))
+	foreignCatalogReq.Header.Set("Content-Type", "application/json")
+	foreignCatalogReq.Header.Set("X-Tenant-ID", tenantA)
+	foreignCatalogRec := httptest.NewRecorder()
+	h.ServeHTTP(foreignCatalogRec, foreignCatalogReq)
+	if foreignCatalogRec.Code != http.StatusBadRequest {
+		t.Fatalf("expected foreign catalog put 400, got %d: %s", foreignCatalogRec.Code, foreignCatalogRec.Body.String())
+	}
+	if !strings.Contains(foreignCatalogRec.Body.String(), "model-b") {
+		t.Fatalf("expected foreign model id in error, got %s", foreignCatalogRec.Body.String())
+	}
+}
+
 func TestAdminGovernanceRoutes(t *testing.T) {
 	container := bootstrap.NewTestContainer()
 	if _, err := container.GovernanceCatalog.Append(context.Background(), audit.Record{
@@ -563,6 +694,19 @@ func createAdminEntityAndReadID(t *testing.T, h http.Handler, method, path, payl
 		t.Fatalf("expected ID in response, got %+v", envelope.Data)
 	}
 	return id
+}
+
+func createAdminNoID(t *testing.T, h http.Handler, method, path, payload, tenantID string) {
+	t.Helper()
+
+	req := httptest.NewRequest(method, path, strings.NewReader(payload))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Tenant-ID", tenantID)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected 201 for %s %s, got %d: %s", method, path, rec.Code, rec.Body.String())
+	}
 }
 
 func firstIDFromListResponse(t *testing.T, payload []byte) string {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -15,6 +16,9 @@ type fakeDB struct {
 	execCalls  []execCall
 	queryCalls []queryCall
 	queryRows  rowScanner
+	querySets  []rowScanner
+	beginCalls int
+	tx         *fakeTx
 }
 
 type execCall struct {
@@ -34,13 +38,55 @@ func (f *fakeDB) ExecContext(ctx context.Context, query string, args ...any) (sq
 
 func (f *fakeDB) QueryContext(ctx context.Context, query string, args ...any) (rowScanner, error) {
 	f.queryCalls = append(f.queryCalls, queryCall{query: query, args: args})
+	if len(f.querySets) > 0 {
+		rows := f.querySets[0]
+		f.querySets = f.querySets[1:]
+		return rows, nil
+	}
 	return f.queryRows, nil
+}
+
+func (f *fakeDB) BeginTx(ctx context.Context, opts *sql.TxOptions) (transactionExecutor, error) {
+	f.beginCalls++
+	f.tx = &fakeTx{parent: f}
+	return f.tx, nil
 }
 
 type fakeResult struct{}
 
 func (fakeResult) LastInsertId() (int64, error) { return 0, nil }
 func (fakeResult) RowsAffected() (int64, error) { return 0, nil }
+
+type fakeTx struct {
+	parent        *fakeDB
+	commitCalls   int
+	rollbackCalls int
+}
+
+func (f *fakeTx) ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error) {
+	f.parent.execCalls = append(f.parent.execCalls, execCall{query: query, args: args})
+	return fakeResult{}, nil
+}
+
+func (f *fakeTx) QueryContext(ctx context.Context, query string, args ...any) (rowScanner, error) {
+	f.parent.queryCalls = append(f.parent.queryCalls, queryCall{query: query, args: args})
+	if len(f.parent.querySets) > 0 {
+		rows := f.parent.querySets[0]
+		f.parent.querySets = f.parent.querySets[1:]
+		return rows, nil
+	}
+	return f.parent.queryRows, nil
+}
+
+func (f *fakeTx) Commit() error {
+	f.commitCalls++
+	return nil
+}
+
+func (f *fakeTx) Rollback() error {
+	f.rollbackCalls++
+	return nil
+}
 
 func TestNewCapabilityRepositoryRejectsNilDB(t *testing.T) {
 	t.Parallel()
@@ -193,6 +239,78 @@ func TestCapabilityRepositoryListsTenantTools(t *testing.T) {
 	}
 	if db.queryCalls[0].args[0] != "tenant-b" {
 		t.Fatalf("unexpected tenant arg: %v", db.queryCalls[0].args)
+	}
+}
+
+func TestCapabilityRepositorySaveAgentCapabilityPolicyReplacesBindings(t *testing.T) {
+	t.Parallel()
+
+	db := &fakeDB{}
+	repo, err := NewCapabilityRepository(db)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	policy, err := capability.NewAgentCapabilityPolicy("tenant-a", "profile-1", []string{"model-2", "model-1"}, []string{"tool-1"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if err := repo.SaveAgentCapabilityPolicy(context.Background(), policy); err != nil {
+		t.Fatalf("save failed: %v", err)
+	}
+
+	if db.beginCalls != 1 {
+		t.Fatalf("expected 1 transaction begin, got %d", db.beginCalls)
+	}
+	if db.tx == nil || db.tx.commitCalls != 1 {
+		t.Fatalf("expected transaction commit once")
+	}
+	if len(db.execCalls) != 5 {
+		t.Fatalf("expected 5 exec calls, got %d", len(db.execCalls))
+	}
+	if !strings.Contains(strings.ToLower(db.execCalls[0].query), "delete from agent_profile_allowed_model") {
+		t.Fatalf("unexpected first query: %s", db.execCalls[0].query)
+	}
+	if !strings.Contains(strings.ToLower(db.execCalls[1].query), "delete from agent_profile_allowed_tool") {
+		t.Fatalf("unexpected second query: %s", db.execCalls[1].query)
+	}
+	if !strings.Contains(strings.ToLower(db.execCalls[2].query), "insert into agent_profile_allowed_model") {
+		t.Fatalf("unexpected third query: %s", db.execCalls[2].query)
+	}
+	if !strings.Contains(strings.ToLower(db.execCalls[4].query), "insert into agent_profile_allowed_tool") {
+		t.Fatalf("unexpected final query: %s", db.execCalls[4].query)
+	}
+}
+
+func TestCapabilityRepositoryGetsAgentCapabilityPolicy(t *testing.T) {
+	t.Parallel()
+
+	db := &fakeDB{
+		querySets: []rowScanner{
+			newFakeRows([]any{"model-1"}, []any{"model-2"}),
+			newFakeRows([]any{"tool-1"}),
+		},
+	}
+	repo, err := NewCapabilityRepository(db)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	policy, err := repo.GetAgentCapabilityPolicy(context.Background(), "tenant-a", "profile-1")
+	if err != nil {
+		t.Fatalf("get failed: %v", err)
+	}
+	if policy.TenantID != "tenant-a" || policy.AgentProfileID != "profile-1" {
+		t.Fatalf("unexpected policy identity: %+v", policy)
+	}
+	if !reflect.DeepEqual(policy.AllowedModelEntryIDs, []string{"model-1", "model-2"}) {
+		t.Fatalf("unexpected model ids: %v", policy.AllowedModelEntryIDs)
+	}
+	if !reflect.DeepEqual(policy.AllowedToolEntryIDs, []string{"tool-1"}) {
+		t.Fatalf("unexpected tool ids: %v", policy.AllowedToolEntryIDs)
+	}
+	if len(db.queryCalls) != 2 {
+		t.Fatalf("expected 2 query calls, got %d", len(db.queryCalls))
 	}
 }
 

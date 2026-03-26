@@ -10,6 +10,7 @@ import (
 
 var _ capability.ModelCatalogRepository = (*CapabilityRepository)(nil)
 var _ capability.ToolCatalogRepository = (*CapabilityRepository)(nil)
+var _ capability.AgentCapabilityPolicyRepository = (*CapabilityRepository)(nil)
 
 type rowScanner interface {
 	Close() error
@@ -23,11 +24,22 @@ type dbExecutor interface {
 	QueryContext(ctx context.Context, query string, args ...any) (rowScanner, error)
 }
 
-type CapabilityRepository struct {
-	db dbExecutor
+type transactionExecutor interface {
+	dbExecutor
+	Commit() error
+	Rollback() error
 }
 
-func NewCapabilityRepository(db dbExecutor) (*CapabilityRepository, error) {
+type transactionalDB interface {
+	dbExecutor
+	BeginTx(ctx context.Context, opts *sql.TxOptions) (transactionExecutor, error)
+}
+
+type CapabilityRepository struct {
+	db transactionalDB
+}
+
+func NewCapabilityRepository(db transactionalDB) (*CapabilityRepository, error) {
 	if db == nil {
 		return nil, errors.New("db executor is required")
 	}
@@ -38,12 +50,40 @@ type sqlDBAdapter struct {
 	db *sql.DB
 }
 
+type sqlTxAdapter struct {
+	tx *sql.Tx
+}
+
 func (a sqlDBAdapter) ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error) {
 	return a.db.ExecContext(ctx, query, args...)
 }
 
 func (a sqlDBAdapter) QueryContext(ctx context.Context, query string, args ...any) (rowScanner, error) {
 	return a.db.QueryContext(ctx, query, args...)
+}
+
+func (a sqlDBAdapter) BeginTx(ctx context.Context, opts *sql.TxOptions) (transactionExecutor, error) {
+	tx, err := a.db.BeginTx(ctx, opts)
+	if err != nil {
+		return nil, err
+	}
+	return sqlTxAdapter{tx: tx}, nil
+}
+
+func (a sqlTxAdapter) ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error) {
+	return a.tx.ExecContext(ctx, query, args...)
+}
+
+func (a sqlTxAdapter) QueryContext(ctx context.Context, query string, args ...any) (rowScanner, error) {
+	return a.tx.QueryContext(ctx, query, args...)
+}
+
+func (a sqlTxAdapter) Commit() error {
+	return a.tx.Commit()
+}
+
+func (a sqlTxAdapter) Rollback() error {
+	return a.tx.Rollback()
 }
 
 func NewCapabilityRepositoryFromSQLDB(db *sql.DB) (*CapabilityRepository, error) {
@@ -145,4 +185,106 @@ func (r *CapabilityRepository) ListToolsByTenant(ctx context.Context, tenantID s
 		return nil, err
 	}
 	return entries, nil
+}
+
+func (r *CapabilityRepository) SaveAgentCapabilityPolicy(ctx context.Context, policy *capability.AgentCapabilityPolicy) error {
+	if policy == nil {
+		return errors.New("policy is required")
+	}
+
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+
+	if err := replaceAgentCapabilityPolicy(ctx, tx, policy); err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+
+	return tx.Commit()
+}
+
+func replaceAgentCapabilityPolicy(ctx context.Context, tx transactionExecutor, policy *capability.AgentCapabilityPolicy) error {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM agent_profile_allowed_model
+		WHERE tenant_id = $1 AND agent_profile_id = $2`, policy.TenantID, policy.AgentProfileID); err != nil {
+		return err
+	}
+
+	if _, err := tx.ExecContext(ctx, `DELETE FROM agent_profile_allowed_tool
+		WHERE tenant_id = $1 AND agent_profile_id = $2`, policy.TenantID, policy.AgentProfileID); err != nil {
+		return err
+	}
+
+	for _, entryID := range policy.AllowedModelEntryIDs {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO agent_profile_allowed_model
+			(tenant_id, agent_profile_id, model_entry_id, created_at)
+			VALUES ($1, $2, $3, NOW())`,
+			policy.TenantID,
+			policy.AgentProfileID,
+			entryID,
+		); err != nil {
+			return err
+		}
+	}
+
+	for _, entryID := range policy.AllowedToolEntryIDs {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO agent_profile_allowed_tool
+			(tenant_id, agent_profile_id, tool_entry_id, created_at)
+			VALUES ($1, $2, $3, NOW())`,
+			policy.TenantID,
+			policy.AgentProfileID,
+			entryID,
+		); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (r *CapabilityRepository) GetAgentCapabilityPolicy(ctx context.Context, tenantID, agentProfileID string) (*capability.AgentCapabilityPolicy, error) {
+	modelRows, err := r.db.QueryContext(ctx, `SELECT model_entry_id
+		FROM agent_profile_allowed_model
+		WHERE tenant_id = $1 AND agent_profile_id = $2
+		ORDER BY model_entry_id`, tenantID, agentProfileID)
+	if err != nil {
+		return nil, err
+	}
+	defer modelRows.Close()
+
+	modelIDs := make([]string, 0)
+	for modelRows.Next() {
+		var entryID string
+		if err := modelRows.Scan(&entryID); err != nil {
+			return nil, err
+		}
+		modelIDs = append(modelIDs, entryID)
+	}
+	if err := modelRows.Err(); err != nil {
+		return nil, err
+	}
+
+	toolRows, err := r.db.QueryContext(ctx, `SELECT tool_entry_id
+		FROM agent_profile_allowed_tool
+		WHERE tenant_id = $1 AND agent_profile_id = $2
+		ORDER BY tool_entry_id`, tenantID, agentProfileID)
+	if err != nil {
+		return nil, err
+	}
+	defer toolRows.Close()
+
+	toolIDs := make([]string, 0)
+	for toolRows.Next() {
+		var entryID string
+		if err := toolRows.Scan(&entryID); err != nil {
+			return nil, err
+		}
+		toolIDs = append(toolIDs, entryID)
+	}
+	if err := toolRows.Err(); err != nil {
+		return nil, err
+	}
+
+	return capability.NewAgentCapabilityPolicy(tenantID, agentProfileID, modelIDs, toolIDs)
 }

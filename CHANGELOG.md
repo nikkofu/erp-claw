@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.7] - 2026-03-26
+
+### Added
+
+- Tenant-scoped agent capability policy domain, migration, and repository support for binding an `agent_profile` to allowed model catalog entries and tool catalog entries.
+- Application-layer validation and Admin API `PUT/GET /api/admin/v1/agent-profiles/:profile_id/capability-policy` surface for normalized allowlist management.
+- Integration and repository coverage for replacement semantics, duplicate normalization, and cross-tenant profile/model/tool rejection.
+
+### Changed
+
+- Phase 1 docs and README now reflect that minimal capability policy binding is available as a stable control-plane contract, while tenant enablement and runtime enforcement remain future work.
+
 ## [0.2.6] - 2026-03-26
 
 ### Added
