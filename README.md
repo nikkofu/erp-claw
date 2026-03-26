@@ -97,6 +97,13 @@ The first executable Phase 2 slice is now available through the admin surface. I
 
 Run `go test ./test/integration -run 'TestAdminSupplyChainFlow|TestAdminInventoryReceiptFlow|TestAdminInventoryReservationFlow|TestAdminInventoryReservationRejectsExcessQuantity|TestAdminInventoryOutboundFlow|TestAdminInventoryOutboundRejectsExcessQuantity|TestAdminInventoryTransferFlow|TestAdminInventoryTransferRejectsExcessQuantity|TestAdminInventoryLedgerListFlow|TestAdminPayableFlow|TestAdminReceivableFlow' -v` to verify the end-to-end Phase 2 admin flow locally, including inventory reservation/outbound/transfer and ledger query, payable, and receivable basics.
 
+## Workspace API (Phase 2 Minimal Query Slice)
+
+- `GET /api/workspace/v1/inventory/balances?product_id=<id>&warehouse_id=<id>`
+- `GET /api/workspace/v1/inventory/ledger?product_id=<id>&warehouse_id=<id>`
+
+Run `go test ./test/integration -run 'TestWorkspaceInventoryQueriesReturnBalanceAndLedger' -v` to verify workspace inventory query routing and response shape.
+
 ## Smoke Run
 
 Start the API server and hit the health endpoint to confirm the router boots:
