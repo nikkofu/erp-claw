@@ -507,6 +507,109 @@ func TestServiceCreatePayablePaymentPlanFailsForInvalidDueDate(t *testing.T) {
 	}
 }
 
+func TestServiceListPayableBillsReturnsTenantScopedBills(t *testing.T) {
+	ctx := context.Background()
+	svc := newTestService()
+
+	receivedOrderA := createReceivedOrder(t, ctx, svc)
+	billA, err := svc.CreatePayableBill(ctx, CreatePayableBillInput{
+		TenantID:        "tenant-a",
+		ActorID:         "finance-a",
+		PurchaseOrderID: receivedOrderA.ID,
+	})
+	if err != nil {
+		t.Fatalf("create tenant-a payable bill: %v", err)
+	}
+
+	supplierB, err := svc.CreateSupplier(ctx, CreateSupplierInput{
+		TenantID: "tenant-b",
+		ActorID:  "actor-b",
+		Code:     "SUP-B-001",
+		Name:     "Tenant B Supply",
+	})
+	if err != nil {
+		t.Fatalf("create tenant-b supplier: %v", err)
+	}
+	productB, err := svc.CreateProduct(ctx, CreateProductInput{
+		TenantID: "tenant-b",
+		ActorID:  "actor-b",
+		SKU:      "SKU-B-001",
+		Name:     "Tenant B Product",
+		Unit:     "pcs",
+	})
+	if err != nil {
+		t.Fatalf("create tenant-b product: %v", err)
+	}
+	warehouseB, err := svc.CreateWarehouse(ctx, CreateWarehouseInput{
+		TenantID: "tenant-b",
+		ActorID:  "actor-b",
+		Code:     "WH-BJ",
+		Name:     "Beijing Warehouse",
+	})
+	if err != nil {
+		t.Fatalf("create tenant-b warehouse: %v", err)
+	}
+	orderB, err := svc.CreatePurchaseOrder(ctx, CreatePurchaseOrderInput{
+		TenantID:    "tenant-b",
+		ActorID:     "actor-b",
+		SupplierID:  supplierB.ID,
+		WarehouseID: warehouseB.ID,
+		Lines: []CreatePurchaseOrderLine{{
+			ProductID: productB.ID,
+			Quantity:  2,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("create tenant-b order: %v", err)
+	}
+	submittedB, approvalB, err := svc.SubmitPurchaseOrder(ctx, SubmitPurchaseOrderInput{
+		TenantID:        "tenant-b",
+		ActorID:         "actor-b",
+		PurchaseOrderID: orderB.ID,
+	})
+	if err != nil {
+		t.Fatalf("submit tenant-b order: %v", err)
+	}
+	approvedB, _, err := svc.ApproveRequest(ctx, ResolveApprovalInput{
+		TenantID:   "tenant-b",
+		ActorID:    "manager-b",
+		ApprovalID: approvalB.ID,
+	})
+	if err != nil {
+		t.Fatalf("approve tenant-b order: %v", err)
+	}
+	_, _, _, err = svc.ReceivePurchaseOrder(ctx, ReceivePurchaseOrderInput{
+		TenantID:        "tenant-b",
+		ActorID:         "receiver-b",
+		PurchaseOrderID: submittedB.ID,
+		Lines: []ReceivePurchaseOrderLine{{
+			ProductID: approvedB.Lines[0].ProductID,
+			Quantity:  approvedB.Lines[0].Quantity,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("receive tenant-b order: %v", err)
+	}
+	if _, err := svc.CreatePayableBill(ctx, CreatePayableBillInput{
+		TenantID:        "tenant-b",
+		ActorID:         "finance-b",
+		PurchaseOrderID: approvedB.ID,
+	}); err != nil {
+		t.Fatalf("create tenant-b payable bill: %v", err)
+	}
+
+	bills, err := svc.ListPayableBills(ctx, ListPayableBillsInput{TenantID: "tenant-a"})
+	if err != nil {
+		t.Fatalf("list tenant-a payable bills: %v", err)
+	}
+	if len(bills) != 1 {
+		t.Fatalf("expected 1 tenant-a payable bill, got %d", len(bills))
+	}
+	if bills[0].ID != billA.ID {
+		t.Fatalf("expected tenant-a payable bill id %s, got %s", billA.ID, bills[0].ID)
+	}
+}
+
 func newTestService() *Service {
 	return NewService(ServiceDeps{
 		MasterData:     memory.NewMasterDataRepository(),

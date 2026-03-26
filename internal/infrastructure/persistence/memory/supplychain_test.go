@@ -199,3 +199,35 @@ func TestPayableRepositorySavePaymentPlanFailsWhenBillNotFound(t *testing.T) {
 		t.Fatalf("expected bill not found, got %v", err)
 	}
 }
+
+func TestPayableRepositoryListByTenantScopesResults(t *testing.T) {
+	ctx := context.Background()
+	repo := NewSupplyChainStore().PayableRepository()
+
+	billA, err := payable.NewBill("pab-001", "tenant-a", "po-001", "finance-a")
+	if err != nil {
+		t.Fatalf("new tenant-a bill: %v", err)
+	}
+	if err := repo.Save(ctx, billA); err != nil {
+		t.Fatalf("save tenant-a bill: %v", err)
+	}
+
+	billB, err := payable.NewBill("pab-002", "tenant-b", "po-002", "finance-b")
+	if err != nil {
+		t.Fatalf("new tenant-b bill: %v", err)
+	}
+	if err := repo.Save(ctx, billB); err != nil {
+		t.Fatalf("save tenant-b bill: %v", err)
+	}
+
+	got, err := repo.ListByTenant(ctx, "tenant-a")
+	if err != nil {
+		t.Fatalf("list tenant-a bills: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("expected 1 tenant-a bill, got %d", len(got))
+	}
+	if got[0].ID != billA.ID {
+		t.Fatalf("expected tenant-a bill id %s, got %s", billA.ID, got[0].ID)
+	}
+}

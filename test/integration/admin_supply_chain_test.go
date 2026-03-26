@@ -158,6 +158,12 @@ type envelope struct {
 	Meta  map[string]any `json:"meta"`
 }
 
+type arrayEnvelope struct {
+	Data  []map[string]any `json:"data"`
+	Error map[string]any   `json:"error"`
+	Meta  map[string]any   `json:"meta"`
+}
+
 func postJSONData(t *testing.T, h http.Handler, path string, body any) map[string]any {
 	t.Helper()
 	return doJSON(t, h, http.MethodPost, path, body, http.StatusOK).Data
@@ -166,6 +172,11 @@ func postJSONData(t *testing.T, h http.Handler, path string, body any) map[strin
 func getJSONData(t *testing.T, h http.Handler, path string) map[string]any {
 	t.Helper()
 	return doJSON(t, h, http.MethodGet, path, nil, http.StatusOK).Data
+}
+
+func getJSONArrayData(t *testing.T, h http.Handler, path string) []map[string]any {
+	t.Helper()
+	return doJSONForArray(t, h, http.MethodGet, path, nil, http.StatusOK).Data
 }
 
 func doJSON(t *testing.T, h http.Handler, method, path string, body any, expectedStatus int) envelope {
@@ -194,6 +205,41 @@ func doJSON(t *testing.T, h http.Handler, method, path string, body any, expecte
 	}
 
 	var env envelope
+	if err := json.NewDecoder(rec.Body).Decode(&env); err != nil {
+		t.Fatalf("decode response body: %v", err)
+	}
+	if env.Meta["request_id"] == "" {
+		t.Fatal("expected meta.request_id")
+	}
+	return env
+}
+
+func doJSONForArray(t *testing.T, h http.Handler, method, path string, body any, expectedStatus int) arrayEnvelope {
+	t.Helper()
+
+	var reqBody *bytes.Reader
+	if body == nil {
+		reqBody = bytes.NewReader(nil)
+	} else {
+		payload, err := json.Marshal(body)
+		if err != nil {
+			t.Fatalf("marshal request body: %v", err)
+		}
+		reqBody = bytes.NewReader(payload)
+	}
+
+	req := httptest.NewRequest(method, path, reqBody)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Tenant-ID", "tenant-admin")
+	rec := httptest.NewRecorder()
+
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != expectedStatus {
+		t.Fatalf("expected status %d, got %d with body %s", expectedStatus, rec.Code, rec.Body.String())
+	}
+
+	var env arrayEnvelope
 	if err := json.NewDecoder(rec.Body).Decode(&env); err != nil {
 		t.Fatalf("decode response body: %v", err)
 	}
