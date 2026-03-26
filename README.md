@@ -69,7 +69,7 @@ Application commands flow through a shared pipeline before any domain mutation h
 - Audit recording wraps command execution so later observability and compliance hooks share one contract.
 - Later ERP domain modules will plug into this same pipeline instead of bypassing it.
 
-## Phase 2 Admin Flow (Wave 1-3 Baseline)
+## Phase 2 Admin Flow (Wave 1-5 Baseline)
 
 The first executable Phase 2 slice is now available through the admin surface. It currently uses in-memory repositories at runtime and forward-looking SQL migrations for the future PostgreSQL-backed implementation.
 
@@ -81,14 +81,43 @@ The first executable Phase 2 slice is now available through the admin surface. I
 - `POST /api/admin/v1/procurement/purchase-orders/:id/receive`
 - `POST /api/admin/v1/procurement/purchase-orders/:id/payable-bills`
 - `GET /api/admin/v1/procurement/purchase-orders/:id`
-- `GET /api/admin/v1/inventory/balances?product_id=<id>&warehouse_id=<id>`
+- `GET /api/admin/v1/inventory/ledger?product_id=<id>&warehouse_id=<id>`
+- `GET /api/admin/v1/inventory/balances?product_id=<id>&warehouse_id=<id>` (returns `on_hand` / `reserved` / `available`)
+- `POST /api/admin/v1/inventory/reservations`
+- `POST /api/admin/v1/inventory/outbounds`
+- `POST /api/admin/v1/inventory/transfers`
+- `POST /api/admin/v1/receivables`
+- `GET /api/admin/v1/receivables`
+- `GET /api/admin/v1/receivables/:id`
 - `GET /api/admin/v1/payables`
 - `GET /api/admin/v1/payables/:id`
 - `POST /api/admin/v1/payables/:id/payment-plans`
+- `POST /api/admin/v1/sales-orders`
+- `GET /api/admin/v1/sales-orders`
+- `GET /api/admin/v1/sales-orders/:id`
+- `POST /api/admin/v1/sales-orders/:id/ship`
+- `GET /api/admin/v1/read-models/overview`
 - `POST /api/admin/v1/approvals/:id/approve`
 - `POST /api/admin/v1/approvals/:id/reject`
 
-Run `go test ./test/integration -run 'TestAdminSupplyChainFlow|TestAdminInventoryReceiptFlow|TestAdminPayableFlow' -v` to verify the end-to-end Phase 2 admin flow locally, including payable bill and payment plan creation.
+Run `go test ./test/integration -run 'TestAdminSupplyChainFlow|TestAdminInventoryReceiptFlow|TestAdminInventoryReservationFlow|TestAdminInventoryReservationRejectsExcessQuantity|TestAdminInventoryOutboundFlow|TestAdminInventoryOutboundRejectsExcessQuantity|TestAdminInventoryTransferFlow|TestAdminInventoryTransferRejectsExcessQuantity|TestAdminInventoryLedgerListFlow|TestAdminPayableFlow|TestAdminReceivableFlow|TestAdminSalesOrderShipFlow|TestAdminSalesOrderShipRejectsInsufficientInventory|TestAdminBackofficeOverviewReadModel' -v` to verify the end-to-end Phase 2 admin flow locally, including inventory reservation/outbound/transfer and ledger query, payable/receivable basics, minimal sales shipment loop, and the backoffice overview read model.
+
+## Workspace API (Phase 2 Minimal Query Slice)
+
+- `GET /api/workspace/v1/inventory/balances?product_id=<id>&warehouse_id=<id>`
+- `GET /api/workspace/v1/inventory/ledger?product_id=<id>&warehouse_id=<id>`
+- `GET /api/workspace/v1/sales-orders`
+- `GET /api/workspace/v1/sales-orders/:id`
+
+Run `go test ./test/integration -run 'TestWorkspaceInventoryQueriesReturnBalanceAndLedger|TestWorkspaceSalesOrderQueriesReturnListAndDetail' -v` to verify workspace inventory/sales query routing and response shape.
+
+## Integration API (Phase 2 Minimal Query Slice)
+
+- `GET /api/integration/v1/read-models/overview`
+- `GET /api/integration/v1/sales-orders`
+- `GET /api/integration/v1/sales-orders/:id`
+
+Run `go test ./test/integration -run 'TestIntegrationReadModelAndSalesQueries' -v` to verify integration overview and sales query routing.
 
 ## Smoke Run
 

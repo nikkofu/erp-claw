@@ -65,6 +65,43 @@ type GetInventoryBalanceInput struct {
 	WarehouseID string
 }
 
+type ReserveInventoryInput struct {
+	TenantID      string
+	ActorID       string
+	ProductID     string
+	WarehouseID   string
+	Quantity      int
+	ReferenceType string
+	ReferenceID   string
+}
+
+type IssueInventoryInput struct {
+	TenantID      string
+	ActorID       string
+	ProductID     string
+	WarehouseID   string
+	Quantity      int
+	ReferenceType string
+	ReferenceID   string
+}
+
+type TransferInventoryInput struct {
+	TenantID        string
+	ActorID         string
+	ProductID       string
+	FromWarehouseID string
+	ToWarehouseID   string
+	Quantity        int
+	ReferenceType   string
+	ReferenceID     string
+}
+
+type ListInventoryLedgerInput struct {
+	TenantID    string
+	ProductID   string
+	WarehouseID string
+}
+
 type CreatePayableBillInput struct {
 	TenantID        string
 	ActorID         string
@@ -90,4 +127,51 @@ type CreatePayablePaymentPlanInput struct {
 type ListPayablePaymentPlansInput struct {
 	TenantID      string
 	PayableBillID string
+}
+
+type CreateReceivableBillInput struct {
+	TenantID    string
+	ActorID     string
+	ExternalRef string
+}
+
+type GetReceivableBillInput struct {
+	TenantID string
+	BillID   string
+}
+
+type ListReceivableBillsInput struct {
+	TenantID string
+}
+
+type CreateSalesOrderLine struct {
+	ProductID string
+	Quantity  int
+}
+
+type CreateSalesOrderInput struct {
+	TenantID    string
+	ActorID     string
+	WarehouseID string
+	ExternalRef string
+	Lines       []CreateSalesOrderLine
+}
+
+type GetSalesOrderInput struct {
+	TenantID     string
+	SalesOrderID string
+}
+
+type ListSalesOrdersInput struct {
+	TenantID string
+}
+
+type ShipSalesOrderInput struct {
+	TenantID     string
+	ActorID      string
+	SalesOrderID string
+}
+
+type GetBackofficeOverviewInput struct {
+	TenantID string
 }

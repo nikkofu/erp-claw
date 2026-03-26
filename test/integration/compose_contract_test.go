@@ -147,3 +147,87 @@ func TestPhase2Wave3PaymentPlanMigrationContract(t *testing.T) {
 		}
 	}
 }
+
+func TestPhase2Wave3ReceivableMigrationContract(t *testing.T) {
+	data, err := os.ReadFile("../../migrations/000006_init_phase2_wave3_receivable_tables.up.sql")
+	if err != nil {
+		t.Fatalf("read phase 2 wave 3 receivable migration: %v", err)
+	}
+
+	content := string(data)
+	requiredTables := []string{
+		"receivable_bill",
+	}
+	for _, table := range requiredTables {
+		if !strings.Contains(content, "create table if not exists "+table) {
+			t.Fatalf("expected migration to create table %q", table)
+		}
+	}
+
+	requiredConstraints := []string{
+		"unique (tenant_id, id)",
+		"unique (tenant_id, external_ref)",
+	}
+	for _, constraint := range requiredConstraints {
+		if !strings.Contains(content, constraint) {
+			t.Fatalf("expected migration to contain tenant-aware constraint %q", constraint)
+		}
+	}
+}
+
+func TestPhase2Wave4InventoryReservationMigrationContract(t *testing.T) {
+	data, err := os.ReadFile("../../migrations/000007_init_phase2_wave4_inventory_reservation_tables.up.sql")
+	if err != nil {
+		t.Fatalf("read phase 2 wave 4 inventory reservation migration: %v", err)
+	}
+
+	content := string(data)
+	requiredTables := []string{
+		"inventory_reservation",
+	}
+	for _, table := range requiredTables {
+		if !strings.Contains(content, "create table if not exists "+table) {
+			t.Fatalf("expected migration to create table %q", table)
+		}
+	}
+
+	requiredConstraints := []string{
+		"unique (tenant_id, id)",
+		"foreign key (tenant_id, product_id) references product(tenant_id, id)",
+		"foreign key (tenant_id, warehouse_id) references warehouse(tenant_id, id)",
+	}
+	for _, constraint := range requiredConstraints {
+		if !strings.Contains(content, constraint) {
+			t.Fatalf("expected migration to contain tenant-aware constraint %q", constraint)
+		}
+	}
+}
+
+func TestPhase2Wave5SalesOrderMigrationContract(t *testing.T) {
+	data, err := os.ReadFile("../../migrations/000008_init_phase2_wave5_sales_tables.up.sql")
+	if err != nil {
+		t.Fatalf("read phase 2 wave 5 sales migration: %v", err)
+	}
+
+	content := string(data)
+	requiredTables := []string{
+		"sales_order",
+		"sales_order_line",
+	}
+	for _, table := range requiredTables {
+		if !strings.Contains(content, "create table if not exists "+table) {
+			t.Fatalf("expected migration to create table %q", table)
+		}
+	}
+
+	requiredConstraints := []string{
+		"unique (tenant_id, id)",
+		"foreign key (tenant_id, warehouse_id) references warehouse(tenant_id, id)",
+		"foreign key (tenant_id, product_id) references product(tenant_id, id)",
+	}
+	for _, constraint := range requiredConstraints {
+		if !strings.Contains(content, constraint) {
+			t.Fatalf("expected migration to contain tenant-aware constraint %q", constraint)
+		}
+	}
+}
