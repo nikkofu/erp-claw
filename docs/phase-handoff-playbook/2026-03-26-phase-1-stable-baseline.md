@@ -18,7 +18,7 @@
 - 目标分支：`feature/phase1-control-plane`
 - 目标工作树：`.worktrees/phase1-control-plane`
 - 根仓库状态：`main` 工作区已清理干净，不再残留误落的未跟踪 `Phase 1` 文件
-- 版本号：`0.2.8`
+- 版本号：`0.2.9`
 - bootstrap 合同：运行时 catalog 在非测试路径下失败即中止，不再静默回退为内存存储
 - Fresh 验证命令：`GOCACHE=$(pwd)/.cache/go-build go test ./... -count=1`
 
@@ -47,6 +47,7 @@
 - tenant-scoped tool catalog baseline
 - capability tenant enablement baseline (`activate` / `deactivate`)
 - agent profile capability policy binding baseline
+- agent profile effective capability read baseline (`/capability-policy/effective`)
 - approval definition / instance / task baseline
 - `REQUIRE_APPROVAL` 到 approval instance/task 的最小 pipeline 接线
 - outbox dispatch / retry / failed recovery / stale `publishing` reclaim / poll instrumentation baseline
@@ -58,7 +59,8 @@
 - `Admin API` 已存在控制面目录型接口，不需要重新从零搭 tenant/iam catalog
 - `Workspace API` 已存在 sessions/tasks/events/stream 最小写入/查询/SSE 面，可作为后续更深 workspace protocol 的依赖底座
 - `policy` / `audit` / `approval starter seam` 已存在，可在业务命令中继续复用
-- `model catalog` / `tool catalog` / `tenant enablement baseline` / `agent capability policy binding` 已存在，不需要重新设计租户级 capability 主键和仓储边界
+- `model catalog` / `tool catalog` / `tenant enablement baseline` / `agent capability policy binding` / `effective capability read surface` 已存在，不需要重新设计租户级 capability 主键和仓储边界
+- `/capability-policy/effective` 当前只解析显式 `capability-policy` 绑定，不隐式推导 `agent_profile.model`
 - `outbox reliability baseline` 已存在，后续业务事件发布应沿用该路径，而不是绕开它
 - tenant-scoped admin mutations 已要求 tenant root 先存在，后续业务建模应沿用这一边界
 
@@ -68,6 +70,7 @@
 
 - Phase 2 供应链业务闭环，包括 master data、procurement、inventory、sales 与 receivable/payable
 - plugin registry、quota / feature flag，以及 runtime-side capability enforcement
+- capability effective read surface 不是 runtime-side enforcement，也不是完整 plugin/tool runtime
 - 更完整的 workflow orchestration、approval admin surface、多级审批与 approver resolution
 - 真实 WebSocket / streaming protocol、跨进程 event replay 与更完整的 stream durability
 - live DB round-trip、consumer-side idempotency、DLQ 与更完整的 reliability hardening
@@ -91,7 +94,9 @@
 - `0281578` `feat: add phase1 outbox operator surface`
 - `c20d484` `feat: add phase1 workspace streaming surface`
 - `67918a3` `feat: add phase1 agent capability policy surface`
-- 当前这次 agent capability policy slice 与其配套文档/版本同步提交
+- `1ea9e61` `feat: add phase1 capability tenant enablement surface`
+- `224240e` `feat: add phase1 effective capability policy resolver`
+- `c974b1f` `feat: add phase1 effective capability policy admin surface`
 
 ## 8. 建议的下一步
 

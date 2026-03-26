@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.9] - 2026-03-26
+
+### Added
+
+- Effective agent capability policy domain and application resolver that joins stored profile allowlists with the current tenant-local model/tool catalogs.
+- Admin API `GET /api/admin/v1/agent-profiles/:profile_id/capability-policy/effective` for reading active effective model/tool bindings alongside stale bindings.
+- Application and integration coverage for effective/stale separation, empty explicit-policy fallback, and deactivated catalog entry visibility.
+
+### Changed
+
+- Phase 1 docs and README now clarify that the effective capability surface resolves explicit `capability-policy` bindings only; it does not infer implicit allowlist entries from `agent_profile.model`.
+- Phase 1 docs now distinguish between stale inactive entries produced by the current Admin lifecycle and stale missing entries handled defensively by the resolver.
+
 ## [0.2.8] - 2026-03-26
 
 ### Added

@@ -73,8 +73,11 @@ The control plane now exposes a minimal governed allowlist surface for agent cap
 
 - `PUT /api/admin/v1/agent-profiles/:profile_id/capability-policy`
 - `GET /api/admin/v1/agent-profiles/:profile_id/capability-policy`
+- `GET /api/admin/v1/agent-profiles/:profile_id/capability-policy/effective`
 - Tenant-local validation for agent profile IDs, model catalog entry IDs, and tool catalog entry IDs
 - Replace semantics on write, with normalized and deduplicated model/tool entry reads
+- Effective reads resolve explicit stored allowlists against the current tenant-local catalogs and separate active bindings from stale bindings
+- Empty explicit capability policy reads return empty effective/stale lists; the route does not implicitly treat `agent_profile.model` as an allowlist entry
 
 The capability catalog also now has a tenant enablement baseline.
 
@@ -83,7 +86,9 @@ The capability catalog also now has a tenant enablement baseline.
 - `POST /api/admin/v1/tool-catalog-entries/:entry_id/activate`
 - `POST /api/admin/v1/tool-catalog-entries/:entry_id/deactivate`
 - Future capability policy writes reject inactive catalog entries
-- Existing capability bindings remain queryable after deactivation; runtime-side enforcement is still a later Phase 1/Phase 3 concern
+- Existing capability bindings remain queryable after deactivation through the stored policy route, while the effective read surface reports deactivated entries as stale
+- The current Admin lifecycle naturally produces stale inactive entries; stale missing entries are handled defensively for repository drift and future lifecycle expansion
+- Runtime-side enforcement is still a later Phase 1/Phase 3 concern
 
 This is still not the full capability governance system. Tenant enablement, plugin registry, quota, feature flags, and runtime-side enforcement remain outside this Phase 1 slice.
 
