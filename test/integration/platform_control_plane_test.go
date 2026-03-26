@@ -338,6 +338,44 @@ func TestPlatformControlPlaneListSessionsSupportsStatusFilter(t *testing.T) {
 	}
 }
 
+func TestPlatformControlPlaneListTasksSupportsPagination(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	container := bootstrap.NewContainer(bootstrap.DefaultConfig())
+	h := router.New(router.WithContainer(container))
+
+	postJSONData(t, h, "/api/platform/v1/agent/sessions", map[string]any{
+		"session_id": "sess-page-001",
+		"metadata": map[string]any{
+			"channel": "workspace",
+		},
+	})
+	for _, taskID := range []string{"task-page-001", "task-page-002", "task-page-003"} {
+		postJSONData(t, h, "/api/platform/v1/agent/sessions/sess-page-001/tasks", map[string]any{
+			"task_id":   taskID,
+			"task_type": "tool.call",
+			"input": map[string]any{
+				"tool": "search",
+			},
+		})
+	}
+
+	paged := getJSONData(t, h, "/api/platform/v1/agent/tasks?offset=1&limit=1")
+	items, ok := paged["tasks"].([]any)
+	if !ok {
+		t.Fatalf("expected tasks array, got %#v", paged["tasks"])
+	}
+	if len(items) != 1 {
+		t.Fatalf("expected 1 paged task, got %d", len(items))
+	}
+	task, ok := items[0].(map[string]any)
+	if !ok {
+		t.Fatalf("expected task object, got %#v", items[0])
+	}
+	if got := stringField(t, task, "id"); got != "task-page-002" {
+		t.Fatalf("expected task-page-002, got %s", got)
+	}
+}
+
 func doJSONWithHeaders(
 	t *testing.T,
 	h http.Handler,

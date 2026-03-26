@@ -526,6 +526,8 @@ type ListTasksInput struct {
 	ActorID   string
 	SessionID string
 	Status    platformruntime.TaskStatus
+	Offset    int
+	Limit     int
 }
 
 func (s *Service) ListTasks(ctx context.Context, input ListTasksInput) ([]platformruntime.Task, error) {
@@ -553,7 +555,21 @@ func (s *Service) ListTasks(ctx context.Context, input ListTasksInput) ([]platfo
 			}
 			filtered = append(filtered, task)
 		}
-		tasks = filtered
+
+		start := input.Offset
+		if start < 0 {
+			start = 0
+		}
+		if start >= len(filtered) {
+			tasks = []platformruntime.Task{}
+			return nil
+		}
+
+		end := len(filtered)
+		if input.Limit > 0 && start+input.Limit < end {
+			end = start + input.Limit
+		}
+		tasks = append([]platformruntime.Task(nil), filtered[start:end]...)
 		return nil
 	})
 	return tasks, err
