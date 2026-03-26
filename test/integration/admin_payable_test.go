@@ -67,6 +67,39 @@ func TestAdminPayableFlow(t *testing.T) {
 	if got := stringField(t, payableDetail, "purchase_order_id"); got != orderID {
 		t.Fatalf("expected payable purchase_order_id %s, got %s", orderID, got)
 	}
+
+	planResp := postJSONData(t, h, "/api/admin/v1/payables/"+payableID+"/payment-plans", map[string]any{
+		"due_date": "2026-04-01",
+	})
+	if got := stringField(t, planResp, "payable_bill_id"); got != payableID {
+		t.Fatalf("expected payment plan payable_bill_id %s, got %s", payableID, got)
+	}
+	if got := stringField(t, planResp, "status"); got != "planned" {
+		t.Fatalf("expected payment plan status planned, got %s", got)
+	}
+	if got := stringField(t, planResp, "due_date"); got != "2026-04-01" {
+		t.Fatalf("expected payment plan due date 2026-04-01, got %s", got)
+	}
+
+	payableDetail = getJSONData(t, h, "/api/admin/v1/payables/"+payableID)
+	rawPlans, ok := payableDetail["payment_plans"]
+	if !ok {
+		t.Fatalf("expected payable detail to include payment_plans, got %#v", payableDetail)
+	}
+	plans, ok := rawPlans.([]any)
+	if !ok {
+		t.Fatalf("expected payment_plans to be an array, got %#v", rawPlans)
+	}
+	if len(plans) != 1 {
+		t.Fatalf("expected 1 payment plan, got %d", len(plans))
+	}
+	planObj, ok := plans[0].(map[string]any)
+	if !ok {
+		t.Fatalf("expected payment plan item to be an object, got %#v", plans[0])
+	}
+	if got := stringField(t, planObj, "due_date"); got != "2026-04-01" {
+		t.Fatalf("expected payment plan due date 2026-04-01, got %s", got)
+	}
 }
 
 func TestAdminPayableCreateBeforeReceiveReturnsBadRequest(t *testing.T) {

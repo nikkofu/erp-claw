@@ -83,10 +83,11 @@ The first executable Phase 2 slice is now available through the admin surface. I
 - `GET /api/admin/v1/procurement/purchase-orders/:id`
 - `GET /api/admin/v1/inventory/balances?product_id=<id>&warehouse_id=<id>`
 - `GET /api/admin/v1/payables/:id`
+- `POST /api/admin/v1/payables/:id/payment-plans`
 - `POST /api/admin/v1/approvals/:id/approve`
 - `POST /api/admin/v1/approvals/:id/reject`
 
-Run `go test ./test/integration -run 'TestAdminSupplyChainFlow|TestAdminInventoryReceiptFlow|TestAdminPayableFlow' -v` to verify the end-to-end Phase 2 admin flow locally.
+Run `go test ./test/integration -run 'TestAdminSupplyChainFlow|TestAdminInventoryReceiptFlow|TestAdminPayableFlow' -v` to verify the end-to-end Phase 2 admin flow locally, including payable bill and payment plan creation.
 
 ## Smoke Run
 

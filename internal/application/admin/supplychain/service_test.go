@@ -432,6 +432,81 @@ func TestServiceCreatePayableBillFailsWhenBillAlreadyExists(t *testing.T) {
 	}
 }
 
+func TestServiceCreatesPayablePaymentPlanForBill(t *testing.T) {
+	ctx := context.Background()
+	svc := newTestService()
+	receivedOrder := createReceivedOrder(t, ctx, svc)
+
+	bill, err := svc.CreatePayableBill(ctx, CreatePayableBillInput{
+		TenantID:        "tenant-a",
+		ActorID:         "finance-a",
+		PurchaseOrderID: receivedOrder.ID,
+	})
+	if err != nil {
+		t.Fatalf("create payable bill: %v", err)
+	}
+
+	plan, err := svc.CreatePayablePaymentPlan(ctx, CreatePayablePaymentPlanInput{
+		TenantID:       "tenant-a",
+		ActorID:        "finance-a",
+		PayableBillID:  bill.ID,
+		DueDateISO8601: "2026-04-01",
+	})
+	if err != nil {
+		t.Fatalf("create payable payment plan: %v", err)
+	}
+
+	if plan.Status != payable.PaymentPlanStatusPlanned {
+		t.Fatalf("expected planned payment plan, got %s", plan.Status)
+	}
+	if plan.PayableBillID != bill.ID {
+		t.Fatalf("expected payable bill id %s, got %s", bill.ID, plan.PayableBillID)
+	}
+	if plan.DueDateISO8601 != "2026-04-01" {
+		t.Fatalf("expected due date 2026-04-01, got %s", plan.DueDateISO8601)
+	}
+}
+
+func TestServiceCreatePayablePaymentPlanFailsWhenBillNotFound(t *testing.T) {
+	ctx := context.Background()
+	svc := newTestService()
+
+	_, err := svc.CreatePayablePaymentPlan(ctx, CreatePayablePaymentPlanInput{
+		TenantID:       "tenant-a",
+		ActorID:        "finance-a",
+		PayableBillID:  "pab-missing",
+		DueDateISO8601: "2026-04-01",
+	})
+	if !errors.Is(err, payable.ErrBillNotFound) {
+		t.Fatalf("expected bill not found, got %v", err)
+	}
+}
+
+func TestServiceCreatePayablePaymentPlanFailsForInvalidDueDate(t *testing.T) {
+	ctx := context.Background()
+	svc := newTestService()
+	receivedOrder := createReceivedOrder(t, ctx, svc)
+
+	bill, err := svc.CreatePayableBill(ctx, CreatePayableBillInput{
+		TenantID:        "tenant-a",
+		ActorID:         "finance-a",
+		PurchaseOrderID: receivedOrder.ID,
+	})
+	if err != nil {
+		t.Fatalf("create payable bill: %v", err)
+	}
+
+	_, err = svc.CreatePayablePaymentPlan(ctx, CreatePayablePaymentPlanInput{
+		TenantID:       "tenant-a",
+		ActorID:        "finance-a",
+		PayableBillID:  bill.ID,
+		DueDateISO8601: "20260401",
+	})
+	if !errors.Is(err, payable.ErrInvalidPaymentPlan) {
+		t.Fatalf("expected invalid payment plan, got %v", err)
+	}
+}
+
 func newTestService() *Service {
 	return NewService(ServiceDeps{
 		MasterData:     memory.NewMasterDataRepository(),

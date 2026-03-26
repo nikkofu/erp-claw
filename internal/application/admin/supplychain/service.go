@@ -338,6 +338,34 @@ func (s *Service) GetPayableBill(ctx context.Context, input GetPayableBillInput)
 	return s.payables.Get(ctx, input.TenantID, input.BillID)
 }
 
+func (s *Service) CreatePayablePaymentPlan(ctx context.Context, input CreatePayablePaymentPlanInput) (payable.PaymentPlan, error) {
+	var plan payable.PaymentPlan
+	err := s.pipeline.Execute(ctx, shared.Command{
+		Name:     "payable.payment_plans.create",
+		TenantID: input.TenantID,
+		ActorID:  input.ActorID,
+		Payload:  input,
+	}, func(txCtx context.Context, _ shared.Command) error {
+		if _, err := s.payables.Get(txCtx, input.TenantID, input.PayableBillID); err != nil {
+			return err
+		}
+		created, err := payable.NewPaymentPlan(nextID("ppm"), input.TenantID, input.PayableBillID, input.ActorID, input.DueDateISO8601)
+		if err != nil {
+			return err
+		}
+		if err := s.payables.SavePaymentPlan(txCtx, created); err != nil {
+			return err
+		}
+		plan = created
+		return nil
+	})
+	return plan, err
+}
+
+func (s *Service) ListPayablePaymentPlans(ctx context.Context, input ListPayablePaymentPlansInput) ([]payable.PaymentPlan, error) {
+	return s.payables.ListPaymentPlansByBill(ctx, input.TenantID, input.PayableBillID)
+}
+
 func (s *Service) resolveRequest(
 	ctx context.Context,
 	input ResolveApprovalInput,

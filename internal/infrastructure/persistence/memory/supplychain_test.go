@@ -150,3 +150,52 @@ func TestPayableRepositoryRejectsDuplicateBillPerPurchaseOrder(t *testing.T) {
 		t.Fatalf("expected bill already exists, got %v", err)
 	}
 }
+
+func TestPayableRepositoryListPaymentPlansByBillReturnsDetachedCopy(t *testing.T) {
+	ctx := context.Background()
+	repo := NewSupplyChainStore().PayableRepository()
+
+	bill, err := payable.NewBill("pab-001", "tenant-a", "po-001", "finance-a")
+	if err != nil {
+		t.Fatalf("new bill: %v", err)
+	}
+	if err := repo.Save(ctx, bill); err != nil {
+		t.Fatalf("save bill: %v", err)
+	}
+
+	plan, err := payable.NewPaymentPlan("ppm-001", "tenant-a", bill.ID, "finance-a", "2026-04-01")
+	if err != nil {
+		t.Fatalf("new payment plan: %v", err)
+	}
+	if err := repo.SavePaymentPlan(ctx, plan); err != nil {
+		t.Fatalf("save payment plan: %v", err)
+	}
+
+	got, err := repo.ListPaymentPlansByBill(ctx, "tenant-a", bill.ID)
+	if err != nil {
+		t.Fatalf("list payment plans: %v", err)
+	}
+	got[0].DueDateISO8601 = "2099-12-31"
+
+	reloaded, err := repo.ListPaymentPlansByBill(ctx, "tenant-a", bill.ID)
+	if err != nil {
+		t.Fatalf("reload payment plans: %v", err)
+	}
+	if reloaded[0].DueDateISO8601 != "2026-04-01" {
+		t.Fatalf("expected stored due date 2026-04-01, got %s", reloaded[0].DueDateISO8601)
+	}
+}
+
+func TestPayableRepositorySavePaymentPlanFailsWhenBillNotFound(t *testing.T) {
+	ctx := context.Background()
+	repo := NewSupplyChainStore().PayableRepository()
+
+	plan, err := payable.NewPaymentPlan("ppm-001", "tenant-a", "pab-missing", "finance-a", "2026-04-01")
+	if err != nil {
+		t.Fatalf("new payment plan: %v", err)
+	}
+	err = repo.SavePaymentPlan(ctx, plan)
+	if !errors.Is(err, payable.ErrBillNotFound) {
+		t.Fatalf("expected bill not found, got %v", err)
+	}
+}

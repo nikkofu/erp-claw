@@ -227,7 +227,35 @@ func registerAdminRoutes(rg *gin.RouterGroup, container *bootstrap.Container) {
 			renderSupplyChainError(c, err)
 			return
 		}
-		presenter.OK(c, payableBillResponse(bill))
+
+		plans, err := container.SupplyChain.ListPayablePaymentPlans(c.Request.Context(), supplychain.ListPayablePaymentPlansInput{
+			TenantID:      tenantIDFromContext(c),
+			PayableBillID: bill.ID,
+		})
+		if err != nil {
+			renderSupplyChainError(c, err)
+			return
+		}
+		presenter.OK(c, payableBillDetailResponse(bill, plans))
+	})
+	payableGroup.POST("/:id/payment-plans", func(c *gin.Context) {
+		var req createPayablePaymentPlanRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			presenter.Error(c, http.StatusBadRequest, err.Error())
+			return
+		}
+
+		plan, err := container.SupplyChain.CreatePayablePaymentPlan(c.Request.Context(), supplychain.CreatePayablePaymentPlanInput{
+			TenantID:       tenantIDFromContext(c),
+			ActorID:        actorIDFromContext(c),
+			PayableBillID:  c.Param("id"),
+			DueDateISO8601: req.DueDate,
+		})
+		if err != nil {
+			renderSupplyChainError(c, err)
+			return
+		}
+		presenter.OK(c, payablePaymentPlanResponse(plan))
 	})
 }
 
@@ -267,6 +295,10 @@ type receivePurchaseOrderLineRequest struct {
 	Quantity  int    `json:"quantity"`
 }
 
+type createPayablePaymentPlanRequest struct {
+	DueDate string `json:"due_date"`
+}
+
 func tenantIDFromContext(c *gin.Context) string {
 	return c.GetString("tenant_id")
 }
@@ -294,6 +326,7 @@ func renderSupplyChainError(c *gin.Context, err error) {
 		errors.Is(err, payable.ErrInvalidBill),
 		errors.Is(err, payable.ErrBillAlreadyExists),
 		errors.Is(err, payable.ErrOrderNotBillable),
+		errors.Is(err, payable.ErrInvalidPaymentPlan),
 		errors.Is(err, approval.ErrInvalidRequest),
 		errors.Is(err, approval.ErrApprovalNotPending):
 		presenter.Error(c, http.StatusBadRequest, err.Error())
@@ -436,4 +469,29 @@ func payableBillResponse(bill payable.Bill) gin.H {
 		"status":            bill.Status,
 		"created_by":        bill.CreatedBy,
 	}
+}
+
+func payablePaymentPlanResponse(plan payable.PaymentPlan) gin.H {
+	return gin.H{
+		"id":              plan.ID,
+		"tenant_id":       plan.TenantID,
+		"payable_bill_id": plan.PayableBillID,
+		"status":          plan.Status,
+		"due_date":        plan.DueDateISO8601,
+		"created_by":      plan.CreatedBy,
+	}
+}
+
+func payablePaymentPlansResponse(plans []payable.PaymentPlan) []gin.H {
+	out := make([]gin.H, 0, len(plans))
+	for _, plan := range plans {
+		out = append(out, payablePaymentPlanResponse(plan))
+	}
+	return out
+}
+
+func payableBillDetailResponse(bill payable.Bill, plans []payable.PaymentPlan) gin.H {
+	resp := payableBillResponse(bill)
+	resp["payment_plans"] = payablePaymentPlansResponse(plans)
+	return resp
 }

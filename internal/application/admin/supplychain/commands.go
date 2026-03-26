@@ -75,3 +75,15 @@ type GetPayableBillInput struct {
 	TenantID string
 	BillID   string
 }
+
+type CreatePayablePaymentPlanInput struct {
+	TenantID       string
+	ActorID        string
+	PayableBillID  string
+	DueDateISO8601 string
+}
+
+type ListPayablePaymentPlansInput struct {
+	TenantID      string
+	PayableBillID string
+}

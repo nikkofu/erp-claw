@@ -16,29 +16,33 @@ type masterDataRepository struct {
 }
 
 type SupplyChainStore struct {
-	mu         sync.RWMutex
-	suppliers  map[string]masterdata.Supplier
-	products   map[string]masterdata.Product
-	warehouses map[string]masterdata.Warehouse
-	orders     map[string]procurement.PurchaseOrder
-	requests   map[string]approval.Request
-	receipts   map[string]inventory.Receipt
-	ledger     map[string][]inventory.LedgerEntry
-	bills      map[string]payable.Bill
-	billsByPO  map[string]string
+	mu          sync.RWMutex
+	suppliers   map[string]masterdata.Supplier
+	products    map[string]masterdata.Product
+	warehouses  map[string]masterdata.Warehouse
+	orders      map[string]procurement.PurchaseOrder
+	requests    map[string]approval.Request
+	receipts    map[string]inventory.Receipt
+	ledger      map[string][]inventory.LedgerEntry
+	bills       map[string]payable.Bill
+	billsByPO   map[string]string
+	plans       map[string]payable.PaymentPlan
+	plansByBill map[string][]string
 }
 
 func NewSupplyChainStore() *SupplyChainStore {
 	return &SupplyChainStore{
-		suppliers:  make(map[string]masterdata.Supplier),
-		products:   make(map[string]masterdata.Product),
-		warehouses: make(map[string]masterdata.Warehouse),
-		orders:     make(map[string]procurement.PurchaseOrder),
-		requests:   make(map[string]approval.Request),
-		receipts:   make(map[string]inventory.Receipt),
-		ledger:     make(map[string][]inventory.LedgerEntry),
-		bills:      make(map[string]payable.Bill),
-		billsByPO:  make(map[string]string),
+		suppliers:   make(map[string]masterdata.Supplier),
+		products:    make(map[string]masterdata.Product),
+		warehouses:  make(map[string]masterdata.Warehouse),
+		orders:      make(map[string]procurement.PurchaseOrder),
+		requests:    make(map[string]approval.Request),
+		receipts:    make(map[string]inventory.Receipt),
+		ledger:      make(map[string][]inventory.LedgerEntry),
+		bills:       make(map[string]payable.Bill),
+		billsByPO:   make(map[string]string),
+		plans:       make(map[string]payable.PaymentPlan),
+		plansByBill: make(map[string][]string),
 	}
 }
 
@@ -251,6 +255,36 @@ func (r *payableRepository) GetByPurchaseOrder(_ context.Context, tenantID, purc
 	return clonePayableBill(bill), nil
 }
 
+func (r *payableRepository) SavePaymentPlan(_ context.Context, plan payable.PaymentPlan) error {
+	r.store.mu.Lock()
+	defer r.store.mu.Unlock()
+
+	if _, ok := r.store.bills[key(plan.TenantID, plan.PayableBillID)]; !ok {
+		return payable.ErrBillNotFound
+	}
+
+	r.store.plans[key(plan.TenantID, plan.ID)] = clonePayablePaymentPlan(plan)
+	billKey := key(plan.TenantID, plan.PayableBillID)
+	r.store.plansByBill[billKey] = append(r.store.plansByBill[billKey], plan.ID)
+	return nil
+}
+
+func (r *payableRepository) ListPaymentPlansByBill(_ context.Context, tenantID, payableBillID string) ([]payable.PaymentPlan, error) {
+	r.store.mu.RLock()
+	defer r.store.mu.RUnlock()
+
+	ids := r.store.plansByBill[key(tenantID, payableBillID)]
+	out := make([]payable.PaymentPlan, 0, len(ids))
+	for _, planID := range ids {
+		plan, ok := r.store.plans[key(tenantID, planID)]
+		if !ok {
+			continue
+		}
+		out = append(out, clonePayablePaymentPlan(plan))
+	}
+	return out, nil
+}
+
 func key(tenantID, id string) string {
 	return tenantID + "/" + id
 }
@@ -275,4 +309,8 @@ func cloneLedgerEntry(entry inventory.LedgerEntry) inventory.LedgerEntry {
 
 func clonePayableBill(bill payable.Bill) payable.Bill {
 	return bill
+}
+
+func clonePayablePaymentPlan(plan payable.PaymentPlan) payable.PaymentPlan {
+	return plan
 }
