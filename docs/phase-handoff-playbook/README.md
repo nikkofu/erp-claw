@@ -1,45 +1,52 @@
 # Phase Handoff Playbook
 
-本目录用于保存“可恢复执行”的项目级交接文档，避免会话切换后出现上下文丢失。
+Use this workflow when pausing a non-trivial delivery wave so the next session can continue without rediscovery.
 
-## 目标
+## Quick Start
 
-- 明确当前分支快照
-- 给出新鲜验证证据
-- 把“已完成”和“未完成”拆开
-- 给出明天第一条命令和第一件最小任务
+1. Scaffold a dated handoff document:
+   - `./scripts/new_phase_handoff.sh <topic-slug>`
+   - compatibility alias: `./scripts/phase_handoff_new.sh <topic-slug>`
+2. Fill in the generated markdown under `docs/phase-handoff-playbook/`.
+3. Run the quality gate:
+   - `./scripts/phase_handoff_check.sh <handoff-doc-path>`
+   - or `make handoff-check HANDOFF_DOC=<handoff-doc-path>`
 
-## 文件命名
+## Purpose
 
-- `YYYY-MM-DD-<topic>-handoff.md`
+- capture exact execution snapshot (`worktree`, `branch`, `head sha`, remote refs)
+- provide fresh verification evidence from the current session
+- separate completed and unfinished scope
+- define a smallest next task with acceptance criteria
+- declare merge safety (`safe_to_merge` / `blocked`)
 
-示例：
+## Output Location Convention
 
-- `2026-03-26-phase2-wave6-handoff.md`
+Keep project-specific artifacts only in this folder:
 
-## 交接前最低要求
+- `docs/phase-handoff-playbook/YYYY-MM-DD-<topic>-handoff.md`
+- `docs/phase-handoff-playbook/YYYY-MM-DD-<phase>-next-work-checklist.md`
 
-- 写明 `worktree + branch + head sha`
-- 写明 `origin/main` 与阶段分支远端 sha
-- 写明新鲜验证命令和结果
-- 写明 merge 安全状态（`safe_to_merge` / `blocked`）
-- 写明明天第一任务和 acceptance criteria
+Keep reusable process assets under:
 
-## 推荐流程
+- `skills/phase-handoff-playbook/`
 
-1. 使用 `skills/phase-handoff-playbook/handoff-template.md` 起草
-2. 对照 `skills/phase-handoff-playbook/handoff-quality-checklist.md` 自检
-3. 在次日开工前执行 `skills/phase-handoff-playbook/resume-checklist.md`
+## Required Handoff Content
 
-## 明早快速恢复
+- exact worktree path, branch, and `head sha`
+- `origin/main` sha and phase branch remote sha
+- fresh verification command and result
+- completed vs unfinished scope
+- tomorrow kickoff steps
+- smallest-next-task checklist with acceptance criteria
+- explicit merge safety status (`safe_to_merge` or `blocked` with reason)
+- risks and "do not do next" traps
 
-```bash
-scripts/phase_resume_from_latest.sh
-```
+## Resume Next Session
 
-该脚本会输出：
+At the start of the next session:
 
-- 最新 handoff 文件路径
-- 当前分支/HEAD/远端主线快照
-- handoff 中记录的“明天第一任务”
-- handoff 中提取到的验证命令（best-effort）
+1. Run `skills/phase-handoff-playbook/resume-checklist.md`.
+2. Optionally run `./scripts/phase_resume_from_latest.sh` for a quick startup summary.
+
+If assumptions drifted (branch, worktree, SHAs, verification result), update the handoff before coding.

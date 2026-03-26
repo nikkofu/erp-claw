@@ -53,6 +53,23 @@ The intended local verification loop for the platform foundation is:
 4. `make test`
 5. `make smoke`
 
+## Phase Handoff Playbook
+
+Use the playbook whenever a delivery wave is paused and another session (or agent) needs to continue safely.
+
+1. Create a dated handoff document:
+   - `./scripts/new_phase_handoff.sh <topic-slug>`
+   - compatibility alias: `./scripts/phase_handoff_new.sh <topic-slug>`
+   - or `make handoff-new HANDOFF_TOPIC=<topic-slug>`
+2. Fill the generated markdown under `docs/phase-handoff-playbook/`.
+3. Run the quality gate before you stop:
+   - `./scripts/phase_handoff_check.sh <handoff-doc-path>`
+   - or `make handoff-check HANDOFF_DOC=<handoff-doc-path>`
+4. Optional resume helper for next morning:
+   - `./scripts/phase_resume_from_latest.sh`
+
+Reusable templates/checklists live in `skills/phase-handoff-playbook/`; project-specific outputs live in `docs/phase-handoff-playbook/`.
+
 ## Async Runtime Notes
 
 The worker and scheduler are wired as separate runtime roles because they serve different responsibilities in the platform execution plane.
@@ -133,26 +150,6 @@ curl -sS http://127.0.0.1:8080/api/platform/v1/health/livez
 ```
 
 Use `make smoke` to run the live HTTP health probe in `TestHealthRoutesLive` after the API server is already listening locally.
-
-## Phase Handoff Playbook
-
-为避免跨天推进时丢失上下文，阶段收尾统一使用 handoff playbook。
-
-- Playbook skill: `skills/phase-handoff-playbook/SKILL.md`
-- Handoff outputs: `docs/phase-handoff-playbook/`
-- 快速生成模板:
-
-```bash
-scripts/phase_handoff_new.sh phase2-wave-next
-```
-
-次日恢复建议先跑：
-
-```bash
-scripts/phase_resume_from_latest.sh
-```
-
-生成后请补齐“新鲜验证结果 + 明天第一任务 + merge 安全状态”。
 
 ## Configuration
 

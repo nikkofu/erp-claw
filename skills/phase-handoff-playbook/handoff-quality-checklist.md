@@ -1,31 +1,41 @@
 # Handoff Quality Checklist
 
-Use before marking handoff complete.
+Use this before declaring a handoff complete.
 
 ## Critical
 
-- Active `worktree_path`, `branch`, `head_sha` are explicit
-- `origin/main` and phase branch remote SHA are explicit
-- Fresh verification commands were run in this session
-- Verification results are explicit PASS/FAIL (not implied)
-- Completed and unfinished work are separated
-- Tomorrow kickoff commands are concrete and runnable
-- First task tomorrow is one smallest actionable task
-- Remaining tasks include acceptance criteria
-- Merge safety status is explicit: `safe_to_merge` or `blocked` with reason
+- active `worktree path`, `branch`, and `head sha` are explicit
+- `origin/main` and phase branch remote sha are explicit
+- merge safety status is explicit (`safe_to_merge` or `blocked` with reason)
+- fresh verification command was run in the active worktree
+- verification result is stated explicitly
+- completed work is separated from unfinished work
+- tomorrow's first task is obvious
+- remaining tasks have acceptance criteria
+- remaining tasks have dependency order
+- parallel-safe tasks are marked as such
 
-If any critical item is missing, handoff is incomplete.
+If any critical item is missing, the handoff is incomplete.
 
 ## Important
 
-- Open PR and release tag status are captured (if relevant)
-- Risks are explicit and tied to unresolved scope
-- Parallel-safe tasks are marked only when write scope is disjoint
-- "Do not do next" traps are listed
-- Reflection includes at least one concrete process improvement
+- high-risk gaps are listed explicitly
+- "do not do next" traps are listed explicitly
+- reflection includes at least one process failure and one architecture lesson
+- project outputs are saved under `docs/phase-handoff-playbook/`
+- reusable guidance stays in `skills/phase-handoff-playbook/`
+- branch-specific notes are not mixed into the reusable skill text
 
-## Strong Positive Signals
+## Strong Signals Of A Good Handoff
 
-- New contributor can start in under 10 minutes
-- Next session can run commands without re-deriving context
-- At least one known failure mode is prevented by the handoff text
+- a new contributor can identify where to start in under 10 minutes
+- a future agent can split remaining work into safe parallel slices without rereading the whole repo
+- the handoff prevents at least one known failure mode from repeating
+
+## Strong Signals Of A Bad Handoff
+
+- "continue Phase 1" is the only next step
+- tasks are still epic-sized
+- tests are assumed from memory
+- wrong branch or wrong worktree could be used without anyone noticing
+- the document reads like a diary instead of an operational artifact

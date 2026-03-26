@@ -1,69 +1,82 @@
 # Parallel Prompt Pack
 
-Reusable fragments for safe multi-agent continuation.
+These are reusable prompt fragments for safely continuing a wave with subagents.
 
-## Worker Slice Prompt
+## Prompt 1: Parallel Worker Slice
+
+Use for one isolated implementation slice.
 
 ```text
-Continue this isolated slice in:
-- worktree: <ABS_WORKTREE_PATH>
-- branch: <BRANCH>
+You are continuing a bounded slice in the repo at <WORKTREE_PATH>.
 
-You are not alone in the repo. Do not revert others' changes.
+You are not alone in the codebase. Other workers may be editing other files.
+Do not revert anyone else's changes.
 Stay strictly inside your owned write scope.
 
 Goal:
-- <ONE OUTCOME>
+- <ONE CLEAR OUTCOME>
 
-Owned write scope:
-- <ABS_PATH_1>
-- <ABS_PATH_2>
+Owned write scope only:
+- <ABSOLUTE_PATH_1>
+- <ABSOLUTE_PATH_2>
 
 Do not modify:
-- <ABS_PATH_3>
-- <ABS_PATH_4>
+- <ABSOLUTE_PATH_OR_AREA_1>
+- <ABSOLUTE_PATH_OR_AREA_2>
 
-Validation:
-- <EXACT COMMAND>
+Implementation constraints:
+- Use TDD
+- Show RED before production edits
+- Keep changes minimal and local
+
+Validation to run before finishing:
+- <EXACT TEST COMMAND>
 
 Return format:
-- DONE / DONE_WITH_CONCERNS / NEEDS_CONTEXT / BLOCKED
-- changed files
-- RED/GREEN evidence
-- residual risks
+- Start with DONE / DONE_WITH_CONCERNS / NEEDS_CONTEXT / BLOCKED
+- Summarize what changed
+- List exact files changed
+- Include RED/GREEN evidence
+- State residual concerns
 ```
 
-## Handoff Reviewer Prompt
+## Prompt 2: Handoff Reviewer
+
+Use for a reviewer agent checking whether a handoff doc is operational.
 
 ```text
-Review this handoff for operational readiness (not writing style).
+Review this handoff document for operational quality, not style.
 
 Check:
-- explicit worktree/branch/sha?
-- explicit remote refs and drift?
-- fresh verification with outcomes?
-- completed vs unfinished split?
-- first task tomorrow obvious?
-- task list small and actionable?
-- merge safety call present?
+- Is the active worktree and branch explicit?
+- Is `head sha`, `origin/main sha`, and phase branch remote sha explicit?
+- Is merge safety status explicit?
+- Is verification fresh and concrete?
+- Are completed vs unfinished items clearly separated?
+- Is tomorrow's first task obvious?
+- Are remaining tasks small enough to start directly?
+- Are parallel-safe tasks clearly marked?
 
-Output:
-1) findings by severity
-2) open questions
-3) short readiness verdict
+Report:
+- Findings first, ordered by severity
+- Then open questions
+- Then a short assessment
 ```
 
-## Resume Prompt
+## Prompt 3: Resume From Handoff
+
+Use at the start of the next session.
 
 ```text
-Resume from:
+Resume work from this handoff:
 - <HANDOFF_DOC_PATH>
 
-Start with:
-1. verify worktree + branch
-2. fetch and check remote refs
-3. rerun verification commands
+Start by:
+1. verifying the stated worktree and branch
+2. verifying head and remote refs (`origin/main`, phase branch remote)
+3. rerunning the stated verification command
+4. checking whether the repo still matches the handoff assumptions
 
-Then propose exactly one smallest safe next task.
-If assumptions are stale, state what changed before coding.
+Then propose the smallest safe next task to execute.
+If the handoff assumptions are stale, say exactly what changed before coding.
 ```

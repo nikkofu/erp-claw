@@ -1,70 +1,55 @@
 # Phase Handoff Template
 
-Save to:
+Save the generated file in the project output directory, not in `skills/`.
+
+Recommended path:
 
 - `docs/phase-handoff-playbook/YYYY-MM-DD-<topic>-handoff.md`
+- or `docs/phase-handoff-playbook/YYYY-MM-DD-<phase>-next-work-checklist.md`
 
----
+## Title
 
-## 1. Snapshot
+`<phase or topic> next-work checklist and handoff`
 
-- worktree_path:
+## Snapshot
+
+- worktree path:
 - branch:
-- head_sha:
-- origin_main_sha:
-- origin_phase_branch_sha:
-- open_pr:
-- release_tag:
-- merge_safety: `safe_to_merge` | `blocked` (+ reason)
+- head sha:
+- origin/main sha:
+- origin/phase branch sha:
+- merge safety status: `safe_to_merge` | `blocked` (+ reason)
+- fresh verification command:
+- fresh verification result:
+- today completed:
+- still unfinished:
 
-## 2. Fresh Verification
+## Tomorrow Kickoff
 
-| Command | Result | Notes |
-| --- | --- | --- |
-| `go test ./...` | PASS/FAIL |  |
-| `<other command>` | PASS/FAIL |  |
+1. enter the correct worktree
+2. inspect git status in worktree and root
+3. rerun fresh verification
+4. resolve any path drift or branch confusion
+5. start from the first priority task only
 
-## 3. Completed Today
+## Minimal Task Checklist
 
-- item 1
-- item 2
-
-## 4. Still Unfinished
-
-- item 1
-- item 2
-
-## 5. Tomorrow Kickoff
-
-```bash
-git fetch origin --prune
-git checkout <branch>
-git pull --ff-only origin <branch>
-go test ./...
-```
-
-First execution task tomorrow:
-
-- `<one smallest task>`
-
-## 6. Smallest-Next-Task Checklist
-
-| ID | Priority | Task | Why | Acceptance | File Scope | Dependency | Parallel-safe |
+| ID | Priority | Task | Why | Acceptance | Suggested files | Dependency | Parallel-safe |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| T01 | P0 |  |  |  |  | none | yes/no |
+| T00-01 | P0 |  |  |  |  |  |  |
 
-## 7. Risks
-
-- risk 1
-- risk 2
-
-## 8. Do Not Do Next
-
-- trap 1
-- trap 2
-
-## 9. Reflection
+## Experience Summary
 
 - what worked:
-- what slowed down:
-- one process improvement for next session:
+- what accelerated delivery:
+- what slowed delivery:
+
+## Deep Reflection
+
+- biggest process mistake:
+- biggest architecture lesson:
+- what must change next time:
+
+## Do Not Do Tomorrow
+
+- none

@@ -1,43 +1,48 @@
 # Resume Checklist
 
-Use at session start before coding.
+Use this at the start of the next session before writing code.
 
-## 1) Reconfirm Context
+## Verify Context
 
-- confirm intended worktree path
-- confirm branch name
-- run `git status -sb`
-- confirm the handoff file path being resumed
+- confirm the intended worktree path
+- confirm the intended branch name
+- inspect `git status --short` in the active worktree
+- inspect root repo status if multiple worktrees exist
+- confirm the handoff document path you are resuming from
 
-## 2) Reconfirm Remote Drift
+## Verify Remote Drift
 
 - run `git fetch origin --prune`
-- record `origin/main` SHA
-- record phase branch remote SHA
-- check if new merges landed since handoff
+- confirm current `head sha`
+- confirm current `origin/main` sha
+- confirm phase branch remote sha
+- compare all SHAs to what the handoff recorded
 
-## 3) Re-run Verification
+## Verify Assumptions
 
-- rerun the same verification command(s) from handoff
-- if results differ, stop and update handoff assumptions first
+- rerun the verification command recorded in the handoff
+- compare current status to the handoff assumptions
+- note any new files, rebases, merges, or drift
+- check whether any old background process still matters
 
-## 4) Rebuild Focus
+## Rebuild Focus
 
-- restate first task in one sentence
-- restate acceptance criteria
-- restate in-scope files and out-of-scope files
+- restate the smallest next task in one sentence
+- restate the acceptance criteria
+- restate which files are in scope
+- restate which files are explicitly out of scope
 
-## 5) Parallel Safety
+## Parallel Safety Check
 
-- only parallelize tasks with disjoint write scope
-- identify bottleneck slice first
-- avoid overlapping router/container edits in parallel
+- if multiple slices are being resumed, confirm write scopes are disjoint
+- identify the bottleneck slice
+- avoid starting parallel work on overlapping files
 
 ## Stop Conditions
 
-Stop and refresh handoff before coding if:
+Stop and update the handoff before coding if:
 
-- branch/worktree mismatch
-- verification now failing
-- remote main changed and impacts assumptions
-- documented first task is no longer smallest safe step
+- the branch or worktree is not the one named in the handoff
+- the recorded SHAs no longer match reality
+- the verification command is now failing
+- the documented next task is no longer the smallest safe step
