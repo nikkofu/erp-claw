@@ -3,6 +3,7 @@ package shared
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/nikkofu/erp-claw/internal/platform/audit"
@@ -41,6 +42,88 @@ func TestPipelineStartsApprovalInsideTransaction(t *testing.T) {
 	}
 }
 
+func TestPipelineCapabilityDenialSkipsHandlerAndTransaction(t *testing.T) {
+	t.Parallel()
+
+	txManager := &transactionManagerStub{}
+	capabilities := &capabilityAuthorizerStub{
+		err: fmt.Errorf("%w: tool catalog entry %q is not effectively allowed", ErrCapabilityDenied, "tool-2"),
+	}
+	pipeline := NewPipeline(PipelineDeps{
+		Policy:       policy.StaticEvaluator(policy.DecisionAllow),
+		Transactions: txManager,
+		Audit:        audit.NoopRecorder(),
+		Capabilities: capabilities,
+	})
+
+	handlerCalls := 0
+	err := pipeline.Execute(context.Background(), Command{
+		Name:     "agent.run",
+		TenantID: "tenant-a",
+		ActorID:  "user-a",
+		Payload: map[string]any{
+			"agent_profile_id": "profile-1",
+			"model_entry_id":   "model-1",
+			"tool_entry_ids":   []string{"tool-2"},
+		},
+	}, func(context.Context, Command) error {
+		handlerCalls++
+		return nil
+	})
+	if !errors.Is(err, ErrCapabilityDenied) {
+		t.Fatalf("expected capability denied error, got %v", err)
+	}
+	if capabilities.calls != 1 {
+		t.Fatalf("expected capability authorizer to be called once, got %d", capabilities.calls)
+	}
+	if txManager.calls != 0 {
+		t.Fatalf("expected no transaction when capability check fails, got %d", txManager.calls)
+	}
+	if handlerCalls != 0 {
+		t.Fatalf("expected handler not to run, got %d calls", handlerCalls)
+	}
+}
+
+func TestPipelineCapabilityAuthorizerAllowsHandlerExecution(t *testing.T) {
+	t.Parallel()
+
+	txManager := &transactionManagerStub{}
+	capabilities := &capabilityAuthorizerStub{}
+	pipeline := NewPipeline(PipelineDeps{
+		Policy:       policy.StaticEvaluator(policy.DecisionAllow),
+		Transactions: txManager,
+		Audit:        audit.NoopRecorder(),
+		Capabilities: capabilities,
+	})
+
+	handlerCalls := 0
+	err := pipeline.Execute(context.Background(), Command{
+		Name:     "agent.run",
+		TenantID: "tenant-a",
+		ActorID:  "user-a",
+		Payload: map[string]any{
+			"agent_profile_id": "profile-1",
+			"model_entry_id":   "model-1",
+			"tool_entry_ids":   []string{"tool-1"},
+		},
+	}, func(context.Context, Command) error {
+		handlerCalls++
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("expected nil error, got %v", err)
+	}
+	if capabilities.calls != 1 {
+		t.Fatalf("expected capability authorizer to be called once, got %d", capabilities.calls)
+	}
+	if txManager.calls != 1 {
+		t.Fatalf("expected one transaction call, got %d", txManager.calls)
+	}
+	if handlerCalls != 1 {
+		t.Fatalf("expected handler to run once, got %d", handlerCalls)
+	}
+}
+
 type transactionManagerStub struct {
 	calls int
 }
@@ -60,4 +143,14 @@ type approvalStarterStub struct {
 func (s *approvalStarterStub) StartApprovalForCommand(context.Context, Command) error {
 	s.calls++
 	return nil
+}
+
+type capabilityAuthorizerStub struct {
+	calls int
+	err   error
+}
+
+func (s *capabilityAuthorizerStub) AuthorizeCommandCapabilities(context.Context, Command) error {
+	s.calls++
+	return s.err
 }

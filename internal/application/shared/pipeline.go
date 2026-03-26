@@ -13,6 +13,7 @@ import (
 var (
 	ErrPolicyDenied     = errors.New("policy denied command")
 	ErrApprovalRequired = errors.New("policy requires approval")
+	ErrCapabilityDenied = errors.New("capability denied command")
 )
 
 // Handler executes a command inside the transaction boundary.
@@ -22,11 +23,16 @@ type ApprovalStarter interface {
 	StartApprovalForCommand(context.Context, Command) error
 }
 
+type CapabilityAuthorizer interface {
+	AuthorizeCommandCapabilities(context.Context, Command) error
+}
+
 type PipelineDeps struct {
 	Policy       policy.Evaluator
 	Transactions TransactionManager
 	Audit        audit.Recorder
 	Approvals    ApprovalStarter
+	Capabilities CapabilityAuthorizer
 }
 
 type Pipeline struct {
@@ -34,6 +40,7 @@ type Pipeline struct {
 	transactions TransactionManager
 	audit        audit.Recorder
 	approvals    ApprovalStarter
+	capabilities CapabilityAuthorizer
 }
 
 func NewPipeline(deps PipelineDeps) *Pipeline {
@@ -52,6 +59,7 @@ func NewPipeline(deps PipelineDeps) *Pipeline {
 		transactions: deps.Transactions,
 		audit:        deps.Audit,
 		approvals:    deps.Approvals,
+		capabilities: deps.Capabilities,
 	}
 }
 
@@ -70,6 +78,19 @@ func (p *Pipeline) Execute(ctx context.Context, cmd Command, handlers ...Handler
 	case policy.DecisionDeny:
 		err = ErrPolicyDenied
 		return p.recordAndReturn(ctx, cmd, decision, "rejected", err)
+	}
+
+	if p.capabilities != nil {
+		if err := p.capabilities.AuthorizeCommandCapabilities(ctx, cmd); err != nil {
+			outcome := "failed"
+			if errors.Is(err, ErrCapabilityDenied) {
+				outcome = "capability_denied"
+			}
+			return p.recordAndReturn(ctx, cmd, decision, outcome, err)
+		}
+	}
+
+	switch decision {
 	case policy.DecisionRequireApproval:
 		if p.approvals != nil {
 			if err := p.transactions.WithinTransaction(ctx, func(txCtx context.Context) error {
