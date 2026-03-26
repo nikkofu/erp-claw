@@ -30,12 +30,16 @@ func New(opts ...Option) *gin.Engine {
 	if cfg.container == nil {
 		cfg.container = bootstrap.NewContainer(bootstrap.DefaultConfig())
 	}
+	tenantResolver := tenant.ChainResolver{
+		Primary:  tenant.CatalogResolver{Catalog: cfg.container.TenantCatalog},
+		Fallback: tenant.SimpleResolver{},
+	}
 
 	ginEngine := gin.New()
 	ginEngine.Use(gin.Recovery())
 	ginEngine.Use(middleware.RequestID())
 	ginEngine.Use(middleware.Logging())
-	ginEngine.Use(middleware.Tenant(tenant.SimpleResolver{}))
+	ginEngine.Use(middleware.Tenant(tenantResolver))
 	ginEngine.Use(middleware.Auth())
 	ginEngine.Use(middleware.Audit())
 

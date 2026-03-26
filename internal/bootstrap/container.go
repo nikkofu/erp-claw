@@ -12,13 +12,15 @@ import (
 	"github.com/nikkofu/erp-claw/internal/platform/health"
 	"github.com/nikkofu/erp-claw/internal/platform/iam"
 	"github.com/nikkofu/erp-claw/internal/platform/policy"
+	"github.com/nikkofu/erp-claw/internal/platform/tenant"
 )
 
 type Container struct {
-	Config       Config
-	Health       *health.Service
-	SupplyChain  *supplychain.Service
-	ControlPlane *controlplane.Service
+	Config        Config
+	Health        *health.Service
+	SupplyChain   *supplychain.Service
+	ControlPlane  *controlplane.Service
+	TenantCatalog tenant.Catalog
 }
 
 func NewContainer(cfg Config) *Container {
@@ -57,6 +59,7 @@ func NewContainer(cfg Config) *Container {
 		Audit:  auditRecorder,
 	})
 
+	tenantCatalog := controlPlaneStore.TenantCatalog()
 	return &Container{
 		Config: cfg,
 		Health: health.NewService(),
@@ -68,12 +71,13 @@ func NewContainer(cfg Config) *Container {
 			Pipeline:       pipeline,
 		}),
 		ControlPlane: controlplane.NewService(controlplane.ServiceDeps{
-			TenantCatalog: controlPlaneStore.TenantCatalog(),
+			TenantCatalog: tenantCatalog,
 			IAMDirectory:  controlPlaneStore.IAMDirectory(),
 			Sessions:      controlPlaneStore.SessionRepository(),
 			Tasks:         controlPlaneStore.TaskRepository(),
 			AuditReader:   auditRecorder,
 			Pipeline:      pipeline,
 		}),
+		TenantCatalog: tenantCatalog,
 	}
 }
