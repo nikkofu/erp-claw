@@ -225,6 +225,28 @@ func (s *Service) ListActors(ctx context.Context, input ListActorsInput) ([]iam.
 	return actors, err
 }
 
+type DeleteActorInput struct {
+	OperatorTenantID string
+	OperatorActorID  string
+	TenantID         string
+	ActorID          string
+}
+
+func (s *Service) DeleteActor(ctx context.Context, input DeleteActorInput) error {
+	return s.pipeline.Execute(ctx, shared.Command{
+		Name:     "controlplane.actors.delete",
+		TenantID: input.OperatorTenantID,
+		ActorID:  input.OperatorActorID,
+		Payload:  input,
+	}, func(txCtx context.Context, _ shared.Command) error {
+		targetTenantID := strings.TrimSpace(input.TenantID)
+		if targetTenantID == "" {
+			targetTenantID = strings.TrimSpace(input.OperatorTenantID)
+		}
+		return s.iamDirectory.Delete(txCtx, targetTenantID, strings.TrimSpace(input.ActorID))
+	})
+}
+
 type OpenSessionInput struct {
 	TenantID  string
 	ActorID   string

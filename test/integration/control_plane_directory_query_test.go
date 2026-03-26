@@ -60,4 +60,33 @@ func TestControlPlaneCanListTenantsAndActors(t *testing.T) {
 	if stringField(t, actorDetail, "id") != "actor-alpha" {
 		t.Fatalf("expected actor id actor-alpha, got %s", stringField(t, actorDetail, "id"))
 	}
+
+	doJSONWithHeaders(
+		t,
+		h,
+		"DELETE",
+		"/api/platform/v1/control/actors/actor-beta?tenant_id=tenant-directory-a",
+		nil,
+		200,
+		nil,
+	)
+
+	actorsRespAfterDelete := getJSONData(t, h, "/api/platform/v1/control/actors?tenant_id=tenant-directory-a")
+	actorsAfterDelete, ok := actorsRespAfterDelete["actors"].([]any)
+	if !ok {
+		t.Fatalf("expected actors array, got %#v", actorsRespAfterDelete["actors"])
+	}
+	if len(actorsAfterDelete) != 1 {
+		t.Fatalf("expected 1 actor after delete, got %d", len(actorsAfterDelete))
+	}
+
+	doJSONWithHeaders(
+		t,
+		h,
+		"GET",
+		"/api/platform/v1/control/actors/actor-beta?tenant_id=tenant-directory-a",
+		nil,
+		404,
+		nil,
+	)
 }

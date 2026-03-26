@@ -18,6 +18,7 @@ type Directory interface {
 	Save(ctx context.Context, tenantID string, actor Actor) error
 	Get(ctx context.Context, tenantID, actorID string) (Actor, error)
 	List(ctx context.Context, tenantID string) ([]Actor, error)
+	Delete(ctx context.Context, tenantID, actorID string) error
 }
 
 type InMemoryDirectory struct {
@@ -83,6 +84,24 @@ func (d *InMemoryDirectory) List(_ context.Context, tenantID string) ([]Actor, e
 		return out[i].ID < out[j].ID
 	})
 	return out, nil
+}
+
+func (d *InMemoryDirectory) Delete(_ context.Context, tenantID, actorID string) error {
+	tenantID = strings.TrimSpace(tenantID)
+	actorID = strings.TrimSpace(actorID)
+	if tenantID == "" || actorID == "" {
+		return ErrActorNotFound
+	}
+
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	key := d.key(tenantID, actorID)
+	if _, ok := d.actors[key]; !ok {
+		return ErrActorNotFound
+	}
+	delete(d.actors, key)
+	return nil
 }
 
 func (d *InMemoryDirectory) key(tenantID, actorID string) string {

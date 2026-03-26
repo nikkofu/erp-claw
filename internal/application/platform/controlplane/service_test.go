@@ -7,6 +7,7 @@ import (
 
 	"github.com/nikkofu/erp-claw/internal/application/shared"
 	"github.com/nikkofu/erp-claw/internal/infrastructure/persistence/memory"
+	"github.com/nikkofu/erp-claw/internal/platform/iam"
 	"github.com/nikkofu/erp-claw/internal/platform/policy"
 	platformruntime "github.com/nikkofu/erp-claw/internal/platform/runtime"
 )
@@ -706,6 +707,49 @@ func TestServiceListSessionTasksSupportsStatusAndPagination(t *testing.T) {
 	}
 	if len(paged) != 1 || paged[0].ID != "task-002" {
 		t.Fatalf("expected only task-002 in paged result, got %#v", paged)
+	}
+}
+
+func TestServiceDeleteActorRemovesActorFromDirectory(t *testing.T) {
+	store := memory.NewControlPlaneStore()
+	svc := NewService(ServiceDeps{
+		TenantCatalog: store.TenantCatalog(),
+		IAMDirectory:  store.IAMDirectory(),
+		Sessions:      store.SessionRepository(),
+		Tasks:         store.TaskRepository(),
+		Pipeline: shared.NewPipeline(shared.PipelineDeps{
+			Policy: policy.StaticEvaluator(policy.DecisionAllow),
+		}),
+	})
+
+	ctx := context.Background()
+	if _, err := svc.UpsertActor(ctx, UpsertActorInput{
+		OperatorTenantID: "tenant-admin",
+		OperatorActorID:  "actor-admin",
+		TenantID:         "tenant-a",
+		ActorID:          "actor-delete-me",
+		Roles:            []string{"viewer"},
+	}); err != nil {
+		t.Fatalf("upsert actor: %v", err)
+	}
+
+	if err := svc.DeleteActor(ctx, DeleteActorInput{
+		OperatorTenantID: "tenant-admin",
+		OperatorActorID:  "actor-admin",
+		TenantID:         "tenant-a",
+		ActorID:          "actor-delete-me",
+	}); err != nil {
+		t.Fatalf("delete actor: %v", err)
+	}
+
+	_, err := svc.GetActor(ctx, GetActorInput{
+		OperatorTenantID: "tenant-admin",
+		OperatorActorID:  "actor-admin",
+		TenantID:         "tenant-a",
+		ActorID:          "actor-delete-me",
+	})
+	if !errors.Is(err, iam.ErrActorNotFound) {
+		t.Fatalf("expected ErrActorNotFound, got %v", err)
 	}
 }
 

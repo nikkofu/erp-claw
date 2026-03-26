@@ -119,6 +119,20 @@ func registerControlPlaneRoutes(rg *gin.RouterGroup, container *bootstrap.Contai
 		presenter.OK(c, actorResponse(actor))
 	})
 
+	controlGroup.DELETE("/actors/:id", func(c *gin.Context) {
+		err := container.ControlPlane.DeleteActor(c.Request.Context(), controlplane.DeleteActorInput{
+			OperatorTenantID: tenantIDFromContext(c),
+			OperatorActorID:  actorIDFromContext(c),
+			TenantID:         c.Query("tenant_id"),
+			ActorID:          c.Param("id"),
+		})
+		if err != nil {
+			renderControlPlaneError(c, err)
+			return
+		}
+		presenter.OK(c, gin.H{"deleted": true})
+	})
+
 	controlGroup.POST("/policy/rules", func(c *gin.Context) {
 		var req upsertPolicyRuleRequest
 		if err := c.ShouldBindJSON(&req); err != nil {

@@ -124,6 +124,18 @@ func (r iamDirectoryRepository) List(_ context.Context, tenantID string) ([]iam.
 	return out, nil
 }
 
+func (r iamDirectoryRepository) Delete(_ context.Context, tenantID, actorID string) error {
+	r.store.mu.Lock()
+	defer r.store.mu.Unlock()
+
+	actorKey := key(tenantID, actorID)
+	if _, ok := r.store.actors[actorKey]; !ok {
+		return iam.ErrActorNotFound
+	}
+	delete(r.store.actors, actorKey)
+	return nil
+}
+
 type sessionRepository struct {
 	store *ControlPlaneStore
 }
