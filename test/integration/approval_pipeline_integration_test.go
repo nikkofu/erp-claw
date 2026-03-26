@@ -129,6 +129,11 @@ func (r *integrationApprovalRepo) UpdateInstanceStatus(_ context.Context, tenant
 	return nil
 }
 
+func (r *integrationApprovalRepo) DeleteInstance(_ context.Context, tenantID, instanceID string) error {
+	delete(r.instances, tenantID+"|"+instanceID)
+	return nil
+}
+
 func (r *integrationApprovalRepo) CreateTask(_ context.Context, task domainapproval.Task) (domainapproval.Task, error) {
 	if task.ID == "" {
 		task.ID = "task-a"

@@ -43,6 +43,32 @@ func TestGatewayAppendsRuntimeEvent(t *testing.T) {
 	}
 }
 
+func TestGatewayAppendsRuntimeEventWithoutRegisteredChannel(t *testing.T) {
+	gateway := NewWorkspaceGateway()
+
+	evt := platformruntime.WorkspaceEvent{
+		Type:      platformruntime.WorkspaceEventTypeTaskStatusChanged,
+		TenantID:  "tenant-a",
+		SessionID: "session-missing",
+		TaskID:    "task-a",
+		Payload:   map[string]any{"status": "running"},
+	}
+	if err := gateway.AppendWorkspaceEvent(context.Background(), evt); err != nil {
+		t.Fatalf("append runtime event without live channel: %v", err)
+	}
+
+	events, err := gateway.ListWorkspaceEvents(context.Background(), "tenant-a", "session-missing")
+	if err != nil {
+		t.Fatalf("list workspace events: %v", err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("expected one stored event, got %d", len(events))
+	}
+	if events[0].TaskID != "task-a" {
+		t.Fatalf("expected task-a, got %s", events[0].TaskID)
+	}
+}
+
 func TestGatewayListsWorkspaceEventsByTenantAndSession(t *testing.T) {
 	gateway := NewWorkspaceGateway()
 	if _, err := gateway.RegisterChannel("session-a", 4); err != nil {

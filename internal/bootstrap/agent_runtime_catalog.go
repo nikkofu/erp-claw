@@ -2,6 +2,7 @@ package bootstrap
 
 import (
 	"context"
+	"fmt"
 	"strconv"
 	"strings"
 	"sync"
@@ -13,12 +14,16 @@ import (
 )
 
 func newAgentRuntimeCatalog(cfg Config) AgentRuntimeCatalog {
+	if shouldUseInMemoryCatalogFallback(cfg) {
+		return NewInMemoryAgentRuntimeCatalogForTest()
+	}
+
 	catalog, err := newPostgresAgentRuntimeCatalog(cfg.Database)
 	if err == nil {
 		return catalog
 	}
 
-	return NewInMemoryAgentRuntimeCatalogForTest()
+	panic(fmt.Errorf("bootstrap: agent runtime catalog init failed: %w", err))
 }
 
 func newPostgresAgentRuntimeCatalog(cfg DatabaseConfig) (AgentRuntimeCatalog, error) {

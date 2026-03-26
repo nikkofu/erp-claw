@@ -155,7 +155,7 @@ func TestCreateTenantCommandRejectsEmptyCode(t *testing.T) {
 }
 
 func TestAdminCreateTenantRoute(t *testing.T) {
-	h := router.New(router.WithContainer(bootstrap.NewContainer(bootstrap.DefaultConfig())))
+	h := router.New(router.WithContainer(bootstrap.NewTestContainer()))
 	req := httptest.NewRequest(http.MethodPost, "/api/admin/v1/tenants", strings.NewReader(`{"code":"tenant-a","name":"Tenant A"}`))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Tenant-ID", "platform-root")
@@ -169,17 +169,19 @@ func TestAdminCreateTenantRoute(t *testing.T) {
 }
 
 func TestAdminRoleDepartmentLifecycleRoutes(t *testing.T) {
-	h := router.New(router.WithContainer(bootstrap.NewContainer(bootstrap.DefaultConfig())))
+	h := router.New(router.WithContainer(bootstrap.NewTestContainer()))
 
-	userID := createAdminEntityAndReadID(t, h, http.MethodPost, "/api/admin/v1/users", `{"tenant_id":"tenant-a","email":"ada@example.com","display_name":"Ada"}`, "tenant-a")
-	roleID := createAdminEntityAndReadID(t, h, http.MethodPost, "/api/admin/v1/roles", `{"name":"ops-admin","description":"Operations admin"}`, "tenant-a")
-	departmentID := createAdminEntityAndReadID(t, h, http.MethodPost, "/api/admin/v1/departments", `{"name":"operations"}`, "tenant-a")
+	tenantID := createAdminEntityAndReadID(t, h, http.MethodPost, "/api/admin/v1/tenants", `{"code":"tenant-a","name":"Tenant A"}`, "platform-root")
 
-	createAdminEntityAndReadID(t, h, http.MethodPost, "/api/admin/v1/user-role-bindings", `{"user_id":"`+userID+`","role_id":"`+roleID+`"}`, "tenant-a")
-	createAdminEntityAndReadID(t, h, http.MethodPost, "/api/admin/v1/user-department-bindings", `{"user_id":"`+userID+`","department_id":"`+departmentID+`"}`, "tenant-a")
+	userID := createAdminEntityAndReadID(t, h, http.MethodPost, "/api/admin/v1/users", `{"tenant_id":"`+tenantID+`","email":"ada@example.com","display_name":"Ada"}`, tenantID)
+	roleID := createAdminEntityAndReadID(t, h, http.MethodPost, "/api/admin/v1/roles", `{"name":"ops-admin","description":"Operations admin"}`, tenantID)
+	departmentID := createAdminEntityAndReadID(t, h, http.MethodPost, "/api/admin/v1/departments", `{"name":"operations"}`, tenantID)
 
-	rolesReq := httptest.NewRequest(http.MethodGet, "/api/admin/v1/roles?tenant_id=tenant-a", nil)
-	rolesReq.Header.Set("X-Tenant-ID", "tenant-a")
+	createAdminEntityAndReadID(t, h, http.MethodPost, "/api/admin/v1/user-role-bindings", `{"user_id":"`+userID+`","role_id":"`+roleID+`"}`, tenantID)
+	createAdminEntityAndReadID(t, h, http.MethodPost, "/api/admin/v1/user-department-bindings", `{"user_id":"`+userID+`","department_id":"`+departmentID+`"}`, tenantID)
+
+	rolesReq := httptest.NewRequest(http.MethodGet, "/api/admin/v1/roles?tenant_id="+tenantID, nil)
+	rolesReq.Header.Set("X-Tenant-ID", tenantID)
 	rolesRec := httptest.NewRecorder()
 	h.ServeHTTP(rolesRec, rolesReq)
 	if rolesRec.Code != http.StatusOK {
@@ -189,8 +191,8 @@ func TestAdminRoleDepartmentLifecycleRoutes(t *testing.T) {
 		t.Fatalf("expected roles list to contain created role, got %s", rolesRec.Body.String())
 	}
 
-	departmentsReq := httptest.NewRequest(http.MethodGet, "/api/admin/v1/departments?tenant_id=tenant-a", nil)
-	departmentsReq.Header.Set("X-Tenant-ID", "tenant-a")
+	departmentsReq := httptest.NewRequest(http.MethodGet, "/api/admin/v1/departments?tenant_id="+tenantID, nil)
+	departmentsReq.Header.Set("X-Tenant-ID", tenantID)
 	departmentsRec := httptest.NewRecorder()
 	h.ServeHTTP(departmentsRec, departmentsReq)
 	if departmentsRec.Code != http.StatusOK {
@@ -198,6 +200,21 @@ func TestAdminRoleDepartmentLifecycleRoutes(t *testing.T) {
 	}
 	if !strings.Contains(departmentsRec.Body.String(), "operations") {
 		t.Fatalf("expected departments list to contain created department, got %s", departmentsRec.Body.String())
+	}
+}
+
+func TestAdminCreateUserRouteRejectsUnknownTenant(t *testing.T) {
+	h := router.New(router.WithContainer(bootstrap.NewTestContainer()))
+
+	req := httptest.NewRequest(http.MethodPost, "/api/admin/v1/users", strings.NewReader(`{"tenant_id":"tenant-missing","email":"ada@example.com","display_name":"Ada"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Tenant-ID", "tenant-missing")
+	rec := httptest.NewRecorder()
+
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for unknown tenant, got %d: %s", rec.Code, rec.Body.String())
 	}
 }
 

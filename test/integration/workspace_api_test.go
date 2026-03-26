@@ -48,7 +48,7 @@ func TestWorkspaceRoutesExposeSessionsTasksAndEvents(t *testing.T) {
 		t.Fatalf("append event: %v", err)
 	}
 
-	container := bootstrap.NewContainer(bootstrap.DefaultConfig())
+	container := bootstrap.NewTestContainer()
 	container.AgentRuntimeCatalog = catalog
 	container.WorkspaceGateway = gateway
 

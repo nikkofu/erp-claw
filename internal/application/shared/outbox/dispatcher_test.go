@@ -152,12 +152,33 @@ func TestDispatcherProcessOnceReturnsFetchError(t *testing.T) {
 	}
 }
 
+func TestDispatcherProcessOnceRequeuesStuckPublishingBeforeFetch(t *testing.T) {
+	t.Parallel()
+
+	clock := fixedClock{at: time.Date(2026, 3, 25, 10, 4, 0, 0, time.UTC)}
+	repo := &repositoryStub{}
+	dispatcher := NewDispatcher(repo, &publisherStub{}, DispatcherConfig{
+		BatchSize:   10,
+		RetryDelay:  time.Second,
+		Clock:       clock,
+	})
+
+	if err := dispatcher.ProcessOnce(context.Background()); err != nil {
+		t.Fatalf("ProcessOnce() error = %v, want nil", err)
+	}
+
+	if repo.requeuedStuckCutoff.IsZero() {
+		t.Fatal("expected stuck publishing recovery to run before fetch")
+	}
+}
+
 type repositoryStub struct {
 	fetchMessages []Message
 	fetchErr      error
 	published     []publishedCall
 	retried       []retryCall
 	failed        []failedCall
+	requeuedStuckCutoff time.Time
 }
 
 type publishedCall struct {
@@ -182,6 +203,11 @@ func (r *repositoryStub) FetchPublishable(_ context.Context, _ int, _ time.Time)
 		return nil, r.fetchErr
 	}
 	return r.fetchMessages, nil
+}
+
+func (r *repositoryStub) RequeueStuck(_ context.Context, cutoff, _ time.Time) (int, error) {
+	r.requeuedStuckCutoff = cutoff
+	return 0, nil
 }
 
 func (r *repositoryStub) MarkPublished(_ context.Context, id int64, publishedAt time.Time) error {

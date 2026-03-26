@@ -90,6 +90,10 @@ func (r *ControlPlaneRepository) ListTenants(ctx context.Context) ([]controlplan
 }
 
 func (r *ControlPlaneRepository) CreateUser(ctx context.Context, user controlplane.User) (controlplane.User, error) {
+	if err := r.ensureTenantExists(ctx, user.TenantID); err != nil {
+		return controlplane.User{}, err
+	}
+
 	if strings.TrimSpace(user.ID) == "" {
 		user.ID = uuid.NewString()
 	}
@@ -141,6 +145,10 @@ func (r *ControlPlaneRepository) ListUsers(ctx context.Context, tenantID string)
 }
 
 func (r *ControlPlaneRepository) CreateRole(ctx context.Context, role controlplane.Role) (controlplane.Role, error) {
+	if err := r.ensureTenantExists(ctx, role.TenantID); err != nil {
+		return controlplane.Role{}, err
+	}
+
 	if strings.TrimSpace(role.ID) == "" {
 		role.ID = uuid.NewString()
 	}
@@ -192,6 +200,10 @@ func (r *ControlPlaneRepository) ListRoles(ctx context.Context, tenantID string)
 }
 
 func (r *ControlPlaneRepository) CreateDepartment(ctx context.Context, department controlplane.Department) (controlplane.Department, error) {
+	if err := r.ensureTenantExists(ctx, department.TenantID); err != nil {
+		return controlplane.Department{}, err
+	}
+
 	if strings.TrimSpace(department.ID) == "" {
 		department.ID = uuid.NewString()
 	}
@@ -243,6 +255,10 @@ func (r *ControlPlaneRepository) ListDepartments(ctx context.Context, tenantID s
 }
 
 func (r *ControlPlaneRepository) AssignUserRole(ctx context.Context, binding controlplane.UserRoleBinding) (controlplane.UserRoleBinding, error) {
+	if err := r.ensureTenantExists(ctx, binding.TenantID); err != nil {
+		return controlplane.UserRoleBinding{}, err
+	}
+
 	if strings.TrimSpace(binding.ID) == "" {
 		binding.ID = uuid.NewString()
 	}
@@ -264,6 +280,10 @@ func (r *ControlPlaneRepository) AssignUserRole(ctx context.Context, binding con
 }
 
 func (r *ControlPlaneRepository) AssignUserDepartment(ctx context.Context, binding controlplane.UserDepartmentBinding) (controlplane.UserDepartmentBinding, error) {
+	if err := r.ensureTenantExists(ctx, binding.TenantID); err != nil {
+		return controlplane.UserDepartmentBinding{}, err
+	}
+
 	if strings.TrimSpace(binding.ID) == "" {
 		binding.ID = uuid.NewString()
 	}
@@ -285,6 +305,10 @@ func (r *ControlPlaneRepository) AssignUserDepartment(ctx context.Context, bindi
 }
 
 func (r *ControlPlaneRepository) CreateAgentProfile(ctx context.Context, profile controlplane.AgentProfile) (controlplane.AgentProfile, error) {
+	if err := r.ensureTenantExists(ctx, profile.TenantID); err != nil {
+		return controlplane.AgentProfile{}, err
+	}
+
 	if strings.TrimSpace(profile.ID) == "" {
 		profile.ID = uuid.NewString()
 	}
@@ -333,4 +357,25 @@ func (r *ControlPlaneRepository) ListAgentProfiles(ctx context.Context, tenantID
 	}
 
 	return profiles, nil
+}
+
+func (r *ControlPlaneRepository) ensureTenantExists(ctx context.Context, tenantID string) error {
+	parsedTenantID, err := strconv.ParseInt(strings.TrimSpace(tenantID), 10, 64)
+	if err != nil {
+		return err
+	}
+
+	var exists int
+	if err := r.db.QueryRowContext(
+		ctx,
+		`select 1 from tenant where id = $1`,
+		parsedTenantID,
+	).Scan(&exists); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return controlplane.ErrTenantNotFound
+		}
+		return err
+	}
+
+	return nil
 }

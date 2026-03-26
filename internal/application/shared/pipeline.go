@@ -72,7 +72,9 @@ func (p *Pipeline) Execute(ctx context.Context, cmd Command, handlers ...Handler
 		return p.recordAndReturn(ctx, cmd, decision, "rejected", err)
 	case policy.DecisionRequireApproval:
 		if p.approvals != nil {
-			if err := p.approvals.StartApprovalForCommand(ctx, cmd); err != nil {
+			if err := p.transactions.WithinTransaction(ctx, func(txCtx context.Context) error {
+				return p.approvals.StartApprovalForCommand(txCtx, cmd)
+			}); err != nil {
 				return p.recordAndReturn(ctx, cmd, decision, "failed", err)
 			}
 		}

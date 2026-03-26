@@ -215,7 +215,7 @@ func (r *AgentRuntimeRepository) CreateTask(ctx context.Context, task agentrunti
 
 	var sessionID any
 	if strings.TrimSpace(task.SessionID) != "" {
-		parsedSessionID, err := parseInt64ID(task.SessionID)
+		parsedSessionID, err := r.lookupSessionDBID(ctx, tenantID, task.SessionID)
 		if err != nil {
 			return agentruntime.Task{}, err
 		}
@@ -260,6 +260,7 @@ func (r *AgentRuntimeRepository) GetTaskByID(ctx context.Context, tenantID, task
 	}
 
 	var sessionID sql.NullInt64
+	var sessionKey sql.NullString
 	var taskType string
 	var status string
 	var inputRaw []byte
@@ -269,12 +270,23 @@ func (r *AgentRuntimeRepository) GetTaskByID(ctx context.Context, tenantID, task
 	var completedAt sql.NullTime
 	if err := r.db.QueryRowContext(
 		ctx,
-		`select session_id, task_type, status, input, output, attempts, queued_at, completed_at
-		 from agent_task
-		 where tenant_id = $1 and id = $2`,
+		`select t.session_id,
+		        coalesce(s.session_key, ''),
+		        t.task_type,
+		        t.status,
+		        t.input,
+		        t.output,
+		        t.attempts,
+		        t.queued_at,
+		        t.completed_at
+		 from agent_task t
+		 left join agent_session s
+		   on s.tenant_id = t.tenant_id
+		  and s.id = t.session_id
+		 where t.tenant_id = $1 and t.id = $2`,
 		parsedTenantID,
 		parsedTaskID,
-	).Scan(&sessionID, &taskType, &status, &inputRaw, &outputRaw, &attempts, &queuedAt, &completedAt); err != nil {
+	).Scan(&sessionID, &sessionKey, &taskType, &status, &inputRaw, &outputRaw, &attempts, &queuedAt, &completedAt); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return agentruntime.Task{}, agentruntime.ErrTaskNotFound
 		}
@@ -305,7 +317,7 @@ func (r *AgentRuntimeRepository) GetTaskByID(ctx context.Context, tenantID, task
 		QueuedAt: queuedAt,
 	}
 	if sessionID.Valid {
-		task.SessionID = strconv.FormatInt(sessionID.Int64, 10)
+		task.SessionID = sessionKey.String
 	}
 	if completedAt.Valid {
 		task.CompletedAt = &completedAt.Time
@@ -320,19 +332,26 @@ func (r *AgentRuntimeRepository) ListTasks(ctx context.Context, tenantID, sessio
 		return nil, err
 	}
 
-	query := `select id, session_id, task_type, status, input, output, attempts, queued_at, completed_at
-		from agent_task
-		where tenant_id = $1`
+	query := `select t.id,
+	                 coalesce(s.session_key, ''),
+	                 t.task_type,
+	                 t.status,
+	                 t.input,
+	                 t.output,
+	                 t.attempts,
+	                 t.queued_at,
+	                 t.completed_at
+		from agent_task t
+		left join agent_session s
+		  on s.tenant_id = t.tenant_id
+		 and s.id = t.session_id
+		where t.tenant_id = $1`
 	args := []any{parsedTenantID}
 	if strings.TrimSpace(sessionID) != "" {
-		parsedSessionID, err := parseInt64ID(sessionID)
-		if err != nil {
-			return nil, err
-		}
-		query += ` and session_id = $2`
-		args = append(args, parsedSessionID)
+		query += ` and s.session_key = $2`
+		args = append(args, strings.TrimSpace(sessionID))
 	}
-	query += ` order by queued_at desc, id desc`
+	query += ` order by t.queued_at desc, t.id desc`
 
 	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -343,7 +362,7 @@ func (r *AgentRuntimeRepository) ListTasks(ctx context.Context, tenantID, sessio
 	tasks := make([]agentruntime.Task, 0)
 	for rows.Next() {
 		var dbID int64
-		var dbSessionID sql.NullInt64
+		var sessionKey sql.NullString
 		var taskType string
 		var status string
 		var inputRaw []byte
@@ -351,7 +370,7 @@ func (r *AgentRuntimeRepository) ListTasks(ctx context.Context, tenantID, sessio
 		var attempts int
 		var queuedAt time.Time
 		var completedAt sql.NullTime
-		if err := rows.Scan(&dbID, &dbSessionID, &taskType, &status, &inputRaw, &outputRaw, &attempts, &queuedAt, &completedAt); err != nil {
+		if err := rows.Scan(&dbID, &sessionKey, &taskType, &status, &inputRaw, &outputRaw, &attempts, &queuedAt, &completedAt); err != nil {
 			return nil, err
 		}
 
@@ -378,8 +397,8 @@ func (r *AgentRuntimeRepository) ListTasks(ctx context.Context, tenantID, sessio
 			Attempts: attempts,
 			QueuedAt: queuedAt,
 		}
-		if dbSessionID.Valid {
-			task.SessionID = strconv.FormatInt(dbSessionID.Int64, 10)
+		if sessionKey.Valid {
+			task.SessionID = sessionKey.String
 		}
 		if completedAt.Valid {
 			task.CompletedAt = &completedAt.Time
@@ -440,4 +459,23 @@ func (r *AgentRuntimeRepository) UpdateTaskStatus(ctx context.Context, tenantID,
 
 func parseInt64ID(raw string) (int64, error) {
 	return strconv.ParseInt(strings.TrimSpace(raw), 10, 64)
+}
+
+func (r *AgentRuntimeRepository) lookupSessionDBID(ctx context.Context, tenantID int64, sessionKey string) (int64, error) {
+	var sessionID int64
+	if err := r.db.QueryRowContext(
+		ctx,
+		`select id
+		 from agent_session
+		 where tenant_id = $1 and session_key = $2`,
+		tenantID,
+		strings.TrimSpace(sessionKey),
+	).Scan(&sessionID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return 0, agentruntime.ErrSessionNotFound
+		}
+		return 0, err
+	}
+
+	return sessionID, nil
 }

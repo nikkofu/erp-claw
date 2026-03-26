@@ -196,6 +196,7 @@ type InstanceRepository interface {
 	CreateInstance(ctx context.Context, instance Instance) (Instance, error)
 	GetInstanceByID(ctx context.Context, tenantID, instanceID string) (Instance, error)
 	UpdateInstanceStatus(ctx context.Context, tenantID, instanceID string, status InstanceStatus) error
+	DeleteInstance(ctx context.Context, tenantID, instanceID string) error
 }
 
 type TaskRepository interface {

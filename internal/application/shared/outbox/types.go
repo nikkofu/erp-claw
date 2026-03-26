@@ -15,6 +15,7 @@ type Message struct {
 }
 
 type Repository interface {
+	RequeueStuck(ctx context.Context, cutoff, availableAt time.Time) (int, error)
 	FetchPublishable(ctx context.Context, limit int, now time.Time) ([]Message, error)
 	MarkPublished(ctx context.Context, id int64, publishedAt time.Time) error
 	MarkForRetry(ctx context.Context, id int64, nextAvailableAt time.Time, reason string) error

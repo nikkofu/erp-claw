@@ -2,6 +2,7 @@ package bootstrap
 
 import (
 	"context"
+	"fmt"
 	"strconv"
 	"strings"
 	"sync"
@@ -12,12 +13,16 @@ import (
 )
 
 func newControlPlaneCatalog(cfg Config) ControlPlaneCatalog {
+	if shouldUseInMemoryCatalogFallback(cfg) {
+		return newInMemoryControlPlaneCatalog()
+	}
+
 	catalog, err := newPostgresControlPlaneCatalog(cfg.Database)
 	if err == nil {
 		return catalog
 	}
 
-	return newInMemoryControlPlaneCatalog()
+	panic(fmt.Errorf("bootstrap: control-plane catalog init failed: %w", err))
 }
 
 func newPostgresControlPlaneCatalog(cfg DatabaseConfig) (ControlPlaneCatalog, error) {
@@ -55,6 +60,7 @@ type inMemoryControlPlaneCatalog struct {
 	nextUserDeptID   int64
 	nextProfileID    int64
 	tenants          []controlplane.Tenant
+	tenantIndex      map[string]struct{}
 	usersByTenant    map[string][]controlplane.User
 	rolesByTenant    map[string][]controlplane.Role
 	deptsByTenant    map[string][]controlplane.Department
@@ -66,6 +72,7 @@ type inMemoryControlPlaneCatalog struct {
 func newInMemoryControlPlaneCatalog() *inMemoryControlPlaneCatalog {
 	return &inMemoryControlPlaneCatalog{
 		tenants:          make([]controlplane.Tenant, 0),
+		tenantIndex:      make(map[string]struct{}),
 		usersByTenant:    make(map[string][]controlplane.User),
 		rolesByTenant:    make(map[string][]controlplane.Role),
 		deptsByTenant:    make(map[string][]controlplane.Department),
@@ -85,6 +92,7 @@ func (r *inMemoryControlPlaneCatalog) CreateTenant(_ context.Context, tenant con
 	}
 
 	r.tenants = append(r.tenants, tenant)
+	r.tenantIndex[tenant.ID] = struct{}{}
 	return tenant, nil
 }
 
@@ -100,6 +108,10 @@ func (r *inMemoryControlPlaneCatalog) ListTenants(_ context.Context) ([]controlp
 func (r *inMemoryControlPlaneCatalog) CreateUser(_ context.Context, user controlplane.User) (controlplane.User, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+
+	if err := r.ensureTenantExistsLocked(user.TenantID); err != nil {
+		return controlplane.User{}, err
+	}
 
 	if strings.TrimSpace(user.ID) == "" {
 		r.nextUserID++
@@ -124,6 +136,10 @@ func (r *inMemoryControlPlaneCatalog) CreateRole(_ context.Context, role control
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	if err := r.ensureTenantExistsLocked(role.TenantID); err != nil {
+		return controlplane.Role{}, err
+	}
+
 	if strings.TrimSpace(role.ID) == "" {
 		r.nextRoleID++
 		role.ID = "role-" + strconv.FormatInt(r.nextRoleID, 10)
@@ -146,6 +162,10 @@ func (r *inMemoryControlPlaneCatalog) ListRoles(_ context.Context, tenantID stri
 func (r *inMemoryControlPlaneCatalog) CreateDepartment(_ context.Context, department controlplane.Department) (controlplane.Department, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+
+	if err := r.ensureTenantExistsLocked(department.TenantID); err != nil {
+		return controlplane.Department{}, err
+	}
 
 	if strings.TrimSpace(department.ID) == "" {
 		r.nextDepartmentID++
@@ -170,6 +190,10 @@ func (r *inMemoryControlPlaneCatalog) AssignUserRole(_ context.Context, binding 
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	if err := r.ensureTenantExistsLocked(binding.TenantID); err != nil {
+		return controlplane.UserRoleBinding{}, err
+	}
+
 	if strings.TrimSpace(binding.ID) == "" {
 		r.nextUserRoleID++
 		binding.ID = "user-role-" + strconv.FormatInt(r.nextUserRoleID, 10)
@@ -183,6 +207,10 @@ func (r *inMemoryControlPlaneCatalog) AssignUserDepartment(_ context.Context, bi
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	if err := r.ensureTenantExistsLocked(binding.TenantID); err != nil {
+		return controlplane.UserDepartmentBinding{}, err
+	}
+
 	if strings.TrimSpace(binding.ID) == "" {
 		r.nextUserDeptID++
 		binding.ID = "user-department-" + strconv.FormatInt(r.nextUserDeptID, 10)
@@ -195,6 +223,10 @@ func (r *inMemoryControlPlaneCatalog) AssignUserDepartment(_ context.Context, bi
 func (r *inMemoryControlPlaneCatalog) CreateAgentProfile(_ context.Context, profile controlplane.AgentProfile) (controlplane.AgentProfile, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+
+	if err := r.ensureTenantExistsLocked(profile.TenantID); err != nil {
+		return controlplane.AgentProfile{}, err
+	}
 
 	if strings.TrimSpace(profile.ID) == "" {
 		r.nextProfileID++
@@ -213,4 +245,18 @@ func (r *inMemoryControlPlaneCatalog) ListAgentProfiles(_ context.Context, tenan
 	list := make([]controlplane.AgentProfile, len(profiles))
 	copy(list, profiles)
 	return list, nil
+}
+
+func (r *inMemoryControlPlaneCatalog) ensureTenantExistsLocked(tenantID string) error {
+	if _, ok := r.tenantIndex[strings.TrimSpace(tenantID)]; ok {
+		return nil
+	}
+	return controlplane.ErrTenantNotFound
+}
+
+func shouldUseInMemoryCatalogFallback(cfg Config) bool {
+	if strings.EqualFold(strings.TrimSpace(cfg.Env), "test") {
+		return true
+	}
+	return strings.TrimSpace(cfg.Database.DSN) == ""
 }

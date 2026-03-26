@@ -147,6 +147,28 @@ func (r *ApprovalRepository) UpdateInstanceStatus(ctx context.Context, tenantID,
 	return nil
 }
 
+func (r *ApprovalRepository) DeleteInstance(ctx context.Context, tenantID, instanceID string) error {
+	result, err := r.db.ExecContext(
+		ctx,
+		`delete from approval_instance
+		 where tenant_id = $1 and id = $2`,
+		tenantID,
+		instanceID,
+	)
+	if err != nil {
+		return err
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rowsAffected == 0 {
+		return domainapproval.ErrInstanceNotFound
+	}
+	return nil
+}
+
 func (r *ApprovalRepository) CreateTask(ctx context.Context, task domainapproval.Task) (domainapproval.Task, error) {
 	if strings.TrimSpace(task.ID) == "" {
 		task.ID = uuid.NewString()

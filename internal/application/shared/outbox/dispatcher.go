@@ -7,25 +7,28 @@ import (
 )
 
 const (
-	defaultBatchSize   = 50
-	defaultRetryDelay  = 15 * time.Second
-	defaultMaxAttempts = 5
+	defaultBatchSize         = 50
+	defaultRetryDelay        = 15 * time.Second
+	defaultMaxAttempts       = 5
+	defaultProcessingTimeout = time.Minute
 )
 
 type DispatcherConfig struct {
-	BatchSize   int
-	RetryDelay  time.Duration
-	MaxAttempts int
-	Clock       Clock
+	BatchSize         int
+	RetryDelay        time.Duration
+	MaxAttempts       int
+	ProcessingTimeout time.Duration
+	Clock             Clock
 }
 
 type Dispatcher struct {
-	repository  Repository
-	publisher   Publisher
-	batchSize   int
-	retryDelay  time.Duration
-	maxAttempts int
-	clock       Clock
+	repository        Repository
+	publisher         Publisher
+	batchSize         int
+	retryDelay        time.Duration
+	maxAttempts       int
+	processingTimeout time.Duration
+	clock             Clock
 }
 
 func NewDispatcher(repository Repository, publisher Publisher, cfg DispatcherConfig) *Dispatcher {
@@ -44,23 +47,33 @@ func NewDispatcher(repository Repository, publisher Publisher, cfg DispatcherCon
 		maxAttempts = defaultMaxAttempts
 	}
 
+	processingTimeout := cfg.ProcessingTimeout
+	if processingTimeout <= 0 {
+		processingTimeout = defaultProcessingTimeout
+	}
+
 	clock := cfg.Clock
 	if clock == nil {
 		clock = systemClock{}
 	}
 
 	return &Dispatcher{
-		repository:  repository,
-		publisher:   publisher,
-		batchSize:   batchSize,
-		retryDelay:  retryDelay,
-		maxAttempts: maxAttempts,
-		clock:       clock,
+		repository:        repository,
+		publisher:         publisher,
+		batchSize:         batchSize,
+		retryDelay:        retryDelay,
+		maxAttempts:       maxAttempts,
+		processingTimeout: processingTimeout,
+		clock:             clock,
 	}
 }
 
 func (d *Dispatcher) ProcessOnce(ctx context.Context) error {
 	now := d.clock.Now()
+
+	if _, err := d.repository.RequeueStuck(ctx, now.Add(-d.processingTimeout), now); err != nil {
+		return err
+	}
 
 	messages, err := d.repository.FetchPublishable(ctx, d.batchSize, now)
 	if err != nil {

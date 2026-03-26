@@ -7,6 +7,7 @@ import (
 
 var (
 	errTenantCodeRequired = errors.New("tenant code is required")
+	ErrTenantNotFound     = errors.New("control plane tenant not found")
 )
 
 // Tenant is the catalog root for a control-plane tenant.

@@ -42,3 +42,10 @@ func NewContainer(cfg Config) *Container {
 		WorkspaceGateway:    ws.NewWorkspaceGateway(),
 	}
 }
+
+func NewTestContainer() *Container {
+	cfg := DefaultConfig()
+	cfg.Env = "test"
+	cfg.Database.DSN = ""
+	return NewContainer(cfg)
+}

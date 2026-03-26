@@ -66,10 +66,14 @@ func (h StartApprovalHandler) Handle(ctx context.Context, cmd StartApproval) (St
 
 	task, err := domainapproval.NewTask(cmd.TenantID, instance.ID, definition.ApproverID)
 	if err != nil {
+		_ = h.Instances.DeleteInstance(ctx, cmd.TenantID, instance.ID)
 		return StartApprovalResult{}, err
 	}
 	task, err = h.Tasks.CreateTask(ctx, task)
 	if err != nil {
+		if rollbackErr := h.Instances.DeleteInstance(ctx, cmd.TenantID, instance.ID); rollbackErr != nil {
+			return StartApprovalResult{}, errors.Join(err, rollbackErr)
+		}
 		return StartApprovalResult{}, err
 	}
 

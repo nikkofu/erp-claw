@@ -28,6 +28,32 @@ func NewOutboxRepository(db *sql.DB) (*OutboxRepository, error) {
 	return &OutboxRepository{db: db}, nil
 }
 
+func (r *OutboxRepository) RequeueStuck(ctx context.Context, cutoff, availableAt time.Time) (int, error) {
+	result, err := r.db.ExecContext(
+		ctx,
+		`update outbox
+		 set status = 'pending',
+		     available_at = $2,
+		     last_error = 'stuck publishing lease expired',
+		     processing_at = null
+		 where status = 'publishing'
+		   and processing_at is not null
+		   and processing_at <= $1`,
+		cutoff,
+		availableAt,
+	)
+	if err != nil {
+		return 0, err
+	}
+
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+
+	return int(affected), nil
+}
+
 func (r *OutboxRepository) FetchPublishable(ctx context.Context, limit int, now time.Time) ([]outbox.Message, error) {
 	if limit <= 0 {
 		limit = defaultOutboxFetchLimit

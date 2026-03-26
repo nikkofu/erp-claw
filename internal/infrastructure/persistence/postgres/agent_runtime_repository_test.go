@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"database/sql"
+	"strings"
 	"testing"
 
 	application "github.com/nikkofu/erp-claw/internal/application/agentruntime"
@@ -67,7 +68,7 @@ func TestAgentRuntimeRepositoryListSessionsRejectsNonNumericTenantID(t *testing.
 	}
 }
 
-func TestAgentRuntimeRepositoryListTasksRejectsNonNumericSessionID(t *testing.T) {
+func TestAgentRuntimeRepositoryListTasksAcceptsSessionKeyFilter(t *testing.T) {
 	db := openAgentRuntimeTestDB(t)
 	repo, err := NewAgentRuntimeRepository(db)
 	if err != nil {
@@ -76,7 +77,10 @@ func TestAgentRuntimeRepositoryListTasksRejectsNonNumericSessionID(t *testing.T)
 
 	_, err = repo.ListTasks(context.Background(), "1001", "session-a")
 	if err == nil {
-		t.Fatal("expected list tasks to reject non-numeric session id")
+		t.Fatal("expected list tasks to reach storage on invalid test connection")
+	}
+	if strings.Contains(err.Error(), "invalid syntax") {
+		t.Fatalf("expected session key filter to avoid numeric parse rejection, got %v", err)
 	}
 }
 

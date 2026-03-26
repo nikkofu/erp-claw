@@ -14,7 +14,7 @@ import (
 
 func TestHealthRoutes(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	container := bootstrap.NewContainer(bootstrap.DefaultConfig())
+	container := bootstrap.NewTestContainer()
 	h := router.New(router.WithContainer(container))
 
 	cases := []struct {

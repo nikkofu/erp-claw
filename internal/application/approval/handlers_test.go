@@ -2,6 +2,7 @@ package approval
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	domainapproval "github.com/nikkofu/erp-claw/internal/domain/approval"
@@ -66,6 +67,37 @@ func TestApproveTaskHandlerApprovesTaskAndInstance(t *testing.T) {
 	}
 }
 
+func TestStartApprovalHandlerDeletesInstanceWhenTaskCreationFails(t *testing.T) {
+	repo := newFakeRepository()
+	repo.definitions["tenant-a|def-a"] = domainapproval.Definition{
+		TenantID:   "tenant-a",
+		ID:         "def-a",
+		Name:       "purchase approval",
+		ApproverID: "manager-a",
+		Active:     true,
+	}
+	repo.createTaskErr = errors.New("task store unavailable")
+
+	handler := StartApprovalHandler{
+		Definitions: repo,
+		Instances:   repo,
+		Tasks:       repo,
+	}
+	_, err := handler.Handle(context.Background(), StartApproval{
+		TenantID:     "tenant-a",
+		DefinitionID: "def-a",
+		ResourceType: "purchase_order",
+		ResourceID:   "po-1",
+		RequestedBy:  "user-a",
+	})
+	if err == nil {
+		t.Fatal("expected task creation failure")
+	}
+	if len(repo.instances) != 0 {
+		t.Fatalf("expected no orphaned approval instances, got %d", len(repo.instances))
+	}
+}
+
 func TestRejectTaskHandlerRejectsTaskAndInstance(t *testing.T) {
 	repo := seededApprovalRepo(t)
 	handler := RejectTaskHandler{
@@ -96,6 +128,7 @@ type fakeRepository struct {
 	definitions map[string]domainapproval.Definition
 	instances   map[string]domainapproval.Instance
 	tasks       map[string]domainapproval.Task
+	createTaskErr error
 }
 
 func newFakeRepository() *fakeRepository {
@@ -167,11 +200,19 @@ func (r *fakeRepository) UpdateInstanceStatus(_ context.Context, tenantID, insta
 }
 
 func (r *fakeRepository) CreateTask(_ context.Context, task domainapproval.Task) (domainapproval.Task, error) {
+	if r.createTaskErr != nil {
+		return domainapproval.Task{}, r.createTaskErr
+	}
 	if task.ID == "" {
 		task.ID = "task-created"
 	}
 	r.tasks[task.TenantID+"|"+task.ID] = task
 	return task, nil
+}
+
+func (r *fakeRepository) DeleteInstance(_ context.Context, tenantID, instanceID string) error {
+	delete(r.instances, tenantID+"|"+instanceID)
+	return nil
 }
 
 func (r *fakeRepository) GetTaskByID(_ context.Context, tenantID, taskID string) (domainapproval.Task, error) {

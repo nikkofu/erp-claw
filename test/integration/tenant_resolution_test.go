@@ -5,11 +5,12 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/nikkofu/erp-claw/internal/bootstrap"
 	"github.com/nikkofu/erp-claw/internal/interfaces/http/router"
 )
 
 func TestTenantResolutionFromHeader(t *testing.T) {
-	h := router.New()
+	h := router.New(router.WithContainer(bootstrap.NewTestContainer()))
 	req := httptest.NewRequest(http.MethodGet, "/api/platform/v1/health/livez", nil)
 	req.Header.Set("X-Tenant-ID", "tenant-a")
 

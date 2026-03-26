@@ -9,8 +9,6 @@ import (
 	platformruntime "github.com/nikkofu/erp-claw/internal/platform/runtime"
 )
 
-var errUnknownWorkspaceSession = errors.New("workspace session is not registered")
-
 // WorkspaceGateway is the single runtime seam for workspace event fan-out.
 // Full WebSocket protocol negotiation and agent task streaming are intentionally
 // deferred to later plans; this type only preserves session-aware registration.
@@ -66,7 +64,7 @@ func (g *WorkspaceGateway) Broadcast(evt platformruntime.WorkspaceEvent) error {
 	if sessionID := strings.TrimSpace(evt.SessionID); sessionID != "" {
 		ch, ok := g.channels[sessionID]
 		if !ok {
-			return errUnknownWorkspaceSession
+			return nil
 		}
 		select {
 		case ch <- evt:
