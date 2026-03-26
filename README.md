@@ -134,6 +134,20 @@ curl -sS http://127.0.0.1:8080/api/platform/v1/health/livez
 
 Use `make smoke` to run the live HTTP health probe in `TestHealthRoutesLive` after the API server is already listening locally.
 
+## Phase Handoff Playbook
+
+为避免跨天推进时丢失上下文，阶段收尾统一使用 handoff playbook。
+
+- Playbook skill: `skills/phase-handoff-playbook/SKILL.md`
+- Handoff outputs: `docs/phase-handoff-playbook/`
+- 快速生成模板:
+
+```bash
+scripts/phase_handoff_new.sh phase2-wave-next
+```
+
+生成后请补齐“新鲜验证结果 + 明天第一任务 + merge 安全状态”。
+
 ## Configuration
 
 Bootstrap configuration is explicit: `LoadConfig(path string)` seeds defaults, optionally reads the requested YAML file, and then applies any `ERP_` environment overrides before returning the final `Config`. Runtimes that need the local stack behavior should pass `configs/local/app.yaml`; other profiles can reuse this file as their template, but there is no automatic profile discovery in `LoadConfig` yet.
