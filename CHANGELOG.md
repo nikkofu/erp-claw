@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.3] - 2026-03-26
+
+### Added
+
+- Workspace write-side HTTP routes for creating sessions and tasks, transitioning tasks through start/complete/fail/cancel, and closing sessions.
+- Integration coverage for a full workspace write flow that creates runtime state and verifies replayed workspace events through the existing read APIs.
+
+### Changed
+
+- Phase 1 docs now reflect that the workspace surface is no longer read-only; it now includes a minimal command/write seam on top of the existing session/task runtime service.
+
 ## [0.2.2] - 2026-03-26
 
 ### Added

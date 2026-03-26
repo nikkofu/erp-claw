@@ -49,6 +49,18 @@ Bootstrap behavior for `bootstrap.NewContainer(cfg)`:
 - Fails fast when a runtime Postgres catalog cannot be initialized, so control-plane and workspace state do not silently degrade into ephemeral storage.
 - Uses in-memory catalogs only for explicit test bootstrap paths such as `bootstrap.NewTestContainer()` or configurations with an empty database DSN.
 
+## Workspace API Slice (Phase 1)
+
+The Workspace API now exposes a minimal command surface in addition to the existing read-side endpoints.
+
+- Create sessions
+- Create tasks
+- Start / complete / fail / cancel tasks
+- Close sessions
+- List sessions / tasks / replay events
+
+This is still not a full real-time workspace protocol. It is the smallest write-side seam needed to let the Phase 1 agent runtime contracts be exercised end-to-end over HTTP.
+
 ## Dependencies
 
 Third-party services (databases, message brokers, etc.) are expected to be brought up through `docker-compose.yml` before running any Go runtime.
