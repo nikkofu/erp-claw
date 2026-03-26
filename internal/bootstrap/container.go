@@ -70,6 +70,8 @@ func NewContainer(cfg Config) *Container {
 			MasterData:     supplyChainStore.MasterDataRepository(),
 			PurchaseOrders: supplyChainStore.PurchaseOrderRepository(),
 			Approvals:      supplyChainStore.ApprovalRepository(),
+			Inventory:      supplyChainStore.InventoryRepository(),
+			Payables:       supplyChainStore.PayableRepository(),
 			Pipeline:       pipeline,
 		}),
 		ControlPlane: controlplane.NewService(controlplane.ServiceDeps{

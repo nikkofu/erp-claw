@@ -7,7 +7,9 @@ import (
 
 	"github.com/nikkofu/erp-claw/internal/application/shared"
 	"github.com/nikkofu/erp-claw/internal/domain/approval"
+	"github.com/nikkofu/erp-claw/internal/domain/inventory"
 	"github.com/nikkofu/erp-claw/internal/domain/masterdata"
+	"github.com/nikkofu/erp-claw/internal/domain/payable"
 	"github.com/nikkofu/erp-claw/internal/domain/procurement"
 	"github.com/nikkofu/erp-claw/internal/infrastructure/persistence/memory"
 )
@@ -268,11 +270,250 @@ func TestServiceCreatePurchaseOrderFailsForUnknownSupplier(t *testing.T) {
 	}
 }
 
+func TestServiceReceivesApprovedPurchaseOrderIntoInventory(t *testing.T) {
+	ctx := context.Background()
+	svc := newTestService()
+	approvedOrder := createApprovedOrder(t, ctx, svc)
+
+	receipt, ledgerEntries, receivedOrder, err := svc.ReceivePurchaseOrder(ctx, ReceivePurchaseOrderInput{
+		TenantID:        "tenant-a",
+		ActorID:         "receiver-a",
+		PurchaseOrderID: approvedOrder.ID,
+		Lines: []ReceivePurchaseOrderLine{{
+			ProductID: approvedOrder.Lines[0].ProductID,
+			Quantity:  approvedOrder.Lines[0].Quantity,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("receive purchase order: %v", err)
+	}
+
+	if receipt.Status != inventory.ReceiptStatusPosted {
+		t.Fatalf("expected posted receipt, got %s", receipt.Status)
+	}
+
+	if receivedOrder.Status != procurement.PurchaseOrderStatusReceived {
+		t.Fatalf("expected received order, got %s", receivedOrder.Status)
+	}
+
+	if len(ledgerEntries) != 1 {
+		t.Fatalf("expected 1 ledger entry, got %d", len(ledgerEntries))
+	}
+
+	if ledgerEntries[0].QuantityDelta != approvedOrder.Lines[0].Quantity {
+		t.Fatalf("expected quantity delta %d, got %d", approvedOrder.Lines[0].Quantity, ledgerEntries[0].QuantityDelta)
+	}
+}
+
+func TestServiceReturnsInventoryBalanceFromPostedReceipts(t *testing.T) {
+	ctx := context.Background()
+	svc := newTestService()
+	approvedOrder := createApprovedOrder(t, ctx, svc)
+
+	_, _, _, err := svc.ReceivePurchaseOrder(ctx, ReceivePurchaseOrderInput{
+		TenantID:        "tenant-a",
+		ActorID:         "receiver-a",
+		PurchaseOrderID: approvedOrder.ID,
+		Lines: []ReceivePurchaseOrderLine{{
+			ProductID: approvedOrder.Lines[0].ProductID,
+			Quantity:  approvedOrder.Lines[0].Quantity,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("receive purchase order: %v", err)
+	}
+
+	balance, err := svc.GetInventoryBalance(ctx, GetInventoryBalanceInput{
+		TenantID:    "tenant-a",
+		ProductID:   approvedOrder.Lines[0].ProductID,
+		WarehouseID: approvedOrder.WarehouseID,
+	})
+	if err != nil {
+		t.Fatalf("get inventory balance: %v", err)
+	}
+
+	if balance.OnHand != approvedOrder.Lines[0].Quantity {
+		t.Fatalf("expected on hand %d, got %d", approvedOrder.Lines[0].Quantity, balance.OnHand)
+	}
+}
+
+func TestServiceReceivePurchaseOrderFailsWhenOrderNotApproved(t *testing.T) {
+	ctx := context.Background()
+	svc := newTestService()
+	order, _ := createSubmittedOrder(t, ctx, svc)
+
+	_, _, _, err := svc.ReceivePurchaseOrder(ctx, ReceivePurchaseOrderInput{
+		TenantID:        "tenant-a",
+		ActorID:         "receiver-a",
+		PurchaseOrderID: order.ID,
+		Lines: []ReceivePurchaseOrderLine{{
+			ProductID: order.Lines[0].ProductID,
+			Quantity:  order.Lines[0].Quantity,
+		}},
+	})
+	if !errors.Is(err, procurement.ErrPurchaseOrderNotReceivable) {
+		t.Fatalf("expected purchase order not receivable, got %v", err)
+	}
+}
+
+func TestServiceReceivePurchaseOrderFailsForEmptyLines(t *testing.T) {
+	ctx := context.Background()
+	svc := newTestService()
+	approvedOrder := createApprovedOrder(t, ctx, svc)
+
+	_, _, _, err := svc.ReceivePurchaseOrder(ctx, ReceivePurchaseOrderInput{
+		TenantID:        "tenant-a",
+		ActorID:         "receiver-a",
+		PurchaseOrderID: approvedOrder.ID,
+	})
+	if !errors.Is(err, inventory.ErrInvalidReceipt) {
+		t.Fatalf("expected invalid receipt, got %v", err)
+	}
+}
+
+func TestServiceCreatesPayableBillForReceivedPurchaseOrder(t *testing.T) {
+	ctx := context.Background()
+	svc := newTestService()
+	receivedOrder := createReceivedOrder(t, ctx, svc)
+
+	bill, err := svc.CreatePayableBill(ctx, CreatePayableBillInput{
+		TenantID:        "tenant-a",
+		ActorID:         "finance-a",
+		PurchaseOrderID: receivedOrder.ID,
+	})
+	if err != nil {
+		t.Fatalf("create payable bill: %v", err)
+	}
+
+	if bill.Status != payable.BillStatusOpen {
+		t.Fatalf("expected open payable bill, got %s", bill.Status)
+	}
+	if bill.PurchaseOrderID != receivedOrder.ID {
+		t.Fatalf("expected purchase order id %s, got %s", receivedOrder.ID, bill.PurchaseOrderID)
+	}
+}
+
+func TestServiceCreatePayableBillFailsWhenOrderNotReceived(t *testing.T) {
+	ctx := context.Background()
+	svc := newTestService()
+	approvedOrder := createApprovedOrder(t, ctx, svc)
+
+	_, err := svc.CreatePayableBill(ctx, CreatePayableBillInput{
+		TenantID:        "tenant-a",
+		ActorID:         "finance-a",
+		PurchaseOrderID: approvedOrder.ID,
+	})
+	if !errors.Is(err, payable.ErrOrderNotBillable) {
+		t.Fatalf("expected order not billable, got %v", err)
+	}
+}
+
+func TestServiceCreatePayableBillFailsWhenBillAlreadyExists(t *testing.T) {
+	ctx := context.Background()
+	svc := newTestService()
+	receivedOrder := createReceivedOrder(t, ctx, svc)
+
+	_, err := svc.CreatePayableBill(ctx, CreatePayableBillInput{
+		TenantID:        "tenant-a",
+		ActorID:         "finance-a",
+		PurchaseOrderID: receivedOrder.ID,
+	})
+	if err != nil {
+		t.Fatalf("create first payable bill: %v", err)
+	}
+
+	_, err = svc.CreatePayableBill(ctx, CreatePayableBillInput{
+		TenantID:        "tenant-a",
+		ActorID:         "finance-a",
+		PurchaseOrderID: receivedOrder.ID,
+	})
+	if !errors.Is(err, payable.ErrBillAlreadyExists) {
+		t.Fatalf("expected bill already exists, got %v", err)
+	}
+}
+
+func TestServiceCreatesPayablePaymentPlanForBill(t *testing.T) {
+	ctx := context.Background()
+	svc := newTestService()
+	receivedOrder := createReceivedOrder(t, ctx, svc)
+
+	bill, err := svc.CreatePayableBill(ctx, CreatePayableBillInput{
+		TenantID:        "tenant-a",
+		ActorID:         "finance-a",
+		PurchaseOrderID: receivedOrder.ID,
+	})
+	if err != nil {
+		t.Fatalf("create payable bill: %v", err)
+	}
+
+	plan, err := svc.CreatePayablePaymentPlan(ctx, CreatePayablePaymentPlanInput{
+		TenantID:       "tenant-a",
+		ActorID:        "finance-a",
+		PayableBillID:  bill.ID,
+		DueDateISO8601: "2026-04-01",
+	})
+	if err != nil {
+		t.Fatalf("create payable payment plan: %v", err)
+	}
+
+	if plan.Status != payable.PaymentPlanStatusPlanned {
+		t.Fatalf("expected planned payment plan, got %s", plan.Status)
+	}
+	if plan.PayableBillID != bill.ID {
+		t.Fatalf("expected payable bill id %s, got %s", bill.ID, plan.PayableBillID)
+	}
+	if plan.DueDateISO8601 != "2026-04-01" {
+		t.Fatalf("expected due date 2026-04-01, got %s", plan.DueDateISO8601)
+	}
+}
+
+func TestServiceCreatePayablePaymentPlanFailsWhenBillNotFound(t *testing.T) {
+	ctx := context.Background()
+	svc := newTestService()
+
+	_, err := svc.CreatePayablePaymentPlan(ctx, CreatePayablePaymentPlanInput{
+		TenantID:       "tenant-a",
+		ActorID:        "finance-a",
+		PayableBillID:  "pab-missing",
+		DueDateISO8601: "2026-04-01",
+	})
+	if !errors.Is(err, payable.ErrBillNotFound) {
+		t.Fatalf("expected bill not found, got %v", err)
+	}
+}
+
+func TestServiceCreatePayablePaymentPlanFailsForInvalidDueDate(t *testing.T) {
+	ctx := context.Background()
+	svc := newTestService()
+	receivedOrder := createReceivedOrder(t, ctx, svc)
+
+	bill, err := svc.CreatePayableBill(ctx, CreatePayableBillInput{
+		TenantID:        "tenant-a",
+		ActorID:         "finance-a",
+		PurchaseOrderID: receivedOrder.ID,
+	})
+	if err != nil {
+		t.Fatalf("create payable bill: %v", err)
+	}
+
+	_, err = svc.CreatePayablePaymentPlan(ctx, CreatePayablePaymentPlanInput{
+		TenantID:       "tenant-a",
+		ActorID:        "finance-a",
+		PayableBillID:  bill.ID,
+		DueDateISO8601: "20260401",
+	})
+	if !errors.Is(err, payable.ErrInvalidPaymentPlan) {
+		t.Fatalf("expected invalid payment plan, got %v", err)
+	}
+}
+
 func newTestService() *Service {
 	return NewService(ServiceDeps{
 		MasterData:     memory.NewMasterDataRepository(),
 		PurchaseOrders: memory.NewPurchaseOrderRepository(),
 		Approvals:      memory.NewApprovalRepository(),
+		Inventory:      memory.NewInventoryRepository(),
+		Payables:       memory.NewPayableRepository(),
 		Pipeline:       shared.NewPipeline(shared.PipelineDeps{}),
 	})
 }
@@ -306,6 +547,40 @@ func createSubmittedOrder(t *testing.T, ctx context.Context, svc *Service) (proc
 	}
 
 	return submittedOrder, approvalRequest
+}
+
+func createApprovedOrder(t *testing.T, ctx context.Context, svc *Service) procurement.PurchaseOrder {
+	t.Helper()
+
+	_, approvalRequest := createSubmittedOrder(t, ctx, svc)
+	approvedOrder, _, err := svc.ApproveRequest(ctx, ResolveApprovalInput{
+		TenantID:   "tenant-a",
+		ActorID:    "manager-a",
+		ApprovalID: approvalRequest.ID,
+	})
+	if err != nil {
+		t.Fatalf("approve request: %v", err)
+	}
+	return approvedOrder
+}
+
+func createReceivedOrder(t *testing.T, ctx context.Context, svc *Service) procurement.PurchaseOrder {
+	t.Helper()
+
+	approvedOrder := createApprovedOrder(t, ctx, svc)
+	_, _, receivedOrder, err := svc.ReceivePurchaseOrder(ctx, ReceivePurchaseOrderInput{
+		TenantID:        "tenant-a",
+		ActorID:         "receiver-a",
+		PurchaseOrderID: approvedOrder.ID,
+		Lines: []ReceivePurchaseOrderLine{{
+			ProductID: approvedOrder.Lines[0].ProductID,
+			Quantity:  approvedOrder.Lines[0].Quantity,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("receive order: %v", err)
+	}
+	return receivedOrder
 }
 
 func createMasterData(t *testing.T, ctx context.Context, svc *Service) (masterdata.Supplier, masterdata.Product, masterdata.Warehouse) {

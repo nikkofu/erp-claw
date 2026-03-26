@@ -5,7 +5,9 @@ import (
 	"sync"
 
 	"github.com/nikkofu/erp-claw/internal/domain/approval"
+	"github.com/nikkofu/erp-claw/internal/domain/inventory"
 	"github.com/nikkofu/erp-claw/internal/domain/masterdata"
+	"github.com/nikkofu/erp-claw/internal/domain/payable"
 	"github.com/nikkofu/erp-claw/internal/domain/procurement"
 )
 
@@ -14,21 +16,33 @@ type masterDataRepository struct {
 }
 
 type SupplyChainStore struct {
-	mu         sync.RWMutex
-	suppliers  map[string]masterdata.Supplier
-	products   map[string]masterdata.Product
-	warehouses map[string]masterdata.Warehouse
-	orders     map[string]procurement.PurchaseOrder
-	requests   map[string]approval.Request
+	mu          sync.RWMutex
+	suppliers   map[string]masterdata.Supplier
+	products    map[string]masterdata.Product
+	warehouses  map[string]masterdata.Warehouse
+	orders      map[string]procurement.PurchaseOrder
+	requests    map[string]approval.Request
+	receipts    map[string]inventory.Receipt
+	ledger      map[string][]inventory.LedgerEntry
+	bills       map[string]payable.Bill
+	billsByPO   map[string]string
+	plans       map[string]payable.PaymentPlan
+	plansByBill map[string][]string
 }
 
 func NewSupplyChainStore() *SupplyChainStore {
 	return &SupplyChainStore{
-		suppliers:  make(map[string]masterdata.Supplier),
-		products:   make(map[string]masterdata.Product),
-		warehouses: make(map[string]masterdata.Warehouse),
-		orders:     make(map[string]procurement.PurchaseOrder),
-		requests:   make(map[string]approval.Request),
+		suppliers:   make(map[string]masterdata.Supplier),
+		products:    make(map[string]masterdata.Product),
+		warehouses:  make(map[string]masterdata.Warehouse),
+		orders:      make(map[string]procurement.PurchaseOrder),
+		requests:    make(map[string]approval.Request),
+		receipts:    make(map[string]inventory.Receipt),
+		ledger:      make(map[string][]inventory.LedgerEntry),
+		bills:       make(map[string]payable.Bill),
+		billsByPO:   make(map[string]string),
+		plans:       make(map[string]payable.PaymentPlan),
+		plansByBill: make(map[string][]string),
 	}
 }
 
@@ -149,11 +163,154 @@ func (r *approvalRepository) Get(_ context.Context, tenantID, requestID string) 
 	return request, nil
 }
 
+type inventoryRepository struct {
+	store *SupplyChainStore
+}
+
+func NewInventoryRepository() inventory.Repository {
+	return NewSupplyChainStore().InventoryRepository()
+}
+
+func (s *SupplyChainStore) InventoryRepository() inventory.Repository {
+	return &inventoryRepository{store: s}
+}
+
+func (r *inventoryRepository) SaveReceipt(_ context.Context, receipt inventory.Receipt) error {
+	r.store.mu.Lock()
+	defer r.store.mu.Unlock()
+	r.store.receipts[key(receipt.TenantID, receipt.ID)] = cloneReceipt(receipt)
+	return nil
+}
+
+func (r *inventoryRepository) AppendLedgerEntries(_ context.Context, entries []inventory.LedgerEntry) error {
+	r.store.mu.Lock()
+	defer r.store.mu.Unlock()
+	for _, entry := range entries {
+		k := inventoryKey(entry.TenantID, entry.ProductID, entry.WarehouseID)
+		r.store.ledger[k] = append(r.store.ledger[k], cloneLedgerEntry(entry))
+	}
+	return nil
+}
+
+func (r *inventoryRepository) ListLedgerEntries(_ context.Context, tenantID, productID, warehouseID string) ([]inventory.LedgerEntry, error) {
+	r.store.mu.RLock()
+	defer r.store.mu.RUnlock()
+	stored := r.store.ledger[inventoryKey(tenantID, productID, warehouseID)]
+	out := make([]inventory.LedgerEntry, 0, len(stored))
+	for _, entry := range stored {
+		out = append(out, cloneLedgerEntry(entry))
+	}
+	return out, nil
+}
+
+type payableRepository struct {
+	store *SupplyChainStore
+}
+
+func NewPayableRepository() payable.Repository {
+	return NewSupplyChainStore().PayableRepository()
+}
+
+func (s *SupplyChainStore) PayableRepository() payable.Repository {
+	return &payableRepository{store: s}
+}
+
+func (r *payableRepository) Save(_ context.Context, bill payable.Bill) error {
+	r.store.mu.Lock()
+	defer r.store.mu.Unlock()
+
+	orderKey := key(bill.TenantID, bill.PurchaseOrderID)
+	if existingID, exists := r.store.billsByPO[orderKey]; exists && existingID != bill.ID {
+		return payable.ErrBillAlreadyExists
+	}
+
+	r.store.bills[key(bill.TenantID, bill.ID)] = clonePayableBill(bill)
+	r.store.billsByPO[orderKey] = bill.ID
+	return nil
+}
+
+func (r *payableRepository) Get(_ context.Context, tenantID, billID string) (payable.Bill, error) {
+	r.store.mu.RLock()
+	defer r.store.mu.RUnlock()
+
+	bill, ok := r.store.bills[key(tenantID, billID)]
+	if !ok {
+		return payable.Bill{}, payable.ErrBillNotFound
+	}
+	return clonePayableBill(bill), nil
+}
+
+func (r *payableRepository) GetByPurchaseOrder(_ context.Context, tenantID, purchaseOrderID string) (payable.Bill, error) {
+	r.store.mu.RLock()
+	defer r.store.mu.RUnlock()
+
+	billID, ok := r.store.billsByPO[key(tenantID, purchaseOrderID)]
+	if !ok {
+		return payable.Bill{}, payable.ErrBillNotFound
+	}
+	bill, ok := r.store.bills[key(tenantID, billID)]
+	if !ok {
+		return payable.Bill{}, payable.ErrBillNotFound
+	}
+	return clonePayableBill(bill), nil
+}
+
+func (r *payableRepository) SavePaymentPlan(_ context.Context, plan payable.PaymentPlan) error {
+	r.store.mu.Lock()
+	defer r.store.mu.Unlock()
+
+	if _, ok := r.store.bills[key(plan.TenantID, plan.PayableBillID)]; !ok {
+		return payable.ErrBillNotFound
+	}
+
+	r.store.plans[key(plan.TenantID, plan.ID)] = clonePayablePaymentPlan(plan)
+	billKey := key(plan.TenantID, plan.PayableBillID)
+	r.store.plansByBill[billKey] = append(r.store.plansByBill[billKey], plan.ID)
+	return nil
+}
+
+func (r *payableRepository) ListPaymentPlansByBill(_ context.Context, tenantID, payableBillID string) ([]payable.PaymentPlan, error) {
+	r.store.mu.RLock()
+	defer r.store.mu.RUnlock()
+
+	ids := r.store.plansByBill[key(tenantID, payableBillID)]
+	out := make([]payable.PaymentPlan, 0, len(ids))
+	for _, planID := range ids {
+		plan, ok := r.store.plans[key(tenantID, planID)]
+		if !ok {
+			continue
+		}
+		out = append(out, clonePayablePaymentPlan(plan))
+	}
+	return out, nil
+}
+
 func key(tenantID, id string) string {
 	return tenantID + "/" + id
+}
+
+func inventoryKey(tenantID, productID, warehouseID string) string {
+	return tenantID + "/" + warehouseID + "/" + productID
 }
 
 func clonePurchaseOrder(order procurement.PurchaseOrder) procurement.PurchaseOrder {
 	order.Lines = append([]procurement.Line(nil), order.Lines...)
 	return order
+}
+
+func cloneReceipt(receipt inventory.Receipt) inventory.Receipt {
+	receipt.Lines = append([]inventory.ReceiptLine(nil), receipt.Lines...)
+	return receipt
+}
+
+func cloneLedgerEntry(entry inventory.LedgerEntry) inventory.LedgerEntry {
+	return entry
+}
+
+func clonePayableBill(bill payable.Bill) payable.Bill {
+	return bill
+}
+
+func clonePayablePaymentPlan(plan payable.PaymentPlan) payable.PaymentPlan {
+	return plan
 }

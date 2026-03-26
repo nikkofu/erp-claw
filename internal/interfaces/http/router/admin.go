@@ -9,7 +9,9 @@ import (
 	"github.com/nikkofu/erp-claw/internal/application/shared"
 	"github.com/nikkofu/erp-claw/internal/bootstrap"
 	"github.com/nikkofu/erp-claw/internal/domain/approval"
+	"github.com/nikkofu/erp-claw/internal/domain/inventory"
 	"github.com/nikkofu/erp-claw/internal/domain/masterdata"
+	"github.com/nikkofu/erp-claw/internal/domain/payable"
 	"github.com/nikkofu/erp-claw/internal/domain/procurement"
 	"github.com/nikkofu/erp-claw/internal/interfaces/http/presenter"
 )
@@ -133,6 +135,47 @@ func registerAdminRoutes(rg *gin.RouterGroup, container *bootstrap.Container) {
 		presenter.OK(c, purchaseOrderDetailResponse(order, request))
 	})
 
+	procurementGroup.POST("/:id/receive", func(c *gin.Context) {
+		var req receivePurchaseOrderRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			presenter.Error(c, http.StatusBadRequest, err.Error())
+			return
+		}
+
+		lines := make([]supplychain.ReceivePurchaseOrderLine, 0, len(req.Lines))
+		for _, line := range req.Lines {
+			lines = append(lines, supplychain.ReceivePurchaseOrderLine{
+				ProductID: line.ProductID,
+				Quantity:  line.Quantity,
+			})
+		}
+
+		receipt, ledgerEntries, order, err := container.SupplyChain.ReceivePurchaseOrder(c.Request.Context(), supplychain.ReceivePurchaseOrderInput{
+			TenantID:        tenantIDFromContext(c),
+			ActorID:         actorIDFromContext(c),
+			PurchaseOrderID: c.Param("id"),
+			Lines:           lines,
+		})
+		if err != nil {
+			renderSupplyChainError(c, err)
+			return
+		}
+		presenter.OK(c, purchaseOrderReceiptResponse(receipt, ledgerEntries, order))
+	})
+
+	procurementGroup.POST("/:id/payable-bills", func(c *gin.Context) {
+		bill, err := container.SupplyChain.CreatePayableBill(c.Request.Context(), supplychain.CreatePayableBillInput{
+			TenantID:        tenantIDFromContext(c),
+			ActorID:         actorIDFromContext(c),
+			PurchaseOrderID: c.Param("id"),
+		})
+		if err != nil {
+			renderSupplyChainError(c, err)
+			return
+		}
+		presenter.OK(c, payableBillResponse(bill))
+	})
+
 	approvalGroup := rg.Group("/approvals")
 	approvalGroup.POST("/:id/approve", func(c *gin.Context) {
 		order, request, err := container.SupplyChain.ApproveRequest(c.Request.Context(), supplychain.ResolveApprovalInput{
@@ -158,6 +201,61 @@ func registerAdminRoutes(rg *gin.RouterGroup, container *bootstrap.Container) {
 			return
 		}
 		presenter.OK(c, purchaseOrderDetailResponse(order, request))
+	})
+
+	inventoryGroup := rg.Group("/inventory")
+	inventoryGroup.GET("/balances", func(c *gin.Context) {
+		balance, err := container.SupplyChain.GetInventoryBalance(c.Request.Context(), supplychain.GetInventoryBalanceInput{
+			TenantID:    tenantIDFromContext(c),
+			ProductID:   c.Query("product_id"),
+			WarehouseID: c.Query("warehouse_id"),
+		})
+		if err != nil {
+			renderSupplyChainError(c, err)
+			return
+		}
+		presenter.OK(c, inventoryBalanceResponse(balance))
+	})
+
+	payableGroup := rg.Group("/payables")
+	payableGroup.GET("/:id", func(c *gin.Context) {
+		bill, err := container.SupplyChain.GetPayableBill(c.Request.Context(), supplychain.GetPayableBillInput{
+			TenantID: tenantIDFromContext(c),
+			BillID:   c.Param("id"),
+		})
+		if err != nil {
+			renderSupplyChainError(c, err)
+			return
+		}
+
+		plans, err := container.SupplyChain.ListPayablePaymentPlans(c.Request.Context(), supplychain.ListPayablePaymentPlansInput{
+			TenantID:      tenantIDFromContext(c),
+			PayableBillID: bill.ID,
+		})
+		if err != nil {
+			renderSupplyChainError(c, err)
+			return
+		}
+		presenter.OK(c, payableBillDetailResponse(bill, plans))
+	})
+	payableGroup.POST("/:id/payment-plans", func(c *gin.Context) {
+		var req createPayablePaymentPlanRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			presenter.Error(c, http.StatusBadRequest, err.Error())
+			return
+		}
+
+		plan, err := container.SupplyChain.CreatePayablePaymentPlan(c.Request.Context(), supplychain.CreatePayablePaymentPlanInput{
+			TenantID:       tenantIDFromContext(c),
+			ActorID:        actorIDFromContext(c),
+			PayableBillID:  c.Param("id"),
+			DueDateISO8601: req.DueDate,
+		})
+		if err != nil {
+			renderSupplyChainError(c, err)
+			return
+		}
+		presenter.OK(c, payablePaymentPlanResponse(plan))
 	})
 }
 
@@ -188,6 +286,19 @@ type createPurchaseOrderLineRequest struct {
 	Quantity  int    `json:"quantity"`
 }
 
+type receivePurchaseOrderRequest struct {
+	Lines []receivePurchaseOrderLineRequest `json:"lines"`
+}
+
+type receivePurchaseOrderLineRequest struct {
+	ProductID string `json:"product_id"`
+	Quantity  int    `json:"quantity"`
+}
+
+type createPayablePaymentPlanRequest struct {
+	DueDate string `json:"due_date"`
+}
+
 func tenantIDFromContext(c *gin.Context) string {
 	return c.GetString("tenant_id")
 }
@@ -202,13 +313,20 @@ func renderSupplyChainError(c *gin.Context, err error) {
 		errors.Is(err, masterdata.ErrProductNotFound),
 		errors.Is(err, masterdata.ErrWarehouseNotFound),
 		errors.Is(err, procurement.ErrPurchaseOrderNotFound),
-		errors.Is(err, approval.ErrRequestNotFound):
+		errors.Is(err, approval.ErrRequestNotFound),
+		errors.Is(err, payable.ErrBillNotFound):
 		presenter.Error(c, http.StatusNotFound, err.Error())
 	case errors.Is(err, masterdata.ErrInvalidSupplier),
 		errors.Is(err, masterdata.ErrInvalidProduct),
 		errors.Is(err, masterdata.ErrInvalidWarehouse),
+		errors.Is(err, inventory.ErrInvalidReceipt),
 		errors.Is(err, procurement.ErrInvalidPurchaseOrder),
 		errors.Is(err, procurement.ErrPurchaseOrderAlreadySubmitted),
+		errors.Is(err, procurement.ErrPurchaseOrderNotReceivable),
+		errors.Is(err, payable.ErrInvalidBill),
+		errors.Is(err, payable.ErrBillAlreadyExists),
+		errors.Is(err, payable.ErrOrderNotBillable),
+		errors.Is(err, payable.ErrInvalidPaymentPlan),
 		errors.Is(err, approval.ErrInvalidRequest),
 		errors.Is(err, approval.ErrApprovalNotPending):
 		presenter.Error(c, http.StatusBadRequest, err.Error())
@@ -288,4 +406,92 @@ func purchaseOrderDetailResponse(order procurement.PurchaseOrder, request approv
 		"order":    purchaseOrderResponse(order),
 		"approval": approvalResponse(request),
 	}
+}
+
+func receiptResponse(receipt inventory.Receipt) gin.H {
+	lines := make([]gin.H, 0, len(receipt.Lines))
+	for _, line := range receipt.Lines {
+		lines = append(lines, gin.H{
+			"product_id": line.ProductID,
+			"quantity":   line.Quantity,
+		})
+	}
+	return gin.H{
+		"id":                receipt.ID,
+		"tenant_id":         receipt.TenantID,
+		"purchase_order_id": receipt.PurchaseOrderID,
+		"warehouse_id":      receipt.WarehouseID,
+		"status":            receipt.Status,
+		"created_by":        receipt.CreatedBy,
+		"lines":             lines,
+	}
+}
+
+func ledgerEntriesResponse(entries []inventory.LedgerEntry) []gin.H {
+	out := make([]gin.H, 0, len(entries))
+	for _, entry := range entries {
+		out = append(out, gin.H{
+			"id":             entry.ID,
+			"tenant_id":      entry.TenantID,
+			"product_id":     entry.ProductID,
+			"warehouse_id":   entry.WarehouseID,
+			"movement_type":  entry.MovementType,
+			"quantity_delta": entry.QuantityDelta,
+			"reference_type": entry.ReferenceType,
+			"reference_id":   entry.ReferenceID,
+		})
+	}
+	return out
+}
+
+func purchaseOrderReceiptResponse(receipt inventory.Receipt, entries []inventory.LedgerEntry, order procurement.PurchaseOrder) gin.H {
+	return gin.H{
+		"receipt":        receiptResponse(receipt),
+		"ledger_entries": ledgerEntriesResponse(entries),
+		"order":          purchaseOrderResponse(order),
+	}
+}
+
+func inventoryBalanceResponse(balance inventory.Balance) gin.H {
+	return gin.H{
+		"tenant_id":    balance.TenantID,
+		"product_id":   balance.ProductID,
+		"warehouse_id": balance.WarehouseID,
+		"on_hand":      balance.OnHand,
+	}
+}
+
+func payableBillResponse(bill payable.Bill) gin.H {
+	return gin.H{
+		"id":                bill.ID,
+		"tenant_id":         bill.TenantID,
+		"purchase_order_id": bill.PurchaseOrderID,
+		"status":            bill.Status,
+		"created_by":        bill.CreatedBy,
+	}
+}
+
+func payablePaymentPlanResponse(plan payable.PaymentPlan) gin.H {
+	return gin.H{
+		"id":              plan.ID,
+		"tenant_id":       plan.TenantID,
+		"payable_bill_id": plan.PayableBillID,
+		"status":          plan.Status,
+		"due_date":        plan.DueDateISO8601,
+		"created_by":      plan.CreatedBy,
+	}
+}
+
+func payablePaymentPlansResponse(plans []payable.PaymentPlan) []gin.H {
+	out := make([]gin.H, 0, len(plans))
+	for _, plan := range plans {
+		out = append(out, payablePaymentPlanResponse(plan))
+	}
+	return out
+}
+
+func payableBillDetailResponse(bill payable.Bill, plans []payable.PaymentPlan) gin.H {
+	resp := payableBillResponse(bill)
+	resp["payment_plans"] = payablePaymentPlansResponse(plans)
+	return resp
 }
