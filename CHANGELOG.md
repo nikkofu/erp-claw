@@ -2,6 +2,28 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.35] - 2026-03-27
+
+### Added
+
+- Workspace sales-order list query now supports:
+  - `status=draft|shipped`
+  - `sort=id_asc|id_desc`
+  - `page` and `page_size`
+- Integration sales-order list query now supports:
+  - `status=draft|shipped`
+  - `sort=id_asc|id_desc`
+  - `page` and `page_size`
+- New integration tests for workspace/integration sales-order list queries:
+  - `TestWorkspaceSalesOrderListSupportsStatusSortAndPagination`
+  - `TestWorkspaceSalesOrderListRejectsInvalidQuery`
+  - `TestIntegrationSalesOrderListSupportsStatusSortAndPagination`
+  - `TestIntegrationSalesOrderListRejectsInvalidQuery`
+
+### Changed
+
+- Updated `README.md` and `docs/phase-2-coverage-status.md` to include workspace/integration sales-order query semantics.
+
 ## [0.2.34] - 2026-03-27
 
 ### Added
