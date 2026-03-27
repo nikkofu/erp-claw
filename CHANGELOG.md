@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.2.20] - 2026-03-27
+## [0.2.21] - 2026-03-27
 
 ### Added
 
@@ -25,6 +25,12 @@ All notable changes to this project will be documented in this file.
 ### Added
 
 - Transfer-order cancellation workflow baseline on the Phase 2 admin inventory path.
+
+## [0.2.20] - 2026-03-27
+
+### Added
+
+- Phase 2 mainline merge #8 release baseline on top of `origin/main`.
 
 ## [0.2.17] - 2026-03-27
 
