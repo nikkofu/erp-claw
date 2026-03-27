@@ -2,6 +2,27 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.39] - 2026-03-27
+
+### Added
+
+- Application-level inbox idempotent processor seam:
+  - `internal/application/shared/inbox_processor.go`
+  - unified flow: `claim -> handle -> mark processed/failed`
+  - duplicate messages short-circuit without reprocessing
+- Unit tests for inbox processor flow:
+  - success path
+  - duplicate short-circuit path
+  - claim failure path
+  - handler failure with failed-state write-back
+  - mark-failed fallback error path
+  - mark-processed failure path
+  - validation guards for store/handler/key/topic
+
+### Changed
+
+- `docs/phase-1-coverage-status.md` now marks inbox processor seam as delivered and narrows remaining gap to runtime consumer wiring + observability.
+
 ## [0.2.38] - 2026-03-27
 
 ### Added
