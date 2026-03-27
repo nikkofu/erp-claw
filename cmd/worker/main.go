@@ -273,6 +273,7 @@ func pollOutboxBatchWithStore(
 			Topic:       rec.Topic,
 			TenantID:    strconv.FormatInt(rec.TenantID, 10),
 			Correlation: fmt.Sprintf("outbox:%d", rec.ID),
+			MessageID:   fmt.Sprintf("outbox:%d", rec.ID),
 			Payload:     rec.Payload,
 		}
 		if err := bus.Publish(ctx, evt); err != nil {
@@ -332,6 +333,7 @@ func publishOutboxDeadLetter(
 		Topic:       defaultOutboxDLQTopic,
 		TenantID:    strconv.FormatInt(rec.TenantID, 10),
 		Correlation: fmt.Sprintf("outbox:%d:dead-letter", rec.ID),
+		MessageID:   fmt.Sprintf("outbox:%d:dead-letter", rec.ID),
 		Payload: outboxDeadLetterPayload{
 			OutboxID:   rec.ID,
 			TenantID:   rec.TenantID,

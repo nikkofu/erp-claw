@@ -22,6 +22,22 @@ All notable changes to this project will be documented in this file.
 
 - Updated `README.md` and `docs/phase-2-coverage-status.md` to include workspace/integration payable/receivable query semantics.
 
+## [0.2.37] - 2026-03-27
+
+### Added
+
+- Event bus publish contract now supports stable message dedupe key via `Event.MessageID`.
+- NATS bus publish now maps `Event.MessageID` to `Nats-Msg-Id` header for JetStream-level dedupe.
+- Worker outbox publish now emits stable message IDs:
+  - normal publish: `outbox:<id>`
+  - dead-letter publish: `outbox:<id>:dead-letter`
+- New unit tests in `internal/platform/eventbus/nats_test.go` to verify NATS header mapping and publish error behavior.
+
+### Changed
+
+- Worker outbox unit tests now assert message ID propagation.
+- `docs/phase-1-coverage-status.md` now records outbox cross-boundary dedupe baseline (`MessageID`) as delivered.
+
 ## [0.2.36] - 2026-03-27
 
 ### Added

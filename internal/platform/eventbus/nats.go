@@ -10,7 +10,11 @@ import (
 )
 
 type NATSBus struct {
-	js nats.JetStreamContext
+	js jetStreamPublisher
+}
+
+type jetStreamPublisher interface {
+	PublishMsg(msg *nats.Msg, opts ...nats.PubOpt) (*nats.PubAck, error)
 }
 
 func NewNATS(conn *nats.Conn) (*NATSBus, error) {
@@ -46,6 +50,9 @@ func (b *NATSBus) Publish(ctx context.Context, evt Event) error {
 	}
 	if evt.Correlation != "" {
 		msg.Header.Set("X-Correlation-ID", evt.Correlation)
+	}
+	if strings.TrimSpace(evt.MessageID) != "" {
+		msg.Header.Set(nats.MsgIdHdr, evt.MessageID)
 	}
 
 	_, err = b.js.PublishMsg(msg, nats.Context(ctx))

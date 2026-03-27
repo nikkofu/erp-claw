@@ -104,6 +104,9 @@ func TestPollOutboxBatchWithStorePublishesAndMarksPublished(t *testing.T) {
 	if got := bus.published[0].Correlation; got != "outbox:10" {
 		t.Fatalf("expected correlation outbox:10, got %s", got)
 	}
+	if got := bus.published[0].MessageID; got != "outbox:10" {
+		t.Fatalf("expected message id outbox:10, got %s", got)
+	}
 	if len(store.publishedIDs) != 2 || store.publishedIDs[0] != 10 || store.publishedIDs[1] != 11 {
 		t.Fatalf("expected published IDs [10 11], got %v", store.publishedIDs)
 	}
@@ -191,6 +194,9 @@ func TestPollOutboxBatchWithStoreMarksFailedAndPublishesDeadLetterWhenAttemptsEx
 	}
 	if bus.published[0].Correlation != "outbox:21:dead-letter" {
 		t.Fatalf("expected dead-letter correlation outbox:21:dead-letter, got %s", bus.published[0].Correlation)
+	}
+	if bus.published[0].MessageID != "outbox:21:dead-letter" {
+		t.Fatalf("expected dead-letter message id outbox:21:dead-letter, got %s", bus.published[0].MessageID)
 	}
 	payload, ok := bus.published[0].Payload.(outboxDeadLetterPayload)
 	if !ok {
