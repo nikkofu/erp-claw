@@ -477,7 +477,52 @@ func (s *Service) ListInventoryLedger(ctx context.Context, input ListInventoryLe
 	if err := validateInventoryQuery(input.TenantID, input.ProductID, input.WarehouseID); err != nil {
 		return nil, err
 	}
-	return s.inventory.ListLedgerEntries(ctx, input.TenantID, input.ProductID, input.WarehouseID)
+	entries, err := s.inventory.ListLedgerEntries(ctx, input.TenantID, input.ProductID, input.WarehouseID)
+	if err != nil {
+		return nil, err
+	}
+
+	sortMode := strings.TrimSpace(input.Sort)
+	if sortMode == "" {
+		sortMode = "id_asc"
+	}
+	switch sortMode {
+	case "id_asc":
+		sort.Slice(entries, func(i, j int) bool {
+			return entries[i].ID < entries[j].ID
+		})
+	case "id_desc":
+		sort.Slice(entries, func(i, j int) bool {
+			return entries[i].ID > entries[j].ID
+		})
+	default:
+		return nil, inventory.ErrInvalidInventoryQuery
+	}
+
+	page := input.Page
+	if page == 0 {
+		page = 1
+	}
+	pageSize := input.PageSize
+	if pageSize == 0 {
+		pageSize = 20
+	}
+	if page < 1 || pageSize < 1 {
+		return nil, inventory.ErrInvalidInventoryQuery
+	}
+
+	start := (page - 1) * pageSize
+	if start >= len(entries) {
+		return []inventory.LedgerEntry{}, nil
+	}
+	end := start + pageSize
+	if end > len(entries) {
+		end = len(entries)
+	}
+
+	out := make([]inventory.LedgerEntry, 0, end-start)
+	out = append(out, entries[start:end]...)
+	return out, nil
 }
 
 func (s *Service) ReserveInventory(ctx context.Context, input ReserveInventoryInput) (inventory.Reservation, error) {

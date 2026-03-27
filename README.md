@@ -105,7 +105,7 @@ The first executable Phase 2 slice is now available through the admin surface. I
 - `POST /api/admin/v1/procurement/purchase-orders/:id/payable-bills`
 - `GET /api/admin/v1/procurement/purchase-orders/:id`
 - `GET /api/admin/v1/approvals` (supports `status=pending|approved|rejected`, `sort=id_asc|id_desc`, `page`, `page_size`)
-- `GET /api/admin/v1/inventory/ledger?product_id=<id>&warehouse_id=<id>`
+- `GET /api/admin/v1/inventory/ledger` (requires `product_id`, `warehouse_id`; supports `sort=id_asc|id_desc`, `page`, `page_size`)
 - `GET /api/admin/v1/inventory/balances?product_id=<id>&warehouse_id=<id>` (returns `on_hand` / `reserved` / `available`)
 - `POST /api/admin/v1/inventory/reservations`
 - `POST /api/admin/v1/inventory/outbounds`
@@ -129,12 +129,12 @@ The first executable Phase 2 slice is now available through the admin surface. I
 - `POST /api/admin/v1/approvals/:id/approve`
 - `POST /api/admin/v1/approvals/:id/reject`
 
-Run `go test ./test/integration -run 'TestAdminSupplyChainFlow|TestAdminApprovalListSupportsStatusFilter|TestAdminApprovalListSupportsSortAndPagination|TestAdminPurchaseOrderListSupportsStatusSortAndPagination|TestAdminInventoryReceiptFlow|TestAdminInventoryReservationFlow|TestAdminInventoryReservationRejectsExcessQuantity|TestAdminInventoryOutboundFlow|TestAdminInventoryOutboundRejectsExcessQuantity|TestAdminInventoryTransferFlow|TestAdminInventoryTransferRejectsExcessQuantity|TestAdminInventoryTransferOrderWorkflow|TestAdminInventoryTransferOrderListSupportsStatusSortAndPagination|TestAdminInventoryTransferOrderCancelFlow|TestAdminInventoryLedgerListFlow|TestAdminPayableFlow|TestAdminPayableListSupportsStatusSortAndPagination|TestAdminPayableListRejectsInvalidQuery|TestAdminReceivableFlow|TestAdminReceivableListSupportsStatusSortAndPagination|TestAdminReceivableListRejectsInvalidQuery|TestAdminSalesOrderShipFlow|TestAdminSalesOrderShipRejectsInsufficientInventory|TestAdminSalesOrderListSupportsStatusSortAndPagination|TestAdminSalesOrderListRejectsInvalidQuery|TestAdminBackofficeOverviewReadModel' -v` to verify the end-to-end Phase 2 admin flow locally, including approval/purchase-order/payable/receivable/sales-order list queries (status/sort/pagination), inventory reservation/outbound/transfer, transfer-order execution/query/cancel (status/sort/pagination), ledger query, payable/receivable basics, minimal sales shipment loop, and the backoffice overview read model.
+Run `go test ./test/integration -run 'TestAdminSupplyChainFlow|TestAdminApprovalListSupportsStatusFilter|TestAdminApprovalListSupportsSortAndPagination|TestAdminPurchaseOrderListSupportsStatusSortAndPagination|TestAdminInventoryReceiptFlow|TestAdminInventoryReservationFlow|TestAdminInventoryReservationRejectsExcessQuantity|TestAdminInventoryOutboundFlow|TestAdminInventoryOutboundRejectsExcessQuantity|TestAdminInventoryTransferFlow|TestAdminInventoryTransferRejectsExcessQuantity|TestAdminInventoryTransferOrderWorkflow|TestAdminInventoryTransferOrderListSupportsStatusSortAndPagination|TestAdminInventoryTransferOrderCancelFlow|TestAdminInventoryLedgerListFlow|TestAdminInventoryLedgerListSupportsSortAndPagination|TestAdminInventoryLedgerListRejectsInvalidQuery|TestAdminPayableFlow|TestAdminPayableListSupportsStatusSortAndPagination|TestAdminPayableListRejectsInvalidQuery|TestAdminReceivableFlow|TestAdminReceivableListSupportsStatusSortAndPagination|TestAdminReceivableListRejectsInvalidQuery|TestAdminSalesOrderShipFlow|TestAdminSalesOrderShipRejectsInsufficientInventory|TestAdminSalesOrderListSupportsStatusSortAndPagination|TestAdminSalesOrderListRejectsInvalidQuery|TestAdminBackofficeOverviewReadModel' -v` to verify the end-to-end Phase 2 admin flow locally, including approval/purchase-order/payable/receivable/sales-order list queries (status/sort/pagination), inventory reservation/outbound/transfer, transfer-order execution/query/cancel (status/sort/pagination), ledger query (sort/pagination), payable/receivable basics, minimal sales shipment loop, and the backoffice overview read model.
 
 ## Workspace API (Phase 2 Minimal Query Slice)
 
 - `GET /api/workspace/v1/inventory/balances?product_id=<id>&warehouse_id=<id>`
-- `GET /api/workspace/v1/inventory/ledger?product_id=<id>&warehouse_id=<id>`
+- `GET /api/workspace/v1/inventory/ledger` (requires `product_id`, `warehouse_id`; supports `sort=id_asc|id_desc`, `page`, `page_size`)
 - `GET /api/workspace/v1/sales-orders` (supports `status=draft|shipped`, `sort=id_asc|id_desc`, `page`, `page_size`)
 - `GET /api/workspace/v1/sales-orders/:id`
 - `GET /api/workspace/v1/payables` (supports `status=open`, `sort=id_asc|id_desc`, `page`, `page_size`)
@@ -142,7 +142,7 @@ Run `go test ./test/integration -run 'TestAdminSupplyChainFlow|TestAdminApproval
 - `GET /api/workspace/v1/receivables` (supports `status=open`, `sort=id_asc|id_desc`, `page`, `page_size`)
 - `GET /api/workspace/v1/receivables/:id`
 
-Run `go test ./test/integration -run 'TestWorkspaceInventoryQueriesReturnBalanceAndLedger|TestWorkspaceSalesOrderQueriesReturnListAndDetail|TestWorkspaceSalesOrderListSupportsStatusSortAndPagination|TestWorkspaceSalesOrderListRejectsInvalidQuery|TestWorkspaceFinanceQueriesReturnPayableAndReceivableReadModels|TestWorkspaceFinanceListSupportsStatusSortAndPagination|TestWorkspaceFinanceListRejectsInvalidQuery' -v` to verify workspace inventory/sales/finance query routing and response shape.
+Run `go test ./test/integration -run 'TestWorkspaceInventoryQueriesReturnBalanceAndLedger|TestWorkspaceInventoryLedgerListSupportsSortAndPagination|TestWorkspaceInventoryLedgerListRejectsInvalidQuery|TestWorkspaceSalesOrderQueriesReturnListAndDetail|TestWorkspaceSalesOrderListSupportsStatusSortAndPagination|TestWorkspaceSalesOrderListRejectsInvalidQuery|TestWorkspaceFinanceQueriesReturnPayableAndReceivableReadModels|TestWorkspaceFinanceListSupportsStatusSortAndPagination|TestWorkspaceFinanceListRejectsInvalidQuery' -v` to verify workspace inventory/sales/finance query routing and response shape.
 
 ## Integration API (Phase 2 Minimal Query Slice)
 

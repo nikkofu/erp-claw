@@ -150,6 +150,9 @@ type ListInventoryLedgerInput struct {
 	TenantID    string
 	ProductID   string
 	WarehouseID string
+	Sort        string
+	Page        int
+	PageSize    int
 }
 
 type CreatePayableBillInput struct {
