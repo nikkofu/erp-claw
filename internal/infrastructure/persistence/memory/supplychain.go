@@ -145,6 +145,20 @@ func (r *purchaseOrderRepository) Get(_ context.Context, tenantID, orderID strin
 	return clonePurchaseOrder(order), nil
 }
 
+func (r *purchaseOrderRepository) ListByTenant(_ context.Context, tenantID string) ([]procurement.PurchaseOrder, error) {
+	r.store.mu.RLock()
+	defer r.store.mu.RUnlock()
+
+	out := make([]procurement.PurchaseOrder, 0)
+	prefix := tenantID + "/"
+	for k, order := range r.store.orders {
+		if strings.HasPrefix(k, prefix) {
+			out = append(out, clonePurchaseOrder(order))
+		}
+	}
+	return out, nil
+}
+
 type approvalRepository struct {
 	store *SupplyChainStore
 }

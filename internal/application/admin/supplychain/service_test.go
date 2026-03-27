@@ -165,6 +165,151 @@ func TestServiceGetPurchaseOrderReturnsLinkedApproval(t *testing.T) {
 	}
 }
 
+func TestServiceListPurchaseOrdersSupportsStatusSortAndPagination(t *testing.T) {
+	ctx := context.Background()
+	svc := newTestService()
+	supplier, product, warehouse := createMasterData(t, ctx, svc)
+
+	createOrder := func(quantity int) procurement.PurchaseOrder {
+		order, err := svc.CreatePurchaseOrder(ctx, CreatePurchaseOrderInput{
+			TenantID:    "tenant-a",
+			ActorID:     "actor-a",
+			SupplierID:  supplier.ID,
+			WarehouseID: warehouse.ID,
+			Lines: []CreatePurchaseOrderLine{{
+				ProductID: product.ID,
+				Quantity:  quantity,
+			}},
+		})
+		if err != nil {
+			t.Fatalf("create purchase order: %v", err)
+		}
+		return order
+	}
+
+	orderA := createOrder(1)
+	orderB := createOrder(2)
+	orderC := createOrder(3)
+
+	submittedB, approvalB, err := svc.SubmitPurchaseOrder(ctx, SubmitPurchaseOrderInput{
+		TenantID:        "tenant-a",
+		ActorID:         "actor-a",
+		PurchaseOrderID: orderB.ID,
+	})
+	if err != nil {
+		t.Fatalf("submit orderB: %v", err)
+	}
+	if _, _, err := svc.RejectRequest(ctx, ResolveApprovalInput{
+		TenantID:   "tenant-a",
+		ActorID:    "manager-a",
+		ApprovalID: approvalB.ID,
+	}); err != nil {
+		t.Fatalf("reject orderB approval: %v", err)
+	}
+
+	submittedC, approvalC, err := svc.SubmitPurchaseOrder(ctx, SubmitPurchaseOrderInput{
+		TenantID:        "tenant-a",
+		ActorID:         "actor-a",
+		PurchaseOrderID: orderC.ID,
+	})
+	if err != nil {
+		t.Fatalf("submit orderC: %v", err)
+	}
+	if _, _, err := svc.ApproveRequest(ctx, ResolveApprovalInput{
+		TenantID:   "tenant-a",
+		ActorID:    "manager-a",
+		ApprovalID: approvalC.ID,
+	}); err != nil {
+		t.Fatalf("approve orderC approval: %v", err)
+	}
+	if _, _, _, err := svc.ReceivePurchaseOrder(ctx, ReceivePurchaseOrderInput{
+		TenantID:        "tenant-a",
+		ActorID:         "receiver-a",
+		PurchaseOrderID: submittedC.ID,
+		Lines: []ReceivePurchaseOrderLine{{
+			ProductID: submittedC.Lines[0].ProductID,
+			Quantity:  submittedC.Lines[0].Quantity,
+		}},
+	}); err != nil {
+		t.Fatalf("receive orderC: %v", err)
+	}
+
+	page1, err := svc.ListPurchaseOrders(ctx, ListPurchaseOrdersInput{
+		TenantID: "tenant-a",
+		Sort:     "id_asc",
+		Page:     1,
+		PageSize: 2,
+	})
+	if err != nil {
+		t.Fatalf("list purchase orders page1: %v", err)
+	}
+	if len(page1) != 2 {
+		t.Fatalf("expected 2 orders in page1, got %d", len(page1))
+	}
+	if page1[0].ID != orderA.ID || page1[1].ID != submittedB.ID {
+		t.Fatalf("expected page1 ids [%s,%s], got [%s,%s]", orderA.ID, submittedB.ID, page1[0].ID, page1[1].ID)
+	}
+
+	page2, err := svc.ListPurchaseOrders(ctx, ListPurchaseOrdersInput{
+		TenantID: "tenant-a",
+		Sort:     "id_asc",
+		Page:     2,
+		PageSize: 2,
+	})
+	if err != nil {
+		t.Fatalf("list purchase orders page2: %v", err)
+	}
+	if len(page2) != 1 {
+		t.Fatalf("expected 1 order in page2, got %d", len(page2))
+	}
+	if page2[0].ID != submittedC.ID {
+		t.Fatalf("expected page2 order id %s, got %s", submittedC.ID, page2[0].ID)
+	}
+
+	rejected, err := svc.ListPurchaseOrders(ctx, ListPurchaseOrdersInput{
+		TenantID: "tenant-a",
+		Status:   "rejected",
+	})
+	if err != nil {
+		t.Fatalf("list rejected orders: %v", err)
+	}
+	if len(rejected) != 1 {
+		t.Fatalf("expected 1 rejected order, got %d", len(rejected))
+	}
+	if rejected[0].ID != submittedB.ID {
+		t.Fatalf("expected rejected order id %s, got %s", submittedB.ID, rejected[0].ID)
+	}
+}
+
+func TestServiceListPurchaseOrdersFailsForInvalidQuery(t *testing.T) {
+	ctx := context.Background()
+	svc := newTestService()
+
+	_, err := svc.ListPurchaseOrders(ctx, ListPurchaseOrdersInput{
+		TenantID: "tenant-a",
+		Status:   "unknown",
+	})
+	if !errors.Is(err, procurement.ErrInvalidPurchaseOrderQuery) {
+		t.Fatalf("expected invalid purchase order query for status, got %v", err)
+	}
+
+	_, err = svc.ListPurchaseOrders(ctx, ListPurchaseOrdersInput{
+		TenantID: "tenant-a",
+		Sort:     "unknown",
+	})
+	if !errors.Is(err, procurement.ErrInvalidPurchaseOrderQuery) {
+		t.Fatalf("expected invalid purchase order query for sort, got %v", err)
+	}
+
+	_, err = svc.ListPurchaseOrders(ctx, ListPurchaseOrdersInput{
+		TenantID: "tenant-a",
+		Page:     -1,
+	})
+	if !errors.Is(err, procurement.ErrInvalidPurchaseOrderQuery) {
+		t.Fatalf("expected invalid purchase order query for page, got %v", err)
+	}
+}
+
 func TestServiceListApprovalRequestsSupportsStatusFilter(t *testing.T) {
 	ctx := context.Background()
 	svc := newTestService()
