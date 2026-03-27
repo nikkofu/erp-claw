@@ -888,7 +888,76 @@ func (s *Service) GetPayableBill(ctx context.Context, input GetPayableBillInput)
 }
 
 func (s *Service) ListPayableBills(ctx context.Context, input ListPayableBillsInput) ([]payable.Bill, error) {
-	return s.payables.ListByTenant(ctx, input.TenantID)
+	tenantID := strings.TrimSpace(input.TenantID)
+	if tenantID == "" {
+		return nil, payable.ErrInvalidBillQuery
+	}
+
+	statusFilter := strings.TrimSpace(input.Status)
+	if statusFilter != "" {
+		status := payable.BillStatus(statusFilter)
+		switch status {
+		case payable.BillStatusOpen:
+		default:
+			return nil, payable.ErrInvalidBillQuery
+		}
+	}
+
+	bills, err := s.payables.ListByTenant(ctx, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	if statusFilter != "" {
+		filtered := make([]payable.Bill, 0, len(bills))
+		for _, bill := range bills {
+			if string(bill.Status) == statusFilter {
+				filtered = append(filtered, bill)
+			}
+		}
+		bills = filtered
+	}
+
+	sortMode := strings.TrimSpace(input.Sort)
+	if sortMode == "" {
+		sortMode = "id_desc"
+	}
+	switch sortMode {
+	case "id_asc":
+		sort.Slice(bills, func(i, j int) bool {
+			return bills[i].ID < bills[j].ID
+		})
+	case "id_desc":
+		sort.Slice(bills, func(i, j int) bool {
+			return bills[i].ID > bills[j].ID
+		})
+	default:
+		return nil, payable.ErrInvalidBillQuery
+	}
+
+	page := input.Page
+	if page == 0 {
+		page = 1
+	}
+	pageSize := input.PageSize
+	if pageSize == 0 {
+		pageSize = 20
+	}
+	if page < 1 || pageSize < 1 {
+		return nil, payable.ErrInvalidBillQuery
+	}
+
+	start := (page - 1) * pageSize
+	if start >= len(bills) {
+		return []payable.Bill{}, nil
+	}
+	end := start + pageSize
+	if end > len(bills) {
+		end = len(bills)
+	}
+
+	out := make([]payable.Bill, 0, end-start)
+	out = append(out, bills[start:end]...)
+	return out, nil
 }
 
 func (s *Service) CreatePayablePaymentPlan(ctx context.Context, input CreatePayablePaymentPlanInput) (payable.PaymentPlan, error) {
@@ -945,7 +1014,76 @@ func (s *Service) GetReceivableBill(ctx context.Context, input GetReceivableBill
 }
 
 func (s *Service) ListReceivableBills(ctx context.Context, input ListReceivableBillsInput) ([]receivable.Bill, error) {
-	return s.receivables.ListByTenant(ctx, input.TenantID)
+	tenantID := strings.TrimSpace(input.TenantID)
+	if tenantID == "" {
+		return nil, receivable.ErrInvalidBillQuery
+	}
+
+	statusFilter := strings.TrimSpace(input.Status)
+	if statusFilter != "" {
+		status := receivable.BillStatus(statusFilter)
+		switch status {
+		case receivable.BillStatusOpen:
+		default:
+			return nil, receivable.ErrInvalidBillQuery
+		}
+	}
+
+	bills, err := s.receivables.ListByTenant(ctx, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	if statusFilter != "" {
+		filtered := make([]receivable.Bill, 0, len(bills))
+		for _, bill := range bills {
+			if string(bill.Status) == statusFilter {
+				filtered = append(filtered, bill)
+			}
+		}
+		bills = filtered
+	}
+
+	sortMode := strings.TrimSpace(input.Sort)
+	if sortMode == "" {
+		sortMode = "id_desc"
+	}
+	switch sortMode {
+	case "id_asc":
+		sort.Slice(bills, func(i, j int) bool {
+			return bills[i].ID < bills[j].ID
+		})
+	case "id_desc":
+		sort.Slice(bills, func(i, j int) bool {
+			return bills[i].ID > bills[j].ID
+		})
+	default:
+		return nil, receivable.ErrInvalidBillQuery
+	}
+
+	page := input.Page
+	if page == 0 {
+		page = 1
+	}
+	pageSize := input.PageSize
+	if pageSize == 0 {
+		pageSize = 20
+	}
+	if page < 1 || pageSize < 1 {
+		return nil, receivable.ErrInvalidBillQuery
+	}
+
+	start := (page - 1) * pageSize
+	if start >= len(bills) {
+		return []receivable.Bill{}, nil
+	}
+	end := start + pageSize
+	if end > len(bills) {
+		end = len(bills)
+	}
+
+	out := make([]receivable.Bill, 0, end-start)
+	out = append(out, bills[start:end]...)
+	return out, nil
 }
 
 func (s *Service) CreateSalesOrder(ctx context.Context, input CreateSalesOrderInput) (sales.Order, error) {

@@ -165,6 +165,10 @@ type GetPayableBillInput struct {
 
 type ListPayableBillsInput struct {
 	TenantID string
+	Status   string
+	Sort     string
+	Page     int
+	PageSize int
 }
 
 type CreatePayablePaymentPlanInput struct {
@@ -192,6 +196,10 @@ type GetReceivableBillInput struct {
 
 type ListReceivableBillsInput struct {
 	TenantID string
+	Status   string
+	Sort     string
+	Page     int
+	PageSize int
 }
 
 type CreateSalesOrderLine struct {

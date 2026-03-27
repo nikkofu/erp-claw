@@ -2069,6 +2069,100 @@ func TestServiceListPayableBillsReturnsTenantScopedBills(t *testing.T) {
 	}
 }
 
+func TestServiceListPayableBillsSupportsStatusSortAndPagination(t *testing.T) {
+	ctx := context.Background()
+	svc := newTestService()
+
+	createBill := func() payable.Bill {
+		receivedOrder := createReceivedOrder(t, ctx, svc)
+		bill, err := svc.CreatePayableBill(ctx, CreatePayableBillInput{
+			TenantID:        "tenant-a",
+			ActorID:         "finance-a",
+			PurchaseOrderID: receivedOrder.ID,
+		})
+		if err != nil {
+			t.Fatalf("create payable bill: %v", err)
+		}
+		return bill
+	}
+
+	billA := createBill()
+	billB := createBill()
+	billC := createBill()
+
+	page1, err := svc.ListPayableBills(ctx, ListPayableBillsInput{
+		TenantID: "tenant-a",
+		Sort:     "id_asc",
+		Page:     1,
+		PageSize: 2,
+	})
+	if err != nil {
+		t.Fatalf("list payable bills page1: %v", err)
+	}
+	if len(page1) != 2 {
+		t.Fatalf("expected 2 payable bills in page1, got %d", len(page1))
+	}
+	if page1[0].ID != billA.ID || page1[1].ID != billB.ID {
+		t.Fatalf("expected page1 ids [%s,%s], got [%s,%s]", billA.ID, billB.ID, page1[0].ID, page1[1].ID)
+	}
+
+	page2, err := svc.ListPayableBills(ctx, ListPayableBillsInput{
+		TenantID: "tenant-a",
+		Sort:     "id_asc",
+		Page:     2,
+		PageSize: 2,
+	})
+	if err != nil {
+		t.Fatalf("list payable bills page2: %v", err)
+	}
+	if len(page2) != 1 {
+		t.Fatalf("expected 1 payable bill in page2, got %d", len(page2))
+	}
+	if page2[0].ID != billC.ID {
+		t.Fatalf("expected page2 payable bill id %s, got %s", billC.ID, page2[0].ID)
+	}
+
+	openBills, err := svc.ListPayableBills(ctx, ListPayableBillsInput{
+		TenantID: "tenant-a",
+		Status:   "open",
+	})
+	if err != nil {
+		t.Fatalf("list payable bills with open status: %v", err)
+	}
+	if len(openBills) != 3 {
+		t.Fatalf("expected 3 open payable bills, got %d", len(openBills))
+	}
+}
+
+func TestServiceListPayableBillsFailsForInvalidQuery(t *testing.T) {
+	ctx := context.Background()
+	svc := newTestService()
+
+	_, err := svc.ListPayableBills(ctx, ListPayableBillsInput{
+		TenantID: "tenant-a",
+		Status:   "closed",
+	})
+	if !errors.Is(err, payable.ErrInvalidBillQuery) {
+		t.Fatalf("expected invalid payable bill query for status, got %v", err)
+	}
+
+	_, err = svc.ListPayableBills(ctx, ListPayableBillsInput{
+		TenantID: "tenant-a",
+		Sort:     "unknown",
+	})
+	if !errors.Is(err, payable.ErrInvalidBillQuery) {
+		t.Fatalf("expected invalid payable bill query for sort, got %v", err)
+	}
+
+	_, err = svc.ListPayableBills(ctx, ListPayableBillsInput{
+		TenantID: "tenant-a",
+		Page:     -1,
+	})
+	if !errors.Is(err, payable.ErrInvalidBillQuery) {
+		t.Fatalf("expected invalid payable bill query for page, got %v", err)
+	}
+}
+
 func TestServiceCreatesReceivableBill(t *testing.T) {
 	ctx := context.Background()
 	svc := newTestService()
@@ -2134,6 +2228,99 @@ func TestServiceListReceivableBillsReturnsTenantScopedBills(t *testing.T) {
 	}
 	if bills[0].ID != billA.ID {
 		t.Fatalf("expected tenant-a receivable bill id %s, got %s", billA.ID, bills[0].ID)
+	}
+}
+
+func TestServiceListReceivableBillsSupportsStatusSortAndPagination(t *testing.T) {
+	ctx := context.Background()
+	svc := newTestService()
+
+	createBill := func(externalRef string) receivable.Bill {
+		bill, err := svc.CreateReceivableBill(ctx, CreateReceivableBillInput{
+			TenantID:    "tenant-a",
+			ActorID:     "finance-a",
+			ExternalRef: externalRef,
+		})
+		if err != nil {
+			t.Fatalf("create receivable bill: %v", err)
+		}
+		return bill
+	}
+
+	billA := createBill("SO-RCV-001")
+	billB := createBill("SO-RCV-002")
+	billC := createBill("SO-RCV-003")
+
+	page1, err := svc.ListReceivableBills(ctx, ListReceivableBillsInput{
+		TenantID: "tenant-a",
+		Sort:     "id_asc",
+		Page:     1,
+		PageSize: 2,
+	})
+	if err != nil {
+		t.Fatalf("list receivable bills page1: %v", err)
+	}
+	if len(page1) != 2 {
+		t.Fatalf("expected 2 receivable bills in page1, got %d", len(page1))
+	}
+	if page1[0].ID != billA.ID || page1[1].ID != billB.ID {
+		t.Fatalf("expected page1 ids [%s,%s], got [%s,%s]", billA.ID, billB.ID, page1[0].ID, page1[1].ID)
+	}
+
+	page2, err := svc.ListReceivableBills(ctx, ListReceivableBillsInput{
+		TenantID: "tenant-a",
+		Sort:     "id_asc",
+		Page:     2,
+		PageSize: 2,
+	})
+	if err != nil {
+		t.Fatalf("list receivable bills page2: %v", err)
+	}
+	if len(page2) != 1 {
+		t.Fatalf("expected 1 receivable bill in page2, got %d", len(page2))
+	}
+	if page2[0].ID != billC.ID {
+		t.Fatalf("expected page2 receivable bill id %s, got %s", billC.ID, page2[0].ID)
+	}
+
+	openBills, err := svc.ListReceivableBills(ctx, ListReceivableBillsInput{
+		TenantID: "tenant-a",
+		Status:   "open",
+	})
+	if err != nil {
+		t.Fatalf("list receivable bills with open status: %v", err)
+	}
+	if len(openBills) != 3 {
+		t.Fatalf("expected 3 open receivable bills, got %d", len(openBills))
+	}
+}
+
+func TestServiceListReceivableBillsFailsForInvalidQuery(t *testing.T) {
+	ctx := context.Background()
+	svc := newTestService()
+
+	_, err := svc.ListReceivableBills(ctx, ListReceivableBillsInput{
+		TenantID: "tenant-a",
+		Status:   "closed",
+	})
+	if !errors.Is(err, receivable.ErrInvalidBillQuery) {
+		t.Fatalf("expected invalid receivable bill query for status, got %v", err)
+	}
+
+	_, err = svc.ListReceivableBills(ctx, ListReceivableBillsInput{
+		TenantID: "tenant-a",
+		Sort:     "unknown",
+	})
+	if !errors.Is(err, receivable.ErrInvalidBillQuery) {
+		t.Fatalf("expected invalid receivable bill query for sort, got %v", err)
+	}
+
+	_, err = svc.ListReceivableBills(ctx, ListReceivableBillsInput{
+		TenantID: "tenant-a",
+		Page:     -1,
+	})
+	if !errors.Is(err, receivable.ErrInvalidBillQuery) {
+		t.Fatalf("expected invalid receivable bill query for page, got %v", err)
 	}
 }
 
