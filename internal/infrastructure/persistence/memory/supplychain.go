@@ -495,3 +495,193 @@ func cloneSalesOrder(order sales.Order) sales.Order {
 	order.Lines = append([]sales.Line(nil), order.Lines...)
 	return order
 }
+
+type supplyChainSnapshot struct {
+	suppliers      map[string]masterdata.Supplier
+	products       map[string]masterdata.Product
+	warehouses     map[string]masterdata.Warehouse
+	orders         map[string]procurement.PurchaseOrder
+	requests       map[string]approval.Request
+	receipts       map[string]inventory.Receipt
+	ledger         map[string][]inventory.LedgerEntry
+	bills          map[string]payable.Bill
+	billsByPO      map[string]string
+	plans          map[string]payable.PaymentPlan
+	plansByBill    map[string][]string
+	receivables    map[string]receivable.Bill
+	reservations   map[string][]inventory.Reservation
+	transferOrders map[string]inventory.TransferOrder
+	salesOrders    map[string]sales.Order
+}
+
+func (s *SupplyChainStore) snapshot() supplyChainSnapshot {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	return supplyChainSnapshot{
+		suppliers:      cloneSupplierMap(s.suppliers),
+		products:       cloneProductMap(s.products),
+		warehouses:     cloneWarehouseMap(s.warehouses),
+		orders:         clonePurchaseOrderMap(s.orders),
+		requests:       cloneApprovalRequestMap(s.requests),
+		receipts:       cloneReceiptMap(s.receipts),
+		ledger:         cloneLedgerMap(s.ledger),
+		bills:          clonePayableBillMap(s.bills),
+		billsByPO:      cloneStringMap(s.billsByPO),
+		plans:          clonePayablePlanMap(s.plans),
+		plansByBill:    cloneStringSliceMap(s.plansByBill),
+		receivables:    cloneReceivableBillMap(s.receivables),
+		reservations:   cloneReservationMap(s.reservations),
+		transferOrders: cloneTransferOrderMap(s.transferOrders),
+		salesOrders:    cloneSalesOrderMap(s.salesOrders),
+	}
+}
+
+func (s *SupplyChainStore) restore(snapshot supplyChainSnapshot) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.suppliers = snapshot.suppliers
+	s.products = snapshot.products
+	s.warehouses = snapshot.warehouses
+	s.orders = snapshot.orders
+	s.requests = snapshot.requests
+	s.receipts = snapshot.receipts
+	s.ledger = snapshot.ledger
+	s.bills = snapshot.bills
+	s.billsByPO = snapshot.billsByPO
+	s.plans = snapshot.plans
+	s.plansByBill = snapshot.plansByBill
+	s.receivables = snapshot.receivables
+	s.reservations = snapshot.reservations
+	s.transferOrders = snapshot.transferOrders
+	s.salesOrders = snapshot.salesOrders
+}
+
+func cloneSupplierMap(source map[string]masterdata.Supplier) map[string]masterdata.Supplier {
+	out := make(map[string]masterdata.Supplier, len(source))
+	for k, v := range source {
+		out[k] = v
+	}
+	return out
+}
+
+func cloneProductMap(source map[string]masterdata.Product) map[string]masterdata.Product {
+	out := make(map[string]masterdata.Product, len(source))
+	for k, v := range source {
+		out[k] = v
+	}
+	return out
+}
+
+func cloneWarehouseMap(source map[string]masterdata.Warehouse) map[string]masterdata.Warehouse {
+	out := make(map[string]masterdata.Warehouse, len(source))
+	for k, v := range source {
+		out[k] = v
+	}
+	return out
+}
+
+func clonePurchaseOrderMap(source map[string]procurement.PurchaseOrder) map[string]procurement.PurchaseOrder {
+	out := make(map[string]procurement.PurchaseOrder, len(source))
+	for k, v := range source {
+		out[k] = clonePurchaseOrder(v)
+	}
+	return out
+}
+
+func cloneApprovalRequestMap(source map[string]approval.Request) map[string]approval.Request {
+	out := make(map[string]approval.Request, len(source))
+	for k, v := range source {
+		out[k] = v
+	}
+	return out
+}
+
+func cloneReceiptMap(source map[string]inventory.Receipt) map[string]inventory.Receipt {
+	out := make(map[string]inventory.Receipt, len(source))
+	for k, v := range source {
+		out[k] = cloneReceipt(v)
+	}
+	return out
+}
+
+func cloneLedgerMap(source map[string][]inventory.LedgerEntry) map[string][]inventory.LedgerEntry {
+	out := make(map[string][]inventory.LedgerEntry, len(source))
+	for k, entries := range source {
+		cloned := make([]inventory.LedgerEntry, 0, len(entries))
+		for _, entry := range entries {
+			cloned = append(cloned, cloneLedgerEntry(entry))
+		}
+		out[k] = cloned
+	}
+	return out
+}
+
+func clonePayableBillMap(source map[string]payable.Bill) map[string]payable.Bill {
+	out := make(map[string]payable.Bill, len(source))
+	for k, v := range source {
+		out[k] = clonePayableBill(v)
+	}
+	return out
+}
+
+func cloneStringMap(source map[string]string) map[string]string {
+	out := make(map[string]string, len(source))
+	for k, v := range source {
+		out[k] = v
+	}
+	return out
+}
+
+func clonePayablePlanMap(source map[string]payable.PaymentPlan) map[string]payable.PaymentPlan {
+	out := make(map[string]payable.PaymentPlan, len(source))
+	for k, v := range source {
+		out[k] = clonePayablePaymentPlan(v)
+	}
+	return out
+}
+
+func cloneStringSliceMap(source map[string][]string) map[string][]string {
+	out := make(map[string][]string, len(source))
+	for k, values := range source {
+		out[k] = append([]string(nil), values...)
+	}
+	return out
+}
+
+func cloneReceivableBillMap(source map[string]receivable.Bill) map[string]receivable.Bill {
+	out := make(map[string]receivable.Bill, len(source))
+	for k, v := range source {
+		out[k] = cloneReceivableBill(v)
+	}
+	return out
+}
+
+func cloneReservationMap(source map[string][]inventory.Reservation) map[string][]inventory.Reservation {
+	out := make(map[string][]inventory.Reservation, len(source))
+	for k, reservations := range source {
+		cloned := make([]inventory.Reservation, 0, len(reservations))
+		for _, reservation := range reservations {
+			cloned = append(cloned, cloneReservation(reservation))
+		}
+		out[k] = cloned
+	}
+	return out
+}
+
+func cloneTransferOrderMap(source map[string]inventory.TransferOrder) map[string]inventory.TransferOrder {
+	out := make(map[string]inventory.TransferOrder, len(source))
+	for k, v := range source {
+		out[k] = cloneTransferOrder(v)
+	}
+	return out
+}
+
+func cloneSalesOrderMap(source map[string]sales.Order) map[string]sales.Order {
+	out := make(map[string]sales.Order, len(source))
+	for k, v := range source {
+		out[k] = cloneSalesOrder(v)
+	}
+	return out
+}
