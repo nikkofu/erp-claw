@@ -135,16 +135,24 @@ Run `go test ./test/integration -run 'TestAdminSupplyChainFlow|TestAdminInventor
 - `GET /api/workspace/v1/inventory/ledger?product_id=<id>&warehouse_id=<id>`
 - `GET /api/workspace/v1/sales-orders`
 - `GET /api/workspace/v1/sales-orders/:id`
+- `GET /api/workspace/v1/payables`
+- `GET /api/workspace/v1/payables/:id`
+- `GET /api/workspace/v1/receivables`
+- `GET /api/workspace/v1/receivables/:id`
 
-Run `go test ./test/integration -run 'TestWorkspaceInventoryQueriesReturnBalanceAndLedger|TestWorkspaceSalesOrderQueriesReturnListAndDetail' -v` to verify workspace inventory/sales query routing and response shape.
+Run `go test ./test/integration -run 'TestWorkspaceInventoryQueriesReturnBalanceAndLedger|TestWorkspaceSalesOrderQueriesReturnListAndDetail|TestWorkspaceFinanceQueriesReturnPayableAndReceivableReadModels' -v` to verify workspace inventory/sales/finance query routing and response shape.
 
 ## Integration API (Phase 2 Minimal Query Slice)
 
 - `GET /api/integration/v1/read-models/overview`
 - `GET /api/integration/v1/sales-orders`
 - `GET /api/integration/v1/sales-orders/:id`
+- `GET /api/integration/v1/payables`
+- `GET /api/integration/v1/payables/:id`
+- `GET /api/integration/v1/receivables`
+- `GET /api/integration/v1/receivables/:id`
 
-Run `go test ./test/integration -run 'TestIntegrationReadModelAndSalesQueries' -v` to verify integration overview and sales query routing.
+Run `go test ./test/integration -run 'TestIntegrationReadModelAndSalesQueries|TestIntegrationFinanceQueriesReturnPayableAndReceivableReadModels' -v` to verify integration overview/sales/finance query routing.
 
 ## Smoke Run
 

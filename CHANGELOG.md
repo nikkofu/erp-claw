@@ -2,6 +2,29 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.27] - 2026-03-27
+
+### Added
+
+- Workspace query surface now includes finance read models:
+  - `GET /api/workspace/v1/payables`
+  - `GET /api/workspace/v1/payables/:id`
+  - `GET /api/workspace/v1/receivables`
+  - `GET /api/workspace/v1/receivables/:id`
+- Integration query surface now includes finance read models:
+  - `GET /api/integration/v1/payables`
+  - `GET /api/integration/v1/payables/:id`
+  - `GET /api/integration/v1/receivables`
+  - `GET /api/integration/v1/receivables/:id`
+- Added integration tests for workspace/integration finance queries:
+  - `TestWorkspaceFinanceQueriesReturnPayableAndReceivableReadModels`
+  - `TestIntegrationFinanceQueriesReturnPayableAndReceivableReadModels`
+
+### Changed
+
+- Updated `README.md` Phase 2 query API sections and verification commands.
+- Updated `docs/phase-2-coverage-status.md` with latest workspace/integration query coverage.
+
 ## [0.2.24] - 2026-03-27
 
 ### Added

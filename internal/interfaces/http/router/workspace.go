@@ -60,4 +60,59 @@ func registerWorkspaceRoutes(rg *gin.RouterGroup, container *bootstrap.Container
 		}
 		presenter.OK(c, salesOrderResponse(order))
 	})
+
+	payableGroup := rg.Group("/payables")
+	payableGroup.GET("", func(c *gin.Context) {
+		bills, err := container.SupplyChain.ListPayableBills(c.Request.Context(), supplychain.ListPayableBillsInput{
+			TenantID: tenantIDFromContext(c),
+		})
+		if err != nil {
+			renderSupplyChainError(c, err)
+			return
+		}
+		presenter.OK(c, payableBillsResponse(bills))
+	})
+	payableGroup.GET("/:id", func(c *gin.Context) {
+		bill, err := container.SupplyChain.GetPayableBill(c.Request.Context(), supplychain.GetPayableBillInput{
+			TenantID: tenantIDFromContext(c),
+			BillID:   c.Param("id"),
+		})
+		if err != nil {
+			renderSupplyChainError(c, err)
+			return
+		}
+
+		plans, err := container.SupplyChain.ListPayablePaymentPlans(c.Request.Context(), supplychain.ListPayablePaymentPlansInput{
+			TenantID:      tenantIDFromContext(c),
+			PayableBillID: bill.ID,
+		})
+		if err != nil {
+			renderSupplyChainError(c, err)
+			return
+		}
+		presenter.OK(c, payableBillDetailResponse(bill, plans))
+	})
+
+	receivableGroup := rg.Group("/receivables")
+	receivableGroup.GET("", func(c *gin.Context) {
+		bills, err := container.SupplyChain.ListReceivableBills(c.Request.Context(), supplychain.ListReceivableBillsInput{
+			TenantID: tenantIDFromContext(c),
+		})
+		if err != nil {
+			renderSupplyChainError(c, err)
+			return
+		}
+		presenter.OK(c, receivableBillsResponse(bills))
+	})
+	receivableGroup.GET("/:id", func(c *gin.Context) {
+		bill, err := container.SupplyChain.GetReceivableBill(c.Request.Context(), supplychain.GetReceivableBillInput{
+			TenantID: tenantIDFromContext(c),
+			BillID:   c.Param("id"),
+		})
+		if err != nil {
+			renderSupplyChainError(c, err)
+			return
+		}
+		presenter.OK(c, receivableBillResponse(bill))
+	})
 }
