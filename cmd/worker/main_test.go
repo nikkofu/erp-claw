@@ -15,6 +15,12 @@ type fakeOutboxStore struct {
 	publishedIDs      []int64
 	retryIDs          []int64
 	retryAvailableAts []time.Time
+	retryAttempts     []int
+	retryErrors       []string
+	failedIDs         []int64
+	failedAttempts    []int
+	failedAts         []time.Time
+	failedErrors      []string
 }
 
 func (f *fakeOutboxStore) ClaimPending(_ context.Context, _ int) ([]outboxRecord, error) {
@@ -29,9 +35,19 @@ func (f *fakeOutboxStore) MarkPublished(_ context.Context, id int64) error {
 	return nil
 }
 
-func (f *fakeOutboxStore) MarkPendingRetry(_ context.Context, id int64, nextAvailableAt time.Time) error {
+func (f *fakeOutboxStore) MarkPendingRetry(_ context.Context, id int64, nextAvailableAt time.Time, attempts int, lastError string) error {
 	f.retryIDs = append(f.retryIDs, id)
 	f.retryAvailableAts = append(f.retryAvailableAts, nextAvailableAt)
+	f.retryAttempts = append(f.retryAttempts, attempts)
+	f.retryErrors = append(f.retryErrors, lastError)
+	return nil
+}
+
+func (f *fakeOutboxStore) MarkFailed(_ context.Context, id int64, attempts int, failedAt time.Time, lastError string) error {
+	f.failedIDs = append(f.failedIDs, id)
+	f.failedAttempts = append(f.failedAttempts, attempts)
+	f.failedAts = append(f.failedAts, failedAt)
+	f.failedErrors = append(f.failedErrors, lastError)
 	return nil
 }
 
@@ -51,14 +67,14 @@ func (b *fakeBus) Publish(_ context.Context, evt eventbus.Event) error {
 func TestPollOutboxBatchWithStorePublishesAndMarksPublished(t *testing.T) {
 	store := &fakeOutboxStore{
 		claimRecords: []outboxRecord{
-			{ID: 10, TenantID: 1001, Topic: "platform.audit.created", EventType: "audit.created", Payload: []byte(`{"x":1}`)},
-			{ID: 11, TenantID: 1002, Topic: "platform.task.created", EventType: "task.created", Payload: []byte(`{"x":2}`)},
+			{ID: 10, TenantID: 1001, Topic: "platform.audit.created", EventType: "audit.created", Payload: []byte(`{"x":1}`), Attempts: 0},
+			{ID: 11, TenantID: 1002, Topic: "platform.task.created", EventType: "task.created", Payload: []byte(`{"x":2}`), Attempts: 0},
 		},
 	}
 	bus := &fakeBus{}
 	now := time.Date(2026, 3, 27, 9, 45, 0, 0, time.UTC)
 
-	err := pollOutboxBatchWithStore(context.Background(), store, bus, now, 100, 5*time.Second)
+	err := pollOutboxBatchWithStore(context.Background(), store, bus, now, 100, 5*time.Second, 3)
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
@@ -78,12 +94,15 @@ func TestPollOutboxBatchWithStorePublishesAndMarksPublished(t *testing.T) {
 	if len(store.retryIDs) != 0 {
 		t.Fatalf("expected no retry IDs, got %v", store.retryIDs)
 	}
+	if len(store.failedIDs) != 0 {
+		t.Fatalf("expected no failed IDs, got %v", store.failedIDs)
+	}
 }
 
 func TestPollOutboxBatchWithStoreRetriesWhenPublishFails(t *testing.T) {
 	store := &fakeOutboxStore{
 		claimRecords: []outboxRecord{
-			{ID: 20, TenantID: 1003, Topic: "platform.task.failed", EventType: "task.failed", Payload: []byte(`{"x":3}`)},
+			{ID: 20, TenantID: 1003, Topic: "platform.task.failed", EventType: "task.failed", Payload: []byte(`{"x":3}`), Attempts: 0},
 		},
 	}
 	bus := &fakeBus{
@@ -94,7 +113,7 @@ func TestPollOutboxBatchWithStoreRetriesWhenPublishFails(t *testing.T) {
 	now := time.Date(2026, 3, 27, 10, 0, 0, 0, time.UTC)
 	retryDelay := 7 * time.Second
 
-	err := pollOutboxBatchWithStore(context.Background(), store, bus, now, 100, retryDelay)
+	err := pollOutboxBatchWithStore(context.Background(), store, bus, now, 100, retryDelay, 3)
 	if err == nil {
 		t.Fatal("expected error when publish fails")
 	}
@@ -111,6 +130,43 @@ func TestPollOutboxBatchWithStoreRetriesWhenPublishFails(t *testing.T) {
 	if !store.retryAvailableAts[0].Equal(expectedRetryAt) {
 		t.Fatalf("expected retry at %s, got %s", expectedRetryAt, store.retryAvailableAts[0])
 	}
+	if len(store.retryAttempts) != 1 || store.retryAttempts[0] != 1 {
+		t.Fatalf("expected retry attempts [1], got %v", store.retryAttempts)
+	}
+	if len(store.failedIDs) != 0 {
+		t.Fatalf("expected no failed IDs for first failure, got %v", store.failedIDs)
+	}
+}
+
+func TestPollOutboxBatchWithStoreMarksFailedWhenAttemptsExhausted(t *testing.T) {
+	store := &fakeOutboxStore{
+		claimRecords: []outboxRecord{
+			{ID: 21, TenantID: 1004, Topic: "platform.task.failed.final", EventType: "task.failed", Payload: []byte(`{"x":4}`), Attempts: 2},
+		},
+	}
+	bus := &fakeBus{
+		publishErrByTopic: map[string]error{
+			"platform.task.failed.final": errors.New("nats down hard"),
+		},
+	}
+	now := time.Date(2026, 3, 27, 10, 5, 0, 0, time.UTC)
+
+	err := pollOutboxBatchWithStore(context.Background(), store, bus, now, 100, 5*time.Second, 3)
+	if err == nil {
+		t.Fatal("expected error when terminal publish failure occurs")
+	}
+	if len(store.retryIDs) != 0 {
+		t.Fatalf("expected no retry IDs when exhausted, got %v", store.retryIDs)
+	}
+	if len(store.failedIDs) != 1 || store.failedIDs[0] != 21 {
+		t.Fatalf("expected failed ID [21], got %v", store.failedIDs)
+	}
+	if len(store.failedAttempts) != 1 || store.failedAttempts[0] != 3 {
+		t.Fatalf("expected failed attempts [3], got %v", store.failedAttempts)
+	}
+	if len(store.failedAts) != 1 || !store.failedAts[0].Equal(now) {
+		t.Fatalf("expected failedAt %s, got %v", now, store.failedAts)
+	}
 }
 
 func TestPollOutboxBatchWithStoreReturnsClaimError(t *testing.T) {
@@ -119,7 +175,7 @@ func TestPollOutboxBatchWithStoreReturnsClaimError(t *testing.T) {
 	}
 	bus := &fakeBus{}
 
-	err := pollOutboxBatchWithStore(context.Background(), store, bus, time.Now(), 100, 5*time.Second)
+	err := pollOutboxBatchWithStore(context.Background(), store, bus, time.Now(), 100, 5*time.Second, 3)
 	if err == nil {
 		t.Fatal("expected claim error")
 	}

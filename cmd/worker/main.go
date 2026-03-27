@@ -20,6 +20,7 @@ import (
 const (
 	defaultOutboxBatchSize  = 100
 	defaultOutboxRetryDelay = 5 * time.Second
+	defaultOutboxMaxAttempt = 3
 )
 
 const claimPendingOutboxSQL = `
@@ -36,7 +37,7 @@ update outbox o
 set status = 'processing'
 from picked
 where o.id = picked.id
-returning o.id, o.tenant_id, o.topic, o.event_type, o.payload;
+returning o.id, o.tenant_id, o.topic, o.event_type, o.payload, o.attempts;
 `
 
 type outboxRecord struct {
@@ -45,12 +46,14 @@ type outboxRecord struct {
 	Topic     string
 	EventType string
 	Payload   []byte
+	Attempts  int
 }
 
 type outboxStore interface {
 	ClaimPending(ctx context.Context, limit int) ([]outboxRecord, error)
 	MarkPublished(ctx context.Context, id int64) error
-	MarkPendingRetry(ctx context.Context, id int64, nextAvailableAt time.Time) error
+	MarkPendingRetry(ctx context.Context, id int64, nextAvailableAt time.Time, attempts int, lastError string) error
+	MarkFailed(ctx context.Context, id int64, attempts int, failedAt time.Time, lastError string) error
 }
 
 type postgresOutboxStore struct {
@@ -67,7 +70,7 @@ func (s *postgresOutboxStore) ClaimPending(ctx context.Context, limit int) ([]ou
 	records := make([]outboxRecord, 0, limit)
 	for rows.Next() {
 		var rec outboxRecord
-		if err := rows.Scan(&rec.ID, &rec.TenantID, &rec.Topic, &rec.EventType, &rec.Payload); err != nil {
+		if err := rows.Scan(&rec.ID, &rec.TenantID, &rec.Topic, &rec.EventType, &rec.Payload, &rec.Attempts); err != nil {
 			return nil, err
 		}
 		records = append(records, rec)
@@ -81,18 +84,32 @@ func (s *postgresOutboxStore) ClaimPending(ctx context.Context, limit int) ([]ou
 func (s *postgresOutboxStore) MarkPublished(ctx context.Context, id int64) error {
 	_, err := s.db.ExecContext(
 		ctx,
-		`update outbox set status = 'published', published_at = now() where id = $1`,
+		`update outbox set status = 'published', published_at = now(), last_error = null where id = $1`,
 		id,
 	)
 	return err
 }
 
-func (s *postgresOutboxStore) MarkPendingRetry(ctx context.Context, id int64, nextAvailableAt time.Time) error {
+func (s *postgresOutboxStore) MarkPendingRetry(ctx context.Context, id int64, nextAvailableAt time.Time, attempts int, lastError string) error {
 	_, err := s.db.ExecContext(
 		ctx,
-		`update outbox set status = 'pending', available_at = $2, published_at = null where id = $1`,
+		`update outbox set status = 'pending', available_at = $2, published_at = null, attempts = $3, last_error = $4 where id = $1`,
 		id,
 		nextAvailableAt.UTC(),
+		attempts,
+		lastError,
+	)
+	return err
+}
+
+func (s *postgresOutboxStore) MarkFailed(ctx context.Context, id int64, attempts int, failedAt time.Time, lastError string) error {
+	_, err := s.db.ExecContext(
+		ctx,
+		`update outbox set status = 'failed', attempts = $2, failed_at = $3, last_error = $4 where id = $1`,
+		id,
+		attempts,
+		failedAt.UTC(),
+		lastError,
 	)
 	return err
 }
@@ -182,7 +199,15 @@ func pollOutboxBatch(ctx context.Context, db *sql.DB, bus eventbus.Bus) error {
 		return fmt.Errorf("event bus is required")
 	}
 	store := &postgresOutboxStore{db: db}
-	return pollOutboxBatchWithStore(ctx, store, bus, time.Now(), defaultOutboxBatchSize, defaultOutboxRetryDelay)
+	return pollOutboxBatchWithStore(
+		ctx,
+		store,
+		bus,
+		time.Now(),
+		defaultOutboxBatchSize,
+		defaultOutboxRetryDelay,
+		defaultOutboxMaxAttempt,
+	)
 }
 
 func pollOutboxBatchWithStore(
@@ -192,6 +217,7 @@ func pollOutboxBatchWithStore(
 	now time.Time,
 	batchSize int,
 	retryDelay time.Duration,
+	maxAttempts int,
 ) error {
 	if store == nil {
 		return fmt.Errorf("outbox store is required")
@@ -204,6 +230,9 @@ func pollOutboxBatchWithStore(
 	}
 	if retryDelay <= 0 {
 		retryDelay = defaultOutboxRetryDelay
+	}
+	if maxAttempts <= 0 {
+		maxAttempts = defaultOutboxMaxAttempt
 	}
 
 	records, err := store.ClaimPending(ctx, batchSize)
@@ -225,14 +254,27 @@ func pollOutboxBatchWithStore(
 			Payload:     rec.Payload,
 		}
 		if err := bus.Publish(ctx, evt); err != nil {
+			nextAttempts := rec.Attempts + 1
 			log.Printf(
-				"outbox publish failed (id=%d topic=%s event_type=%s): %v",
+				"outbox publish failed (id=%d topic=%s event_type=%s attempts=%d): %v",
 				rec.ID,
 				rec.Topic,
 				rec.EventType,
+				nextAttempts,
 				err,
 			)
-			if retryErr := store.MarkPendingRetry(ctx, rec.ID, nextAvailableAt); retryErr != nil {
+			lastError := err.Error()
+			if nextAttempts >= maxAttempts {
+				failedAt := now.UTC()
+				if failErr := store.MarkFailed(ctx, rec.ID, nextAttempts, failedAt, lastError); failErr != nil {
+					err = fmt.Errorf("publish failed: %v; mark failed failed: %w", err, failErr)
+				}
+				if firstErr == nil {
+					firstErr = fmt.Errorf("publish outbox id=%d permanently failed: %w", rec.ID, err)
+				}
+				continue
+			}
+			if retryErr := store.MarkPendingRetry(ctx, rec.ID, nextAvailableAt, nextAttempts, lastError); retryErr != nil {
 				err = fmt.Errorf("publish failed: %v; mark retry failed: %w", err, retryErr)
 			}
 			if firstErr == nil {

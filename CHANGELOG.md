@@ -2,6 +2,23 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.24] - 2026-03-27
+
+### Added
+
+- Outbox retry-governance migration `000010_init_phase1_outbox_retry_governance_tables`:
+  - `attempts`, `last_error`, `failed_at` columns
+  - `idx_outbox_status_available_at` index
+- Worker outbox processing now tracks failure attempts and applies terminal failure status:
+  - publish failure increments attempts
+  - below threshold: back to `pending` with delayed `available_at`
+  - threshold reached: mark as `failed`
+- Expanded outbox worker unit tests for retry-vs-failed branching.
+
+### Changed
+
+- `docs/phase-1-coverage-status.md` now reflects outbox attempt tracking and failed terminal state.
+
 ## [0.2.23] - 2026-03-27
 
 ### Added
