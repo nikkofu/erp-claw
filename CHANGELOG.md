@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.2.33] - 2026-03-27
+## [0.2.34] - 2026-03-27
 
 ### Added
 
@@ -21,6 +21,23 @@ All notable changes to this project will be documented in this file.
 ### Changed
 
 - Updated `README.md` and `docs/phase-2-coverage-status.md` to include sales-order list query coverage.
+
+## [0.2.33] - 2026-03-27
+
+### Added
+
+- Phase 1 inbox idempotency storage baseline:
+  - migration `000011_init_phase1_inbox_idempotency_tables` adds `inbox` table
+  - unique key `(tenant_id, message_key)` for dedupe claims
+  - index `idx_inbox_status_received_at` for status/latency style scans
+- New postgres inbox store helper at `internal/infrastructure/persistence/postgres/inbox.go`:
+  - `ClaimMessage` for insert-once idempotency claims
+  - `MarkProcessed` and `MarkFailed` for consumer-side processing state updates
+- Unit tests for inbox store claim/duplicate/validation/state-update behavior in `internal/infrastructure/persistence/postgres/inbox_test.go`.
+
+### Changed
+
+- `docs/phase-1-coverage-status.md` now tracks inbox idempotency baseline as delivered and marks consumer-chain integration as remaining work.
 
 ## [0.2.32] - 2026-03-27
 
