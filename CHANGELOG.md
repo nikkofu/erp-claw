@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.2.28] - 2026-03-27
+## [0.2.29] - 2026-03-27
 
 ### Added
 
@@ -21,6 +21,20 @@ All notable changes to this project will be documented in this file.
 ### Changed
 
 - Updated `README.md` and `docs/phase-2-coverage-status.md` to reflect approval list query coverage.
+
+## [0.2.28] - 2026-03-27
+
+### Added
+
+- Worker outbox claim now supports lease-based recovery:
+  - claim set expanded to `status in ('pending', 'processing')`
+  - claim window is bounded by `available_at <= readyBefore`
+  - claimed records are moved to `processing` with lease expiry written to `available_at`
+- Worker outbox unit tests now assert claim arguments (`limit`, `readyBefore`, `leaseUntil`) to lock the lease behavior.
+
+### Changed
+
+- `docs/phase-1-coverage-status.md` now documents the outbox processing lease/reclaim semantics.
 
 ## [0.2.27] - 2026-03-27
 

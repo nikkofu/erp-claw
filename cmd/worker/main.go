@@ -21,20 +21,22 @@ const (
 	defaultOutboxBatchSize  = 100
 	defaultOutboxRetryDelay = 5 * time.Second
 	defaultOutboxMaxAttempt = 3
+	defaultOutboxLease      = 30 * time.Second
 )
 
-const claimPendingOutboxSQL = `
+const claimReadyOutboxSQL = `
 with picked as (
 	select id
 	from outbox
-	where status = 'pending'
-	  and available_at <= now()
+	where status in ('pending', 'processing')
+	  and available_at <= $2
 	order by id
 	for update skip locked
 	limit $1
 )
 update outbox o
 set status = 'processing'
+  , available_at = $3
 from picked
 where o.id = picked.id
 returning o.id, o.tenant_id, o.topic, o.event_type, o.payload, o.attempts;
@@ -50,7 +52,7 @@ type outboxRecord struct {
 }
 
 type outboxStore interface {
-	ClaimPending(ctx context.Context, limit int) ([]outboxRecord, error)
+	ClaimReady(ctx context.Context, limit int, readyBefore time.Time, leaseUntil time.Time) ([]outboxRecord, error)
 	MarkPublished(ctx context.Context, id int64) error
 	MarkPendingRetry(ctx context.Context, id int64, nextAvailableAt time.Time, attempts int, lastError string) error
 	MarkFailed(ctx context.Context, id int64, attempts int, failedAt time.Time, lastError string) error
@@ -60,8 +62,8 @@ type postgresOutboxStore struct {
 	db *sql.DB
 }
 
-func (s *postgresOutboxStore) ClaimPending(ctx context.Context, limit int) ([]outboxRecord, error) {
-	rows, err := s.db.QueryContext(ctx, claimPendingOutboxSQL, limit)
+func (s *postgresOutboxStore) ClaimReady(ctx context.Context, limit int, readyBefore time.Time, leaseUntil time.Time) ([]outboxRecord, error) {
+	rows, err := s.db.QueryContext(ctx, claimReadyOutboxSQL, limit, readyBefore.UTC(), leaseUntil.UTC())
 	if err != nil {
 		return nil, err
 	}
@@ -207,6 +209,7 @@ func pollOutboxBatch(ctx context.Context, db *sql.DB, bus eventbus.Bus) error {
 		defaultOutboxBatchSize,
 		defaultOutboxRetryDelay,
 		defaultOutboxMaxAttempt,
+		defaultOutboxLease,
 	)
 }
 
@@ -218,6 +221,7 @@ func pollOutboxBatchWithStore(
 	batchSize int,
 	retryDelay time.Duration,
 	maxAttempts int,
+	leaseDuration time.Duration,
 ) error {
 	if store == nil {
 		return fmt.Errorf("outbox store is required")
@@ -234,10 +238,15 @@ func pollOutboxBatchWithStore(
 	if maxAttempts <= 0 {
 		maxAttempts = defaultOutboxMaxAttempt
 	}
+	if leaseDuration <= 0 {
+		leaseDuration = defaultOutboxLease
+	}
 
-	records, err := store.ClaimPending(ctx, batchSize)
+	readyBefore := now.UTC()
+	leaseUntil := readyBefore.Add(leaseDuration)
+	records, err := store.ClaimReady(ctx, batchSize, readyBefore, leaseUntil)
 	if err != nil {
-		return fmt.Errorf("claim pending outbox: %w", err)
+		return fmt.Errorf("claim ready outbox: %w", err)
 	}
 	if len(records) == 0 {
 		return nil
