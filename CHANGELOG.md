@@ -2,6 +2,26 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.33] - 2026-03-27
+
+### Added
+
+- Admin sales-order list query endpoint:
+  - `GET /api/admin/v1/sales-orders`
+  - supports `status=draft|shipped`
+  - supports `sort=id_asc|id_desc`, `page`, `page_size`
+- Supply-chain service query capability:
+  - `ListSalesOrders` with status/sort/pagination validation and tenant scope
+- New tests for sales-order list query behavior:
+  - `TestServiceListSalesOrdersSupportsStatusSortAndPagination`
+  - `TestServiceListSalesOrdersFailsForInvalidQuery`
+  - `TestAdminSalesOrderListSupportsStatusSortAndPagination`
+  - `TestAdminSalesOrderListRejectsInvalidQuery`
+
+### Changed
+
+- Updated `README.md` and `docs/phase-2-coverage-status.md` to include sales-order list query coverage.
+
 ## [0.2.32] - 2026-03-27
 
 ### Added

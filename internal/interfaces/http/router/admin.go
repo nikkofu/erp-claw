@@ -565,8 +565,23 @@ func registerAdminRoutes(rg *gin.RouterGroup, container *bootstrap.Container) {
 		presenter.OK(c, salesOrderResponse(order))
 	})
 	salesGroup.GET("", func(c *gin.Context) {
+		page, err := parsePositiveSalesOrderQueryInt(c.Query("page"), 1)
+		if err != nil {
+			renderSupplyChainError(c, err)
+			return
+		}
+		pageSize, err := parsePositiveSalesOrderQueryInt(c.Query("page_size"), 20)
+		if err != nil {
+			renderSupplyChainError(c, err)
+			return
+		}
+
 		orders, err := container.SupplyChain.ListSalesOrders(c.Request.Context(), supplychain.ListSalesOrdersInput{
 			TenantID: tenantIDFromContext(c),
+			Status:   c.Query("status"),
+			Sort:     c.DefaultQuery("sort", "id_desc"),
+			Page:     page,
+			PageSize: pageSize,
 		})
 		if err != nil {
 			renderSupplyChainError(c, err)
@@ -706,6 +721,10 @@ func parsePositivePurchaseOrderQueryInt(raw string, defaultValue int) (int, erro
 	return parsePositiveQueryIntWithErr(raw, defaultValue, procurement.ErrInvalidPurchaseOrderQuery)
 }
 
+func parsePositiveSalesOrderQueryInt(raw string, defaultValue int) (int, error) {
+	return parsePositiveQueryIntWithErr(raw, defaultValue, sales.ErrInvalidOrderQuery)
+}
+
 func parsePositiveQueryIntWithErr(raw string, defaultValue int, errValue error) (int, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
@@ -748,6 +767,7 @@ func renderSupplyChainError(c *gin.Context, err error) {
 		errors.Is(err, payable.ErrInvalidPaymentPlan),
 		errors.Is(err, receivable.ErrInvalidBill),
 		errors.Is(err, sales.ErrInvalidOrder),
+		errors.Is(err, sales.ErrInvalidOrderQuery),
 		errors.Is(err, approval.ErrInvalidRequest),
 		errors.Is(err, approval.ErrApprovalNotPending):
 		presenter.Error(c, http.StatusBadRequest, err.Error())

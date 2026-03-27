@@ -214,6 +214,10 @@ type GetSalesOrderInput struct {
 
 type ListSalesOrdersInput struct {
 	TenantID string
+	Status   string
+	Sort     string
+	Page     int
+	PageSize int
 }
 
 type ShipSalesOrderInput struct {

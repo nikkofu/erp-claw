@@ -1610,6 +1610,116 @@ func TestServiceListsSalesOrdersByTenant(t *testing.T) {
 	}
 }
 
+func TestServiceListSalesOrdersSupportsStatusSortAndPagination(t *testing.T) {
+	ctx := context.Background()
+	svc := newTestService()
+	receivedOrder := createReceivedOrder(t, ctx, svc)
+
+	createSalesOrder := func(externalRef string, quantity int) sales.Order {
+		order, err := svc.CreateSalesOrder(ctx, CreateSalesOrderInput{
+			TenantID:    "tenant-a",
+			ActorID:     "sales-a",
+			WarehouseID: receivedOrder.WarehouseID,
+			ExternalRef: externalRef,
+			Lines: []CreateSalesOrderLine{{
+				ProductID: receivedOrder.Lines[0].ProductID,
+				Quantity:  quantity,
+			}},
+		})
+		if err != nil {
+			t.Fatalf("create sales order %s: %v", externalRef, err)
+		}
+		return order
+	}
+
+	orderA := createSalesOrder("SO-LIST-001", 1)
+	orderB := createSalesOrder("SO-LIST-002", 1)
+	orderC := createSalesOrder("SO-LIST-003", 1)
+
+	if _, _, err := svc.ShipSalesOrder(ctx, ShipSalesOrderInput{
+		TenantID:     "tenant-a",
+		ActorID:      "warehouse-a",
+		SalesOrderID: orderB.ID,
+	}); err != nil {
+		t.Fatalf("ship sales order %s: %v", orderB.ID, err)
+	}
+
+	page1, err := svc.ListSalesOrders(ctx, ListSalesOrdersInput{
+		TenantID: "tenant-a",
+		Sort:     "id_asc",
+		Page:     1,
+		PageSize: 2,
+	})
+	if err != nil {
+		t.Fatalf("list sales orders page1: %v", err)
+	}
+	if len(page1) != 2 {
+		t.Fatalf("expected 2 sales orders in page1, got %d", len(page1))
+	}
+	if page1[0].ID != orderA.ID || page1[1].ID != orderB.ID {
+		t.Fatalf("expected page1 ids [%s,%s], got [%s,%s]", orderA.ID, orderB.ID, page1[0].ID, page1[1].ID)
+	}
+
+	page2, err := svc.ListSalesOrders(ctx, ListSalesOrdersInput{
+		TenantID: "tenant-a",
+		Sort:     "id_asc",
+		Page:     2,
+		PageSize: 2,
+	})
+	if err != nil {
+		t.Fatalf("list sales orders page2: %v", err)
+	}
+	if len(page2) != 1 {
+		t.Fatalf("expected 1 sales order in page2, got %d", len(page2))
+	}
+	if page2[0].ID != orderC.ID {
+		t.Fatalf("expected page2 sales order id %s, got %s", orderC.ID, page2[0].ID)
+	}
+
+	shipped, err := svc.ListSalesOrders(ctx, ListSalesOrdersInput{
+		TenantID: "tenant-a",
+		Status:   "shipped",
+	})
+	if err != nil {
+		t.Fatalf("list shipped sales orders: %v", err)
+	}
+	if len(shipped) != 1 {
+		t.Fatalf("expected 1 shipped sales order, got %d", len(shipped))
+	}
+	if shipped[0].ID != orderB.ID {
+		t.Fatalf("expected shipped sales order id %s, got %s", orderB.ID, shipped[0].ID)
+	}
+}
+
+func TestServiceListSalesOrdersFailsForInvalidQuery(t *testing.T) {
+	ctx := context.Background()
+	svc := newTestService()
+
+	_, err := svc.ListSalesOrders(ctx, ListSalesOrdersInput{
+		TenantID: "tenant-a",
+		Status:   "unknown",
+	})
+	if !errors.Is(err, sales.ErrInvalidOrderQuery) {
+		t.Fatalf("expected invalid sales order query for status, got %v", err)
+	}
+
+	_, err = svc.ListSalesOrders(ctx, ListSalesOrdersInput{
+		TenantID: "tenant-a",
+		Sort:     "unknown",
+	})
+	if !errors.Is(err, sales.ErrInvalidOrderQuery) {
+		t.Fatalf("expected invalid sales order query for sort, got %v", err)
+	}
+
+	_, err = svc.ListSalesOrders(ctx, ListSalesOrdersInput{
+		TenantID: "tenant-a",
+		Page:     -1,
+	})
+	if !errors.Is(err, sales.ErrInvalidOrderQuery) {
+		t.Fatalf("expected invalid sales order query for page, got %v", err)
+	}
+}
+
 func TestServiceBuildsBackofficeOverviewReadModel(t *testing.T) {
 	ctx := context.Background()
 	svc := newTestService()

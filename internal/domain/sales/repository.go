@@ -6,6 +6,7 @@ import (
 )
 
 var ErrOrderNotFound = errors.New("sales order not found")
+var ErrInvalidOrderQuery = errors.New("invalid sales order query")
 
 type Repository interface {
 	Save(ctx context.Context, order Order) error
