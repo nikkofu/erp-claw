@@ -26,6 +26,17 @@ func main() {
 		log.Fatalf("failed to load config (%s): %v", configPath, err)
 	}
 
+	bootstrap.StartRuntime(bootstrap.MigrateRole)
+	shutdownTelemetry, err := bootstrap.SetupRuntimeTelemetry(cfg, bootstrap.MigrateRole)
+	if err != nil {
+		log.Fatalf("failed to setup telemetry: %v", err)
+	}
+	defer func() {
+		if shutdownErr := shutdownTelemetry(context.Background()); shutdownErr != nil {
+			log.Printf("failed to shutdown telemetry: %v", shutdownErr)
+		}
+	}()
+
 	pgCfg := postgres.Config{
 		DSN:          cfg.Database.DSN,
 		MaxOpenConns: cfg.Database.MaxOpenConns,

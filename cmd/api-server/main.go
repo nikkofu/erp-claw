@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"net/http"
@@ -24,6 +25,15 @@ func main() {
 	}
 
 	bootstrap.StartRuntime(bootstrap.APIServerRole)
+	shutdownTelemetry, err := bootstrap.SetupRuntimeTelemetry(cfg, bootstrap.APIServerRole)
+	if err != nil {
+		log.Fatalf("failed to setup telemetry: %v", err)
+	}
+	defer func() {
+		if shutdownErr := shutdownTelemetry(context.Background()); shutdownErr != nil {
+			log.Printf("failed to shutdown telemetry: %v", shutdownErr)
+		}
+	}()
 
 	gin.SetMode(gin.ReleaseMode)
 	container := bootstrap.NewContainer(cfg)

@@ -22,6 +22,15 @@ func main() {
 	}
 
 	bootstrap.StartRuntime(bootstrap.AgentGatewayRole)
+	shutdownTelemetry, err := bootstrap.SetupRuntimeTelemetry(cfg, bootstrap.AgentGatewayRole)
+	if err != nil {
+		log.Fatalf("failed to setup telemetry: %v", err)
+	}
+	defer func() {
+		if shutdownErr := shutdownTelemetry(context.Background()); shutdownErr != nil {
+			log.Printf("failed to shutdown telemetry: %v", shutdownErr)
+		}
+	}()
 
 	container := bootstrap.NewContainer(cfg)
 

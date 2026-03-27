@@ -27,6 +27,15 @@ func main() {
 	}
 
 	bootstrap.StartRuntime(bootstrap.WorkerRole)
+	shutdownTelemetry, err := bootstrap.SetupRuntimeTelemetry(cfg, bootstrap.WorkerRole)
+	if err != nil {
+		log.Fatalf("failed to setup telemetry: %v", err)
+	}
+	defer func() {
+		if shutdownErr := shutdownTelemetry(context.Background()); shutdownErr != nil {
+			log.Printf("failed to shutdown telemetry: %v", shutdownErr)
+		}
+	}()
 
 	db, err := postgres.New(postgres.Config{
 		DSN:          cfg.Database.DSN,
