@@ -78,11 +78,13 @@ The first executable Phase 2 slice is now available through the admin surface. I
 - `POST /api/admin/v1/master-data/warehouses`
 - `POST /api/admin/v1/procurement/purchase-orders`
 - `POST /api/admin/v1/procurement/purchase-orders/:id/submit`
+- `POST /api/admin/v1/procurement/purchase-orders/:id/receive`
 - `GET /api/admin/v1/procurement/purchase-orders/:id`
+- `GET /api/admin/v1/inventory/balances?product_id=<id>&warehouse_id=<id>`
 - `POST /api/admin/v1/approvals/:id/approve`
 - `POST /api/admin/v1/approvals/:id/reject`
 
-Run `go test ./test/integration -run TestAdminSupplyChainFlow -v` to verify the end-to-end Wave 1 admin flow locally.
+Run `go test ./test/integration -run 'TestAdminSupplyChainFlow|TestAdminInventoryReceiptFlow' -v` to verify the end-to-end Phase 2 admin flow locally.
 
 ## Smoke Run
 

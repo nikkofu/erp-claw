@@ -7,6 +7,7 @@ import (
 
 	"github.com/nikkofu/erp-claw/internal/application/shared"
 	"github.com/nikkofu/erp-claw/internal/domain/approval"
+	"github.com/nikkofu/erp-claw/internal/domain/inventory"
 	"github.com/nikkofu/erp-claw/internal/domain/masterdata"
 	"github.com/nikkofu/erp-claw/internal/domain/procurement"
 	"github.com/nikkofu/erp-claw/internal/infrastructure/persistence/memory"
@@ -268,11 +269,113 @@ func TestServiceCreatePurchaseOrderFailsForUnknownSupplier(t *testing.T) {
 	}
 }
 
+func TestServiceReceivesApprovedPurchaseOrderIntoInventory(t *testing.T) {
+	ctx := context.Background()
+	svc := newTestService()
+	approvedOrder := createApprovedOrder(t, ctx, svc)
+
+	receipt, ledgerEntries, receivedOrder, err := svc.ReceivePurchaseOrder(ctx, ReceivePurchaseOrderInput{
+		TenantID:        "tenant-a",
+		ActorID:         "receiver-a",
+		PurchaseOrderID: approvedOrder.ID,
+		Lines: []ReceivePurchaseOrderLine{{
+			ProductID: approvedOrder.Lines[0].ProductID,
+			Quantity:  approvedOrder.Lines[0].Quantity,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("receive purchase order: %v", err)
+	}
+
+	if receipt.Status != inventory.ReceiptStatusPosted {
+		t.Fatalf("expected posted receipt, got %s", receipt.Status)
+	}
+
+	if receivedOrder.Status != procurement.PurchaseOrderStatusReceived {
+		t.Fatalf("expected received order, got %s", receivedOrder.Status)
+	}
+
+	if len(ledgerEntries) != 1 {
+		t.Fatalf("expected 1 ledger entry, got %d", len(ledgerEntries))
+	}
+
+	if ledgerEntries[0].QuantityDelta != approvedOrder.Lines[0].Quantity {
+		t.Fatalf("expected quantity delta %d, got %d", approvedOrder.Lines[0].Quantity, ledgerEntries[0].QuantityDelta)
+	}
+}
+
+func TestServiceReturnsInventoryBalanceFromPostedReceipts(t *testing.T) {
+	ctx := context.Background()
+	svc := newTestService()
+	approvedOrder := createApprovedOrder(t, ctx, svc)
+
+	_, _, _, err := svc.ReceivePurchaseOrder(ctx, ReceivePurchaseOrderInput{
+		TenantID:        "tenant-a",
+		ActorID:         "receiver-a",
+		PurchaseOrderID: approvedOrder.ID,
+		Lines: []ReceivePurchaseOrderLine{{
+			ProductID: approvedOrder.Lines[0].ProductID,
+			Quantity:  approvedOrder.Lines[0].Quantity,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("receive purchase order: %v", err)
+	}
+
+	balance, err := svc.GetInventoryBalance(ctx, GetInventoryBalanceInput{
+		TenantID:    "tenant-a",
+		ProductID:   approvedOrder.Lines[0].ProductID,
+		WarehouseID: approvedOrder.WarehouseID,
+	})
+	if err != nil {
+		t.Fatalf("get inventory balance: %v", err)
+	}
+
+	if balance.OnHand != approvedOrder.Lines[0].Quantity {
+		t.Fatalf("expected on hand %d, got %d", approvedOrder.Lines[0].Quantity, balance.OnHand)
+	}
+}
+
+func TestServiceReceivePurchaseOrderFailsWhenOrderNotApproved(t *testing.T) {
+	ctx := context.Background()
+	svc := newTestService()
+	order, _ := createSubmittedOrder(t, ctx, svc)
+
+	_, _, _, err := svc.ReceivePurchaseOrder(ctx, ReceivePurchaseOrderInput{
+		TenantID:        "tenant-a",
+		ActorID:         "receiver-a",
+		PurchaseOrderID: order.ID,
+		Lines: []ReceivePurchaseOrderLine{{
+			ProductID: order.Lines[0].ProductID,
+			Quantity:  order.Lines[0].Quantity,
+		}},
+	})
+	if !errors.Is(err, procurement.ErrPurchaseOrderNotReceivable) {
+		t.Fatalf("expected purchase order not receivable, got %v", err)
+	}
+}
+
+func TestServiceReceivePurchaseOrderFailsForEmptyLines(t *testing.T) {
+	ctx := context.Background()
+	svc := newTestService()
+	approvedOrder := createApprovedOrder(t, ctx, svc)
+
+	_, _, _, err := svc.ReceivePurchaseOrder(ctx, ReceivePurchaseOrderInput{
+		TenantID:        "tenant-a",
+		ActorID:         "receiver-a",
+		PurchaseOrderID: approvedOrder.ID,
+	})
+	if !errors.Is(err, inventory.ErrInvalidReceipt) {
+		t.Fatalf("expected invalid receipt, got %v", err)
+	}
+}
+
 func newTestService() *Service {
 	return NewService(ServiceDeps{
 		MasterData:     memory.NewMasterDataRepository(),
 		PurchaseOrders: memory.NewPurchaseOrderRepository(),
 		Approvals:      memory.NewApprovalRepository(),
+		Inventory:      memory.NewInventoryRepository(),
 		Pipeline:       shared.NewPipeline(shared.PipelineDeps{}),
 	})
 }
@@ -306,6 +409,21 @@ func createSubmittedOrder(t *testing.T, ctx context.Context, svc *Service) (proc
 	}
 
 	return submittedOrder, approvalRequest
+}
+
+func createApprovedOrder(t *testing.T, ctx context.Context, svc *Service) procurement.PurchaseOrder {
+	t.Helper()
+
+	_, approvalRequest := createSubmittedOrder(t, ctx, svc)
+	approvedOrder, _, err := svc.ApproveRequest(ctx, ResolveApprovalInput{
+		TenantID:   "tenant-a",
+		ActorID:    "manager-a",
+		ApprovalID: approvalRequest.ID,
+	})
+	if err != nil {
+		t.Fatalf("approve request: %v", err)
+	}
+	return approvedOrder
 }
 
 func createMasterData(t *testing.T, ctx context.Context, svc *Service) (masterdata.Supplier, masterdata.Product, masterdata.Warehouse) {

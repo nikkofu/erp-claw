@@ -7,6 +7,7 @@ import (
 
 	"github.com/nikkofu/erp-claw/internal/application/shared"
 	"github.com/nikkofu/erp-claw/internal/domain/approval"
+	"github.com/nikkofu/erp-claw/internal/domain/inventory"
 	"github.com/nikkofu/erp-claw/internal/domain/masterdata"
 	"github.com/nikkofu/erp-claw/internal/domain/procurement"
 )
@@ -15,6 +16,7 @@ type ServiceDeps struct {
 	MasterData     masterdata.Repository
 	PurchaseOrders procurement.Repository
 	Approvals      approval.Repository
+	Inventory      inventory.Repository
 	Pipeline       *shared.Pipeline
 }
 
@@ -22,6 +24,7 @@ type Service struct {
 	masterData     masterdata.Repository
 	purchaseOrders procurement.Repository
 	approvals      approval.Repository
+	inventory      inventory.Repository
 	pipeline       *shared.Pipeline
 }
 
@@ -35,6 +38,7 @@ func NewService(deps ServiceDeps) *Service {
 		masterData:     deps.MasterData,
 		purchaseOrders: deps.PurchaseOrders,
 		approvals:      deps.Approvals,
+		inventory:      deps.Inventory,
 		pipeline:       deps.Pipeline,
 	}
 }
@@ -211,6 +215,85 @@ func (s *Service) GetPurchaseOrder(ctx context.Context, tenantID, orderID string
 	return order, request, nil
 }
 
+func (s *Service) ReceivePurchaseOrder(ctx context.Context, input ReceivePurchaseOrderInput) (inventory.Receipt, []inventory.LedgerEntry, procurement.PurchaseOrder, error) {
+	var (
+		receipt       inventory.Receipt
+		ledgerEntries []inventory.LedgerEntry
+		order         procurement.PurchaseOrder
+	)
+	err := s.pipeline.Execute(ctx, shared.Command{
+		Name:     "procurement.purchase_orders.receive",
+		TenantID: input.TenantID,
+		ActorID:  input.ActorID,
+		Payload:  input,
+	}, func(txCtx context.Context, _ shared.Command) error {
+		currentOrder, err := s.purchaseOrders.Get(txCtx, input.TenantID, input.PurchaseOrderID)
+		if err != nil {
+			return err
+		}
+
+		receiptLines := make([]inventory.ReceiptLine, 0, len(input.Lines))
+		for _, line := range input.Lines {
+			receiptLines = append(receiptLines, inventory.ReceiptLine{
+				ProductID: line.ProductID,
+				Quantity:  line.Quantity,
+			})
+		}
+		if err := validateReceiptLinesAgainstOrder(receiptLines, currentOrder.Lines); err != nil {
+			return err
+		}
+
+		createdReceipt, err := inventory.NewReceipt(nextID("rcv"), input.TenantID, currentOrder.ID, currentOrder.WarehouseID, input.ActorID, receiptLines)
+		if err != nil {
+			return err
+		}
+
+		createdEntries := make([]inventory.LedgerEntry, 0, len(receiptLines))
+		for _, line := range receiptLines {
+			entry, err := inventory.NewInboundLedgerEntry(nextID("led"), input.TenantID, line.ProductID, currentOrder.WarehouseID, "receipt", createdReceipt.ID, line.Quantity)
+			if err != nil {
+				return err
+			}
+			createdEntries = append(createdEntries, entry)
+		}
+
+		if err := currentOrder.MarkReceived(); err != nil {
+			return err
+		}
+		if err := s.purchaseOrders.Save(txCtx, currentOrder); err != nil {
+			return err
+		}
+		if err := s.inventory.SaveReceipt(txCtx, createdReceipt); err != nil {
+			return err
+		}
+		if err := s.inventory.AppendLedgerEntries(txCtx, createdEntries); err != nil {
+			return err
+		}
+
+		receipt = createdReceipt
+		ledgerEntries = createdEntries
+		order = currentOrder
+		return nil
+	})
+	return receipt, ledgerEntries, order, err
+}
+
+func (s *Service) GetInventoryBalance(ctx context.Context, input GetInventoryBalanceInput) (inventory.Balance, error) {
+	entries, err := s.inventory.ListLedgerEntries(ctx, input.TenantID, input.ProductID, input.WarehouseID)
+	if err != nil {
+		return inventory.Balance{}, err
+	}
+	balance := inventory.Balance{
+		TenantID:    input.TenantID,
+		ProductID:   input.ProductID,
+		WarehouseID: input.WarehouseID,
+	}
+	for _, entry := range entries {
+		balance.OnHand += entry.QuantityDelta
+	}
+	return balance, nil
+}
+
 func (s *Service) resolveRequest(
 	ctx context.Context,
 	input ResolveApprovalInput,
@@ -258,4 +341,28 @@ func (s *Service) resolveRequest(
 
 func nextID(prefix string) string {
 	return fmt.Sprintf("%s-%06d", prefix, ids.Add(1))
+}
+
+func validateReceiptLinesAgainstOrder(receiptLines []inventory.ReceiptLine, orderLines []procurement.Line) error {
+	if _, err := inventory.NewReceipt("receipt-validation", "tenant-validation", "po-validation", "warehouse-validation", "actor-validation", receiptLines); err != nil {
+		return err
+	}
+	if len(receiptLines) != len(orderLines) {
+		return inventory.ErrInvalidReceipt
+	}
+
+	expected := make(map[string]int, len(orderLines))
+	for _, line := range orderLines {
+		expected[line.ProductID] += line.Quantity
+	}
+	for _, line := range receiptLines {
+		if expected[line.ProductID] != line.Quantity {
+			return inventory.ErrInvalidReceipt
+		}
+		delete(expected, line.ProductID)
+	}
+	if len(expected) > 0 {
+		return inventory.ErrInvalidReceipt
+	}
+	return nil
 }

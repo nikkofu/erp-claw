@@ -9,6 +9,7 @@ import (
 	"github.com/nikkofu/erp-claw/internal/application/shared"
 	"github.com/nikkofu/erp-claw/internal/bootstrap"
 	"github.com/nikkofu/erp-claw/internal/domain/approval"
+	"github.com/nikkofu/erp-claw/internal/domain/inventory"
 	"github.com/nikkofu/erp-claw/internal/domain/masterdata"
 	"github.com/nikkofu/erp-claw/internal/domain/procurement"
 	"github.com/nikkofu/erp-claw/internal/interfaces/http/presenter"
@@ -133,6 +134,34 @@ func registerAdminRoutes(rg *gin.RouterGroup, container *bootstrap.Container) {
 		presenter.OK(c, purchaseOrderDetailResponse(order, request))
 	})
 
+	procurementGroup.POST("/:id/receive", func(c *gin.Context) {
+		var req receivePurchaseOrderRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			presenter.Error(c, http.StatusBadRequest, err.Error())
+			return
+		}
+
+		lines := make([]supplychain.ReceivePurchaseOrderLine, 0, len(req.Lines))
+		for _, line := range req.Lines {
+			lines = append(lines, supplychain.ReceivePurchaseOrderLine{
+				ProductID: line.ProductID,
+				Quantity:  line.Quantity,
+			})
+		}
+
+		receipt, ledgerEntries, order, err := container.SupplyChain.ReceivePurchaseOrder(c.Request.Context(), supplychain.ReceivePurchaseOrderInput{
+			TenantID:        tenantIDFromContext(c),
+			ActorID:         actorIDFromContext(c),
+			PurchaseOrderID: c.Param("id"),
+			Lines:           lines,
+		})
+		if err != nil {
+			renderSupplyChainError(c, err)
+			return
+		}
+		presenter.OK(c, purchaseOrderReceiptResponse(receipt, ledgerEntries, order))
+	})
+
 	approvalGroup := rg.Group("/approvals")
 	approvalGroup.POST("/:id/approve", func(c *gin.Context) {
 		order, request, err := container.SupplyChain.ApproveRequest(c.Request.Context(), supplychain.ResolveApprovalInput{
@@ -158,6 +187,20 @@ func registerAdminRoutes(rg *gin.RouterGroup, container *bootstrap.Container) {
 			return
 		}
 		presenter.OK(c, purchaseOrderDetailResponse(order, request))
+	})
+
+	inventoryGroup := rg.Group("/inventory")
+	inventoryGroup.GET("/balances", func(c *gin.Context) {
+		balance, err := container.SupplyChain.GetInventoryBalance(c.Request.Context(), supplychain.GetInventoryBalanceInput{
+			TenantID:    tenantIDFromContext(c),
+			ProductID:   c.Query("product_id"),
+			WarehouseID: c.Query("warehouse_id"),
+		})
+		if err != nil {
+			renderSupplyChainError(c, err)
+			return
+		}
+		presenter.OK(c, inventoryBalanceResponse(balance))
 	})
 }
 
@@ -188,6 +231,15 @@ type createPurchaseOrderLineRequest struct {
 	Quantity  int    `json:"quantity"`
 }
 
+type receivePurchaseOrderRequest struct {
+	Lines []receivePurchaseOrderLineRequest `json:"lines"`
+}
+
+type receivePurchaseOrderLineRequest struct {
+	ProductID string `json:"product_id"`
+	Quantity  int    `json:"quantity"`
+}
+
 func tenantIDFromContext(c *gin.Context) string {
 	return c.GetString("tenant_id")
 }
@@ -207,8 +259,10 @@ func renderSupplyChainError(c *gin.Context, err error) {
 	case errors.Is(err, masterdata.ErrInvalidSupplier),
 		errors.Is(err, masterdata.ErrInvalidProduct),
 		errors.Is(err, masterdata.ErrInvalidWarehouse),
+		errors.Is(err, inventory.ErrInvalidReceipt),
 		errors.Is(err, procurement.ErrInvalidPurchaseOrder),
 		errors.Is(err, procurement.ErrPurchaseOrderAlreadySubmitted),
+		errors.Is(err, procurement.ErrPurchaseOrderNotReceivable),
 		errors.Is(err, approval.ErrInvalidRequest),
 		errors.Is(err, approval.ErrApprovalNotPending):
 		presenter.Error(c, http.StatusBadRequest, err.Error())
@@ -287,5 +341,58 @@ func purchaseOrderDetailResponse(order procurement.PurchaseOrder, request approv
 	return gin.H{
 		"order":    purchaseOrderResponse(order),
 		"approval": approvalResponse(request),
+	}
+}
+
+func receiptResponse(receipt inventory.Receipt) gin.H {
+	lines := make([]gin.H, 0, len(receipt.Lines))
+	for _, line := range receipt.Lines {
+		lines = append(lines, gin.H{
+			"product_id": line.ProductID,
+			"quantity":   line.Quantity,
+		})
+	}
+	return gin.H{
+		"id":                receipt.ID,
+		"tenant_id":         receipt.TenantID,
+		"purchase_order_id": receipt.PurchaseOrderID,
+		"warehouse_id":      receipt.WarehouseID,
+		"status":            receipt.Status,
+		"created_by":        receipt.CreatedBy,
+		"lines":             lines,
+	}
+}
+
+func ledgerEntriesResponse(entries []inventory.LedgerEntry) []gin.H {
+	out := make([]gin.H, 0, len(entries))
+	for _, entry := range entries {
+		out = append(out, gin.H{
+			"id":             entry.ID,
+			"tenant_id":      entry.TenantID,
+			"product_id":     entry.ProductID,
+			"warehouse_id":   entry.WarehouseID,
+			"movement_type":  entry.MovementType,
+			"quantity_delta": entry.QuantityDelta,
+			"reference_type": entry.ReferenceType,
+			"reference_id":   entry.ReferenceID,
+		})
+	}
+	return out
+}
+
+func purchaseOrderReceiptResponse(receipt inventory.Receipt, entries []inventory.LedgerEntry, order procurement.PurchaseOrder) gin.H {
+	return gin.H{
+		"receipt":        receiptResponse(receipt),
+		"ledger_entries": ledgerEntriesResponse(entries),
+		"order":          purchaseOrderResponse(order),
+	}
+}
+
+func inventoryBalanceResponse(balance inventory.Balance) gin.H {
+	return gin.H{
+		"tenant_id":    balance.TenantID,
+		"product_id":   balance.ProductID,
+		"warehouse_id": balance.WarehouseID,
+		"on_hand":      balance.OnHand,
 	}
 }

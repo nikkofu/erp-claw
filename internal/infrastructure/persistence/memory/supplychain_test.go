@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/nikkofu/erp-claw/internal/domain/inventory"
 	"github.com/nikkofu/erp-claw/internal/domain/procurement"
 )
 
@@ -69,5 +70,32 @@ func TestPurchaseOrderRepositorySaveDetachesCallerSlice(t *testing.T) {
 	}
 	if reloaded.Lines[0].Quantity != 5 {
 		t.Fatalf("expected stored quantity 5, got %d", reloaded.Lines[0].Quantity)
+	}
+}
+
+func TestInventoryRepositoryListLedgerEntriesReturnsDetachedCopy(t *testing.T) {
+	ctx := context.Background()
+	repo := NewSupplyChainStore().InventoryRepository()
+
+	entry, err := inventory.NewInboundLedgerEntry("led-001", "tenant-a", "prd-001", "wh-001", "receipt", "rcv-001", 5)
+	if err != nil {
+		t.Fatalf("new ledger entry: %v", err)
+	}
+	if err := repo.AppendLedgerEntries(ctx, []inventory.LedgerEntry{entry}); err != nil {
+		t.Fatalf("append ledger entries: %v", err)
+	}
+
+	got, err := repo.ListLedgerEntries(ctx, "tenant-a", "prd-001", "wh-001")
+	if err != nil {
+		t.Fatalf("list ledger entries: %v", err)
+	}
+	got[0].QuantityDelta = 99
+
+	reloaded, err := repo.ListLedgerEntries(ctx, "tenant-a", "prd-001", "wh-001")
+	if err != nil {
+		t.Fatalf("reload ledger entries: %v", err)
+	}
+	if reloaded[0].QuantityDelta != 5 {
+		t.Fatalf("expected stored quantity delta 5, got %d", reloaded[0].QuantityDelta)
 	}
 }
