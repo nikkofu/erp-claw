@@ -40,8 +40,23 @@ func registerWorkspaceRoutes(rg *gin.RouterGroup, container *bootstrap.Container
 
 	salesGroup := rg.Group("/sales-orders")
 	salesGroup.GET("", func(c *gin.Context) {
+		page, err := parsePositiveSalesOrderQueryInt(c.Query("page"), 1)
+		if err != nil {
+			renderSupplyChainError(c, err)
+			return
+		}
+		pageSize, err := parsePositiveSalesOrderQueryInt(c.Query("page_size"), 20)
+		if err != nil {
+			renderSupplyChainError(c, err)
+			return
+		}
+
 		orders, err := container.SupplyChain.ListSalesOrders(c.Request.Context(), supplychain.ListSalesOrdersInput{
 			TenantID: tenantIDFromContext(c),
+			Status:   c.Query("status"),
+			Sort:     c.DefaultQuery("sort", "id_desc"),
+			Page:     page,
+			PageSize: pageSize,
 		})
 		if err != nil {
 			renderSupplyChainError(c, err)
