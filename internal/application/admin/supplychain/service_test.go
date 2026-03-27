@@ -790,6 +790,146 @@ func TestServiceExecuteTransferOrderFailsWhenAlreadyExecuted(t *testing.T) {
 	}
 }
 
+func TestServiceListTransferOrdersSupportsStatusSortAndPagination(t *testing.T) {
+	ctx := context.Background()
+	svc := newTestService()
+	receivedOrder := createReceivedOrder(t, ctx, svc)
+
+	warehouseA, err := svc.CreateWarehouse(ctx, CreateWarehouseInput{
+		TenantID: "tenant-a",
+		ActorID:  "actor-a",
+		Code:     "WH-LIST-A",
+		Name:     "Warehouse List A",
+	})
+	if err != nil {
+		t.Fatalf("create warehouse A: %v", err)
+	}
+	warehouseB, err := svc.CreateWarehouse(ctx, CreateWarehouseInput{
+		TenantID: "tenant-a",
+		ActorID:  "actor-a",
+		Code:     "WH-LIST-B",
+		Name:     "Warehouse List B",
+	})
+	if err != nil {
+		t.Fatalf("create warehouse B: %v", err)
+	}
+	warehouseC, err := svc.CreateWarehouse(ctx, CreateWarehouseInput{
+		TenantID: "tenant-a",
+		ActorID:  "actor-a",
+		Code:     "WH-LIST-C",
+		Name:     "Warehouse List C",
+	})
+	if err != nil {
+		t.Fatalf("create warehouse C: %v", err)
+	}
+
+	orderA, err := svc.CreateTransferOrder(ctx, CreateTransferOrderInput{
+		TenantID:        "tenant-a",
+		ActorID:         "planner-a",
+		ProductID:       receivedOrder.Lines[0].ProductID,
+		FromWarehouseID: receivedOrder.WarehouseID,
+		ToWarehouseID:   warehouseA.ID,
+		Quantity:        1,
+	})
+	if err != nil {
+		t.Fatalf("create transfer order A: %v", err)
+	}
+	orderB, err := svc.CreateTransferOrder(ctx, CreateTransferOrderInput{
+		TenantID:        "tenant-a",
+		ActorID:         "planner-a",
+		ProductID:       receivedOrder.Lines[0].ProductID,
+		FromWarehouseID: receivedOrder.WarehouseID,
+		ToWarehouseID:   warehouseB.ID,
+		Quantity:        1,
+	})
+	if err != nil {
+		t.Fatalf("create transfer order B: %v", err)
+	}
+	orderC, err := svc.CreateTransferOrder(ctx, CreateTransferOrderInput{
+		TenantID:        "tenant-a",
+		ActorID:         "planner-a",
+		ProductID:       receivedOrder.Lines[0].ProductID,
+		FromWarehouseID: receivedOrder.WarehouseID,
+		ToWarehouseID:   warehouseC.ID,
+		Quantity:        1,
+	})
+	if err != nil {
+		t.Fatalf("create transfer order C: %v", err)
+	}
+
+	if _, _, err := svc.ExecuteTransferOrder(ctx, ExecuteTransferOrderInput{
+		TenantID:        "tenant-a",
+		ActorID:         "warehouse-a",
+		TransferOrderID: orderB.ID,
+	}); err != nil {
+		t.Fatalf("execute transfer order B: %v", err)
+	}
+
+	page1, err := svc.ListTransferOrders(ctx, ListTransferOrdersInput{
+		TenantID: "tenant-a",
+		Status:   string(inventory.TransferOrderStatusPlanned),
+		Sort:     "id_asc",
+		Page:     1,
+		PageSize: 1,
+	})
+	if err != nil {
+		t.Fatalf("list transfer orders page 1: %v", err)
+	}
+	if len(page1) != 1 {
+		t.Fatalf("expected 1 planned order on page1, got %d", len(page1))
+	}
+	if page1[0].ID != orderA.ID {
+		t.Fatalf("expected first planned order %s, got %s", orderA.ID, page1[0].ID)
+	}
+
+	page2, err := svc.ListTransferOrders(ctx, ListTransferOrdersInput{
+		TenantID: "tenant-a",
+		Status:   string(inventory.TransferOrderStatusPlanned),
+		Sort:     "id_asc",
+		Page:     2,
+		PageSize: 1,
+	})
+	if err != nil {
+		t.Fatalf("list transfer orders page 2: %v", err)
+	}
+	if len(page2) != 1 {
+		t.Fatalf("expected 1 planned order on page2, got %d", len(page2))
+	}
+	if page2[0].ID != orderC.ID {
+		t.Fatalf("expected second planned order %s, got %s", orderC.ID, page2[0].ID)
+	}
+
+	executed, err := svc.ListTransferOrders(ctx, ListTransferOrdersInput{
+		TenantID: "tenant-a",
+		Status:   string(inventory.TransferOrderStatusExecuted),
+		Sort:     "id_desc",
+		Page:     1,
+		PageSize: 10,
+	})
+	if err != nil {
+		t.Fatalf("list executed transfer orders: %v", err)
+	}
+	if len(executed) != 1 {
+		t.Fatalf("expected 1 executed transfer order, got %d", len(executed))
+	}
+	if executed[0].ID != orderB.ID {
+		t.Fatalf("expected executed transfer order %s, got %s", orderB.ID, executed[0].ID)
+	}
+}
+
+func TestServiceListTransferOrdersFailsForInvalidQuery(t *testing.T) {
+	ctx := context.Background()
+	svc := newTestService()
+
+	_, err := svc.ListTransferOrders(ctx, ListTransferOrdersInput{
+		TenantID: "tenant-a",
+		Sort:     "unknown",
+	})
+	if !errors.Is(err, inventory.ErrInvalidTransferOrderQuery) {
+		t.Fatalf("expected invalid transfer order query, got %v", err)
+	}
+}
+
 func TestServiceListsInventoryLedgerEntriesForWarehouseProduct(t *testing.T) {
 	ctx := context.Background()
 	svc := newTestService()
