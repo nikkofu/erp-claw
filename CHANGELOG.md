@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.2.22] - 2026-03-27
+## [0.2.23] - 2026-03-27
 
 ### Added
 
@@ -16,6 +16,12 @@ All notable changes to this project will be documented in this file.
 ### Changed
 
 - `docs/phase-1-coverage-status.md` now reflects outbox progression from placeholder loop to minimal executable processing path.
+
+## [0.2.22] - 2026-03-27
+
+### Added
+
+- Phase 2 mainline merge #9 baseline on top of `origin/main`.
 
 ## [0.2.21] - 2026-03-27
 
