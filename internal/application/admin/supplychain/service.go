@@ -294,6 +294,9 @@ func (s *Service) ReceivePurchaseOrder(ctx context.Context, input ReceivePurchas
 }
 
 func (s *Service) GetInventoryBalance(ctx context.Context, input GetInventoryBalanceInput) (inventory.Balance, error) {
+	if err := validateInventoryQuery(input.TenantID, input.ProductID, input.WarehouseID); err != nil {
+		return inventory.Balance{}, err
+	}
 	entries, err := s.inventory.ListLedgerEntries(ctx, input.TenantID, input.ProductID, input.WarehouseID)
 	if err != nil {
 		return inventory.Balance{}, err
@@ -321,6 +324,9 @@ func (s *Service) GetInventoryBalance(ctx context.Context, input GetInventoryBal
 }
 
 func (s *Service) ListInventoryLedger(ctx context.Context, input ListInventoryLedgerInput) ([]inventory.LedgerEntry, error) {
+	if err := validateInventoryQuery(input.TenantID, input.ProductID, input.WarehouseID); err != nil {
+		return nil, err
+	}
 	return s.inventory.ListLedgerEntries(ctx, input.TenantID, input.ProductID, input.WarehouseID)
 }
 
@@ -994,22 +1000,32 @@ func validateReceiptLinesAgainstOrder(receiptLines []inventory.ReceiptLine, orde
 	if _, err := inventory.NewReceipt("receipt-validation", "tenant-validation", "po-validation", "warehouse-validation", "actor-validation", receiptLines); err != nil {
 		return err
 	}
-	if len(receiptLines) != len(orderLines) {
-		return inventory.ErrInvalidReceipt
-	}
-
 	expected := make(map[string]int, len(orderLines))
 	for _, line := range orderLines {
-		expected[line.ProductID] += line.Quantity
+		expected[strings.TrimSpace(line.ProductID)] += line.Quantity
 	}
+
+	received := make(map[string]int, len(receiptLines))
 	for _, line := range receiptLines {
-		if expected[line.ProductID] != line.Quantity {
+		received[strings.TrimSpace(line.ProductID)] += line.Quantity
+	}
+
+	for productID, quantity := range expected {
+		if received[productID] != quantity {
 			return inventory.ErrInvalidReceipt
 		}
-		delete(expected, line.ProductID)
 	}
-	if len(expected) > 0 {
-		return inventory.ErrInvalidReceipt
+	for productID := range received {
+		if _, ok := expected[productID]; !ok {
+			return inventory.ErrInvalidReceipt
+		}
+	}
+	return nil
+}
+
+func validateInventoryQuery(tenantID, productID, warehouseID string) error {
+	if strings.TrimSpace(tenantID) == "" || strings.TrimSpace(productID) == "" || strings.TrimSpace(warehouseID) == "" {
+		return inventory.ErrInvalidInventoryQuery
 	}
 	return nil
 }

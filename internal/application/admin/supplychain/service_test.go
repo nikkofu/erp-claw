@@ -307,6 +307,81 @@ func TestServiceReceivesApprovedPurchaseOrderIntoInventory(t *testing.T) {
 	}
 }
 
+func TestServiceReceivesApprovedPurchaseOrderWithDuplicateProductLines(t *testing.T) {
+	ctx := context.Background()
+	svc := newTestService()
+	supplier, product, warehouse := createMasterData(t, ctx, svc)
+
+	order, err := svc.CreatePurchaseOrder(ctx, CreatePurchaseOrderInput{
+		TenantID:    "tenant-a",
+		ActorID:     "actor-a",
+		SupplierID:  supplier.ID,
+		WarehouseID: warehouse.ID,
+		Lines: []CreatePurchaseOrderLine{
+			{
+				ProductID: product.ID,
+				Quantity:  2,
+			},
+			{
+				ProductID: product.ID,
+				Quantity:  3,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("create purchase order: %v", err)
+	}
+
+	submittedOrder, approvalRequest, err := svc.SubmitPurchaseOrder(ctx, SubmitPurchaseOrderInput{
+		TenantID:        "tenant-a",
+		ActorID:         "actor-a",
+		PurchaseOrderID: order.ID,
+	})
+	if err != nil {
+		t.Fatalf("submit purchase order: %v", err)
+	}
+	if submittedOrder.Status != procurement.PurchaseOrderStatusPendingApproval {
+		t.Fatalf("expected pending_approval order, got %s", submittedOrder.Status)
+	}
+
+	approvedOrder, _, err := svc.ApproveRequest(ctx, ResolveApprovalInput{
+		TenantID:   "tenant-a",
+		ActorID:    "manager-a",
+		ApprovalID: approvalRequest.ID,
+	})
+	if err != nil {
+		t.Fatalf("approve purchase order: %v", err)
+	}
+	if approvedOrder.Status != procurement.PurchaseOrderStatusApproved {
+		t.Fatalf("expected approved order, got %s", approvedOrder.Status)
+	}
+
+	receipt, ledgerEntries, receivedOrder, err := svc.ReceivePurchaseOrder(ctx, ReceivePurchaseOrderInput{
+		TenantID:        "tenant-a",
+		ActorID:         "receiver-a",
+		PurchaseOrderID: order.ID,
+		Lines: []ReceivePurchaseOrderLine{{
+			ProductID: product.ID,
+			Quantity:  5,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("receive purchase order: %v", err)
+	}
+	if receivedOrder.Status != procurement.PurchaseOrderStatusReceived {
+		t.Fatalf("expected received order, got %s", receivedOrder.Status)
+	}
+	if len(receipt.Lines) != 1 {
+		t.Fatalf("expected 1 receipt line, got %d", len(receipt.Lines))
+	}
+	if len(ledgerEntries) != 1 {
+		t.Fatalf("expected 1 ledger entry, got %d", len(ledgerEntries))
+	}
+	if ledgerEntries[0].QuantityDelta != 5 {
+		t.Fatalf("expected quantity delta 5, got %d", ledgerEntries[0].QuantityDelta)
+	}
+}
+
 func TestServiceReturnsInventoryBalanceFromPostedReceipts(t *testing.T) {
 	ctx := context.Background()
 	svc := newTestService()
