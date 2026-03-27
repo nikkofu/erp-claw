@@ -22,6 +22,7 @@ const (
 	defaultOutboxRetryDelay = 5 * time.Second
 	defaultOutboxMaxAttempt = 3
 	defaultOutboxLease      = 30 * time.Second
+	defaultOutboxDLQTopic   = "platform.outbox.dead_letter"
 )
 
 const claimReadyOutboxSQL = `
@@ -49,6 +50,18 @@ type outboxRecord struct {
 	EventType string
 	Payload   []byte
 	Attempts  int
+}
+
+type outboxDeadLetterPayload struct {
+	OutboxID   int64     `json:"outbox_id"`
+	TenantID   int64     `json:"tenant_id"`
+	Topic      string    `json:"topic"`
+	EventType  string    `json:"event_type"`
+	Payload    []byte    `json:"payload"`
+	Attempts   int       `json:"attempts"`
+	LastError  string    `json:"last_error"`
+	FailedAt   time.Time `json:"failed_at"`
+	OccurredAt time.Time `json:"occurred_at"`
 }
 
 type outboxStore interface {
@@ -277,6 +290,8 @@ func pollOutboxBatchWithStore(
 				failedAt := now.UTC()
 				if failErr := store.MarkFailed(ctx, rec.ID, nextAttempts, failedAt, lastError); failErr != nil {
 					err = fmt.Errorf("publish failed: %v; mark failed failed: %w", err, failErr)
+				} else if dlqErr := publishOutboxDeadLetter(ctx, bus, rec, nextAttempts, failedAt, lastError); dlqErr != nil {
+					err = fmt.Errorf("publish failed: %v; publish dead-letter failed: %w", err, dlqErr)
 				}
 				if firstErr == nil {
 					firstErr = fmt.Errorf("publish outbox id=%d permanently failed: %w", rec.ID, err)
@@ -303,4 +318,31 @@ func pollOutboxBatchWithStore(
 		return firstErr
 	}
 	return nil
+}
+
+func publishOutboxDeadLetter(
+	ctx context.Context,
+	bus eventbus.Bus,
+	rec outboxRecord,
+	attempts int,
+	failedAt time.Time,
+	lastError string,
+) error {
+	evt := eventbus.Event{
+		Topic:       defaultOutboxDLQTopic,
+		TenantID:    strconv.FormatInt(rec.TenantID, 10),
+		Correlation: fmt.Sprintf("outbox:%d:dead-letter", rec.ID),
+		Payload: outboxDeadLetterPayload{
+			OutboxID:   rec.ID,
+			TenantID:   rec.TenantID,
+			Topic:      rec.Topic,
+			EventType:  rec.EventType,
+			Payload:    rec.Payload,
+			Attempts:   attempts,
+			LastError:  lastError,
+			FailedAt:   failedAt.UTC(),
+			OccurredAt: time.Now().UTC(),
+		},
+	}
+	return bus.Publish(ctx, evt)
 }

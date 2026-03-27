@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.32] - 2026-03-27
+
+### Added
+
+- Worker now emits dead-letter events when outbox publish attempts are exhausted:
+  - after marking the record `failed`, emits `platform.outbox.dead_letter`
+  - dead-letter payload includes outbox identity, original topic/event type, payload bytes, attempts, error, and failed timestamp
+- Expanded worker outbox unit tests for terminal-failure dead-letter behavior:
+  - success path where dead-letter event is published
+  - fallback path where dead-letter publish also fails but outbox record still transitions to `failed`
+
+### Changed
+
+- `docs/phase-1-coverage-status.md` now records dead-letter publication as part of the outbox governance baseline.
+
 ## [0.2.31] - 2026-03-27
 
 ### Added

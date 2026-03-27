@@ -154,7 +154,7 @@ func TestPollOutboxBatchWithStoreRetriesWhenPublishFails(t *testing.T) {
 	}
 }
 
-func TestPollOutboxBatchWithStoreMarksFailedWhenAttemptsExhausted(t *testing.T) {
+func TestPollOutboxBatchWithStoreMarksFailedAndPublishesDeadLetterWhenAttemptsExhausted(t *testing.T) {
 	store := &fakeOutboxStore{
 		claimRecords: []outboxRecord{
 			{ID: 21, TenantID: 1004, Topic: "platform.task.failed.final", EventType: "task.failed", Payload: []byte(`{"x":4}`), Attempts: 2},
@@ -182,6 +182,63 @@ func TestPollOutboxBatchWithStoreMarksFailedWhenAttemptsExhausted(t *testing.T) 
 	}
 	if len(store.failedAts) != 1 || !store.failedAts[0].Equal(now) {
 		t.Fatalf("expected failedAt %s, got %v", now, store.failedAts)
+	}
+	if len(bus.published) != 1 {
+		t.Fatalf("expected one dead-letter event, got %d", len(bus.published))
+	}
+	if bus.published[0].Topic != defaultOutboxDLQTopic {
+		t.Fatalf("expected dead-letter topic %s, got %s", defaultOutboxDLQTopic, bus.published[0].Topic)
+	}
+	if bus.published[0].Correlation != "outbox:21:dead-letter" {
+		t.Fatalf("expected dead-letter correlation outbox:21:dead-letter, got %s", bus.published[0].Correlation)
+	}
+	payload, ok := bus.published[0].Payload.(outboxDeadLetterPayload)
+	if !ok {
+		t.Fatalf("expected dead-letter payload type %T, got %T", outboxDeadLetterPayload{}, bus.published[0].Payload)
+	}
+	if payload.OutboxID != 21 || payload.TenantID != 1004 {
+		t.Fatalf("unexpected dead-letter identity payload: %+v", payload)
+	}
+	if payload.Topic != "platform.task.failed.final" || payload.EventType != "task.failed" {
+		t.Fatalf("unexpected dead-letter routing payload: %+v", payload)
+	}
+	if payload.Attempts != 3 || payload.LastError != "nats down hard" {
+		t.Fatalf("unexpected dead-letter retry metadata: %+v", payload)
+	}
+	if !payload.FailedAt.Equal(now) {
+		t.Fatalf("expected dead-letter failedAt %s, got %s", now, payload.FailedAt)
+	}
+	if string(payload.Payload) != `{"x":4}` {
+		t.Fatalf("expected dead-letter payload body %s, got %s", `{"x":4}`, string(payload.Payload))
+	}
+	if payload.OccurredAt.IsZero() {
+		t.Fatal("expected dead-letter occurredAt to be set")
+	}
+}
+
+func TestPollOutboxBatchWithStoreStillMarksFailedWhenDeadLetterPublishFails(t *testing.T) {
+	store := &fakeOutboxStore{
+		claimRecords: []outboxRecord{
+			{ID: 22, TenantID: 1005, Topic: "platform.task.failed.final", EventType: "task.failed", Payload: []byte(`{"x":5}`), Attempts: 2},
+		},
+	}
+	bus := &fakeBus{
+		publishErrByTopic: map[string]error{
+			"platform.task.failed.final": errors.New("nats down hard"),
+			defaultOutboxDLQTopic:        errors.New("dlq down"),
+		},
+	}
+	now := time.Date(2026, 3, 27, 10, 6, 0, 0, time.UTC)
+
+	err := pollOutboxBatchWithStore(context.Background(), store, bus, now, 100, 5*time.Second, 3, 30*time.Second)
+	if err == nil {
+		t.Fatal("expected error when terminal publish failure and dead-letter publish failure occur")
+	}
+	if len(store.failedIDs) != 1 || store.failedIDs[0] != 22 {
+		t.Fatalf("expected failed ID [22], got %v", store.failedIDs)
+	}
+	if len(bus.published) != 0 {
+		t.Fatalf("expected no successful publish events, got %d", len(bus.published))
 	}
 }
 

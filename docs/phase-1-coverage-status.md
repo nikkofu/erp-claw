@@ -131,7 +131,7 @@
 | --- | --- | --- | --- | --- | --- |
 | Execution Plane | Command Pipeline | 命令进入应用处理器、策略前置、事务边界、审计记录 | P0 | 部分实现 | `internal/application/shared/pipeline.go`、`command.go`、`transaction.go`；当前只完成基础执行链路 |
 | Execution Plane | Event Bus | 内存总线、NATS JetStream 总线 | P0 | 已实现 | `internal/platform/eventbus/*` |
-| Execution Plane | Worker Runtime | 装配依赖、轮询 outbox 的后台进程骨架 | P0 | 部分实现 | `cmd/worker/main.go` 已实现 claim/publish/标记 published、失败回退 pending+delay、attempts 计数与阈值后 failed 终态，以及 `processing` 租约写入 `available_at` 的超时回收；DLQ 与消费幂等等治理仍待补齐。 |
+| Execution Plane | Worker Runtime | 装配依赖、轮询 outbox 的后台进程骨架 | P0 | 部分实现 | `cmd/worker/main.go` 已实现 claim/publish/标记 published、失败回退 pending+delay、attempts 计数与阈值后 failed 终态、`processing` 租约写入 `available_at` 的超时回收，以及终态失败后的 dead-letter 发布；消费幂等等治理仍待补齐。 |
 | Execution Plane | Scheduler Runtime | 定时 tick 产生时间驱动事件 | P0 | 部分实现 | `cmd/scheduler/main.go`；当前只发送 `platform.scheduler.tick` 骨架事件 |
 | Execution Plane | Agent Gateway Runtime | 工作台事件入口、会话 channel 注册、进程生命周期 | P1 | 部分实现 | `cmd/agent-gateway/main.go`、`internal/interfaces/ws/workspace_gateway.go` |
 | Execution Plane | Session Context Assembler | tenant/actor/business/policy/knowledge/execution context 组装 | P1 | 部分实现 | `internal/platform/runtime/request_context.go` 只覆盖 request 级元数据，没有完整 session context assembler |
@@ -147,7 +147,7 @@
 | Data Plane | Redis seam | 客户端配置校验与构建 | P0 | 已实现 | `internal/infrastructure/cache/redis/client.go` |
 | Data Plane | NATS seam | 连接配置校验与构建 | P0 | 已实现 | `internal/infrastructure/messaging/nats/client.go` |
 | Data Plane | MinIO seam | 对象存储客户端配置校验与构建 | P0 | 已实现 | `internal/infrastructure/storage/minio/client.go` |
-| Data Plane | Outbox Pattern 基础 | 表结构、worker 轮询骨架、总线发布路径 | P1 | 部分实现 | `outbox` 表与 worker 发布路径已落地（pending -> processing -> published，失败回退 pending+available_at，attempts 计数与 failed 终态，并支持 `processing` 记录租约到期后回收再处理）；仍缺少 DLQ/inbox 幂等等完整治理。 |
+| Data Plane | Outbox Pattern 基础 | 表结构、worker 轮询骨架、总线发布路径 | P1 | 部分实现 | `outbox` 表与 worker 发布路径已落地（pending -> processing -> published，失败回退 pending+available_at，attempts 计数与 failed 终态，`processing` 租约到期回收再处理，以及终态失败 dead-letter 发布）；仍缺少 inbox 幂等等完整治理。 |
 | Data Plane | CQRS Read Models | Backoffice、Workspace、Monitoring、Analytics 读模型 | P1 | 仅设计 | 当前没有 projection、read service 或读模型表 |
 | Data Plane | Search / Vector Retrieval | PostgreSQL FTS、trigram、`pgvector` | P2 | 仅设计 | 设计已定义，当前迁移中没有相关扩展与索引结构 |
 | Integration Plane | 外部系统连接器 | webhook、ERP 外部系统、插件式连接器 | P2 | 仅设计 | 只有 `Integration API` 路由分组占位，没有 connector/runtime 实现 |
