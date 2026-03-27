@@ -47,6 +47,11 @@ type ResolveApprovalInput struct {
 	ApprovalID string
 }
 
+type ListApprovalRequestsInput struct {
+	TenantID string
+	Status   string
+}
+
 type ReceivePurchaseOrderLine struct {
 	ProductID string
 	Quantity  int

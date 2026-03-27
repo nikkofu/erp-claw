@@ -181,6 +181,17 @@ func registerAdminRoutes(rg *gin.RouterGroup, container *bootstrap.Container) {
 	})
 
 	approvalGroup := rg.Group("/approvals")
+	approvalGroup.GET("", func(c *gin.Context) {
+		requests, err := container.SupplyChain.ListApprovalRequests(c.Request.Context(), supplychain.ListApprovalRequestsInput{
+			TenantID: tenantIDFromContext(c),
+			Status:   c.Query("status"),
+		})
+		if err != nil {
+			renderSupplyChainError(c, err)
+			return
+		}
+		presenter.OK(c, approvalRequestsResponse(requests))
+	})
 	approvalGroup.POST("/:id/approve", func(c *gin.Context) {
 		order, request, err := container.SupplyChain.ApproveRequest(c.Request.Context(), supplychain.ResolveApprovalInput{
 			TenantID:   tenantIDFromContext(c),
@@ -671,6 +682,7 @@ func renderSupplyChainError(c *gin.Context, err error) {
 	case errors.Is(err, masterdata.ErrInvalidSupplier),
 		errors.Is(err, masterdata.ErrInvalidProduct),
 		errors.Is(err, masterdata.ErrInvalidWarehouse),
+		errors.Is(err, approval.ErrInvalidRequestQuery),
 		errors.Is(err, inventory.ErrInvalidInventoryQuery),
 		errors.Is(err, inventory.ErrInvalidReceipt),
 		errors.Is(err, inventory.ErrInvalidReservation),
@@ -761,6 +773,22 @@ func approvalResponse(request approval.Request) any {
 		"requested_by":  request.RequestedBy,
 		"decided_by":    request.DecidedBy,
 	}
+}
+
+func approvalRequestsResponse(requests []approval.Request) []gin.H {
+	out := make([]gin.H, 0, len(requests))
+	for _, request := range requests {
+		out = append(out, gin.H{
+			"id":            request.ID,
+			"tenant_id":     request.TenantID,
+			"resource_type": request.ResourceType,
+			"resource_id":   request.ResourceID,
+			"status":        request.Status,
+			"requested_by":  request.RequestedBy,
+			"decided_by":    request.DecidedBy,
+		})
+	}
+	return out
 }
 
 func purchaseOrderDetailResponse(order procurement.PurchaseOrder, request approval.Request) gin.H {

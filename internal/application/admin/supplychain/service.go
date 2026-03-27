@@ -230,6 +230,42 @@ func (s *Service) GetPurchaseOrder(ctx context.Context, tenantID, orderID string
 	return order, request, nil
 }
 
+func (s *Service) ListApprovalRequests(ctx context.Context, input ListApprovalRequestsInput) ([]approval.Request, error) {
+	tenantID := strings.TrimSpace(input.TenantID)
+	if tenantID == "" {
+		return nil, approval.ErrInvalidRequestQuery
+	}
+
+	statusFilter := strings.TrimSpace(input.Status)
+	if statusFilter != "" {
+		status := approval.Status(statusFilter)
+		switch status {
+		case approval.StatusPending, approval.StatusApproved, approval.StatusRejected:
+		default:
+			return nil, approval.ErrInvalidRequestQuery
+		}
+	}
+
+	requests, err := s.approvals.ListByTenant(ctx, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	if statusFilter != "" {
+		filtered := make([]approval.Request, 0, len(requests))
+		for _, request := range requests {
+			if string(request.Status) == statusFilter {
+				filtered = append(filtered, request)
+			}
+		}
+		requests = filtered
+	}
+
+	sort.Slice(requests, func(i, j int) bool {
+		return requests[i].ID > requests[j].ID
+	})
+	return requests, nil
+}
+
 func (s *Service) ReceivePurchaseOrder(ctx context.Context, input ReceivePurchaseOrderInput) (inventory.Receipt, []inventory.LedgerEntry, procurement.PurchaseOrder, error) {
 	var (
 		receipt       inventory.Receipt

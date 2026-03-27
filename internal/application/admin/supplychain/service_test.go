@@ -164,6 +164,63 @@ func TestServiceGetPurchaseOrderReturnsLinkedApproval(t *testing.T) {
 	}
 }
 
+func TestServiceListApprovalRequestsSupportsStatusFilter(t *testing.T) {
+	ctx := context.Background()
+	svc := newTestService()
+
+	_, pendingRequest := createSubmittedOrder(t, ctx, svc)
+	_, approvedRequest := createSubmittedOrder(t, ctx, svc)
+
+	if _, _, err := svc.ApproveRequest(ctx, ResolveApprovalInput{
+		TenantID:   approvedRequest.TenantID,
+		ActorID:    "manager-a",
+		ApprovalID: approvedRequest.ID,
+	}); err != nil {
+		t.Fatalf("approve request: %v", err)
+	}
+
+	pending, err := svc.ListApprovalRequests(ctx, ListApprovalRequestsInput{
+		TenantID: "tenant-a",
+		Status:   "pending",
+	})
+	if err != nil {
+		t.Fatalf("list pending approvals: %v", err)
+	}
+	if len(pending) != 1 {
+		t.Fatalf("expected 1 pending approval, got %d", len(pending))
+	}
+	if pending[0].ID != pendingRequest.ID {
+		t.Fatalf("expected pending approval id %s, got %s", pendingRequest.ID, pending[0].ID)
+	}
+
+	approved, err := svc.ListApprovalRequests(ctx, ListApprovalRequestsInput{
+		TenantID: "tenant-a",
+		Status:   "approved",
+	})
+	if err != nil {
+		t.Fatalf("list approved approvals: %v", err)
+	}
+	if len(approved) != 1 {
+		t.Fatalf("expected 1 approved approval, got %d", len(approved))
+	}
+	if approved[0].ID != approvedRequest.ID {
+		t.Fatalf("expected approved approval id %s, got %s", approvedRequest.ID, approved[0].ID)
+	}
+}
+
+func TestServiceListApprovalRequestsFailsForInvalidStatus(t *testing.T) {
+	ctx := context.Background()
+	svc := newTestService()
+
+	_, err := svc.ListApprovalRequests(ctx, ListApprovalRequestsInput{
+		TenantID: "tenant-a",
+		Status:   "invalid",
+	})
+	if !errors.Is(err, approval.ErrInvalidRequestQuery) {
+		t.Fatalf("expected invalid approval request query, got %v", err)
+	}
+}
+
 func TestServiceSubmitPurchaseOrderFailsForEmptyLines(t *testing.T) {
 	ctx := context.Background()
 	svc := newTestService()

@@ -174,6 +174,20 @@ func (r *approvalRepository) Get(_ context.Context, tenantID, requestID string) 
 	return request, nil
 }
 
+func (r *approvalRepository) ListByTenant(_ context.Context, tenantID string) ([]approval.Request, error) {
+	r.store.mu.RLock()
+	defer r.store.mu.RUnlock()
+
+	out := make([]approval.Request, 0)
+	prefix := tenantID + "/"
+	for k, request := range r.store.requests {
+		if strings.HasPrefix(k, prefix) {
+			out = append(out, request)
+		}
+	}
+	return out, nil
+}
+
 type inventoryRepository struct {
 	store *SupplyChainStore
 }
