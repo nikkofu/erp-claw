@@ -1482,6 +1482,121 @@ func TestServiceListsInventoryLedgerEntriesForWarehouseProduct(t *testing.T) {
 	}
 }
 
+func TestServiceListInventoryLedgerSupportsSortAndPagination(t *testing.T) {
+	ctx := context.Background()
+	svc := newTestService()
+	approvedOrder := createApprovedOrder(t, ctx, svc)
+
+	_, receiptEntries, _, err := svc.ReceivePurchaseOrder(ctx, ReceivePurchaseOrderInput{
+		TenantID:        "tenant-a",
+		ActorID:         "receiver-a",
+		PurchaseOrderID: approvedOrder.ID,
+		Lines: []ReceivePurchaseOrderLine{{
+			ProductID: approvedOrder.Lines[0].ProductID,
+			Quantity:  approvedOrder.Lines[0].Quantity,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("receive purchase order: %v", err)
+	}
+	outboundA, err := svc.IssueInventory(ctx, IssueInventoryInput{
+		TenantID:      "tenant-a",
+		ActorID:       "warehouse-a",
+		ProductID:     approvedOrder.Lines[0].ProductID,
+		WarehouseID:   approvedOrder.WarehouseID,
+		Quantity:      2,
+		ReferenceType: "shipment",
+		ReferenceID:   "shp-ledger-sort-001",
+	})
+	if err != nil {
+		t.Fatalf("issue inventory outboundA: %v", err)
+	}
+	outboundB, err := svc.IssueInventory(ctx, IssueInventoryInput{
+		TenantID:      "tenant-a",
+		ActorID:       "warehouse-a",
+		ProductID:     approvedOrder.Lines[0].ProductID,
+		WarehouseID:   approvedOrder.WarehouseID,
+		Quantity:      1,
+		ReferenceType: "shipment",
+		ReferenceID:   "shp-ledger-sort-002",
+	})
+	if err != nil {
+		t.Fatalf("issue inventory outboundB: %v", err)
+	}
+
+	ascPage1, err := svc.ListInventoryLedger(ctx, ListInventoryLedgerInput{
+		TenantID:    "tenant-a",
+		ProductID:   approvedOrder.Lines[0].ProductID,
+		WarehouseID: approvedOrder.WarehouseID,
+		Sort:        "id_asc",
+		Page:        1,
+		PageSize:    2,
+	})
+	if err != nil {
+		t.Fatalf("list inventory ledger asc page1: %v", err)
+	}
+	if len(ascPage1) != 2 {
+		t.Fatalf("expected 2 ledger entries in asc page1, got %d", len(ascPage1))
+	}
+	if ascPage1[0].ID != receiptEntries[0].ID || ascPage1[1].ID != outboundA.ID {
+		t.Fatalf("expected asc page1 ids [%s,%s], got [%s,%s]", receiptEntries[0].ID, outboundA.ID, ascPage1[0].ID, ascPage1[1].ID)
+	}
+
+	descPage1, err := svc.ListInventoryLedger(ctx, ListInventoryLedgerInput{
+		TenantID:    "tenant-a",
+		ProductID:   approvedOrder.Lines[0].ProductID,
+		WarehouseID: approvedOrder.WarehouseID,
+		Sort:        "id_desc",
+		Page:        1,
+		PageSize:    1,
+	})
+	if err != nil {
+		t.Fatalf("list inventory ledger desc page1: %v", err)
+	}
+	if len(descPage1) != 1 {
+		t.Fatalf("expected 1 ledger entry in desc page1, got %d", len(descPage1))
+	}
+	if descPage1[0].ID != outboundB.ID {
+		t.Fatalf("expected desc page1 id %s, got %s", outboundB.ID, descPage1[0].ID)
+	}
+}
+
+func TestServiceListInventoryLedgerFailsForInvalidQuery(t *testing.T) {
+	ctx := context.Background()
+	svc := newTestService()
+	approvedOrder := createApprovedOrder(t, ctx, svc)
+
+	_, err := svc.ListInventoryLedger(ctx, ListInventoryLedgerInput{
+		TenantID:    "tenant-a",
+		ProductID:   approvedOrder.Lines[0].ProductID,
+		WarehouseID: approvedOrder.WarehouseID,
+		Sort:        "unknown",
+	})
+	if !errors.Is(err, inventory.ErrInvalidInventoryQuery) {
+		t.Fatalf("expected invalid inventory query for sort, got %v", err)
+	}
+
+	_, err = svc.ListInventoryLedger(ctx, ListInventoryLedgerInput{
+		TenantID:    "tenant-a",
+		ProductID:   approvedOrder.Lines[0].ProductID,
+		WarehouseID: approvedOrder.WarehouseID,
+		Page:        -1,
+	})
+	if !errors.Is(err, inventory.ErrInvalidInventoryQuery) {
+		t.Fatalf("expected invalid inventory query for page, got %v", err)
+	}
+
+	_, err = svc.ListInventoryLedger(ctx, ListInventoryLedgerInput{
+		TenantID:    "tenant-a",
+		ProductID:   approvedOrder.Lines[0].ProductID,
+		WarehouseID: approvedOrder.WarehouseID,
+		PageSize:    -1,
+	})
+	if !errors.Is(err, inventory.ErrInvalidInventoryQuery) {
+		t.Fatalf("expected invalid inventory query for page_size, got %v", err)
+	}
+}
+
 func TestServiceCreatesAndShipsSalesOrder(t *testing.T) {
 	ctx := context.Background()
 	svc := newTestService()

@@ -26,10 +26,24 @@ func registerWorkspaceRoutes(rg *gin.RouterGroup, container *bootstrap.Container
 		presenter.OK(c, inventoryBalanceResponse(balance))
 	})
 	inventoryGroup.GET("/ledger", func(c *gin.Context) {
+		page, err := parsePositiveInventoryQueryInt(c.Query("page"), 1)
+		if err != nil {
+			renderSupplyChainError(c, err)
+			return
+		}
+		pageSize, err := parsePositiveInventoryQueryInt(c.Query("page_size"), 20)
+		if err != nil {
+			renderSupplyChainError(c, err)
+			return
+		}
+
 		entries, err := container.SupplyChain.ListInventoryLedger(c.Request.Context(), supplychain.ListInventoryLedgerInput{
 			TenantID:    tenantIDFromContext(c),
 			ProductID:   c.Query("product_id"),
 			WarehouseID: c.Query("warehouse_id"),
+			Sort:        c.DefaultQuery("sort", "id_asc"),
+			Page:        page,
+			PageSize:    pageSize,
 		})
 		if err != nil {
 			renderSupplyChainError(c, err)
