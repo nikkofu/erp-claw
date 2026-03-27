@@ -282,3 +282,67 @@ func cloneMap(source map[string]any) map[string]any {
 	}
 	return out
 }
+
+type controlPlaneSnapshot struct {
+	tenants     map[string]tenant.Tenant
+	actors      map[string]iam.Actor
+	sessions    map[string]platformruntime.Session
+	tasks       map[string]platformruntime.Task
+	sessionTask map[string][]string
+}
+
+func (s *ControlPlaneStore) snapshot() controlPlaneSnapshot {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	return controlPlaneSnapshot{
+		tenants:     cloneTenantMap(s.tenants),
+		actors:      cloneActorMap(s.actors),
+		sessions:    cloneSessionMap(s.sessions),
+		tasks:       cloneTaskMap(s.tasks),
+		sessionTask: cloneStringSliceMap(s.sessionTask),
+	}
+}
+
+func (s *ControlPlaneStore) restore(snapshot controlPlaneSnapshot) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.tenants = snapshot.tenants
+	s.actors = snapshot.actors
+	s.sessions = snapshot.sessions
+	s.tasks = snapshot.tasks
+	s.sessionTask = snapshot.sessionTask
+}
+
+func cloneTenantMap(source map[string]tenant.Tenant) map[string]tenant.Tenant {
+	out := make(map[string]tenant.Tenant, len(source))
+	for k, v := range source {
+		out[k] = v
+	}
+	return out
+}
+
+func cloneActorMap(source map[string]iam.Actor) map[string]iam.Actor {
+	out := make(map[string]iam.Actor, len(source))
+	for k, v := range source {
+		out[k] = cloneActor(v)
+	}
+	return out
+}
+
+func cloneSessionMap(source map[string]platformruntime.Session) map[string]platformruntime.Session {
+	out := make(map[string]platformruntime.Session, len(source))
+	for k, v := range source {
+		out[k] = cloneSession(v)
+	}
+	return out
+}
+
+func cloneTaskMap(source map[string]platformruntime.Task) map[string]platformruntime.Task {
+	out := make(map[string]platformruntime.Task, len(source))
+	for k, v := range source {
+		out[k] = cloneTask(v)
+	}
+	return out
+}

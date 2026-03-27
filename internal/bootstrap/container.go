@@ -64,8 +64,9 @@ func NewContainer(cfg Config) *Container {
 	)
 
 	pipeline := shared.NewPipeline(shared.PipelineDeps{
-		Policy: evaluator,
-		Audit:  auditRecorder,
+		Policy:       evaluator,
+		Transactions: memory.NewAtomicTransactionManager(supplyChainStore, controlPlaneStore),
+		Audit:        auditRecorder,
 	})
 
 	tenantCatalog := controlPlaneStore.TenantCatalog()
