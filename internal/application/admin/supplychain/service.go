@@ -275,13 +275,13 @@ func (s *Service) ReceivePurchaseOrder(ctx context.Context, input ReceivePurchas
 		if err := currentOrder.MarkReceived(); err != nil {
 			return err
 		}
-		if err := s.purchaseOrders.Save(txCtx, currentOrder); err != nil {
-			return err
-		}
 		if err := s.inventory.SaveReceipt(txCtx, createdReceipt); err != nil {
 			return err
 		}
 		if err := s.inventory.AppendLedgerEntries(txCtx, createdEntries); err != nil {
+			return err
+		}
+		if err := s.purchaseOrders.Save(txCtx, currentOrder); err != nil {
 			return err
 		}
 
