@@ -50,6 +50,9 @@ type ResolveApprovalInput struct {
 type ListApprovalRequestsInput struct {
 	TenantID string
 	Status   string
+	Sort     string
+	Page     int
+	PageSize int
 }
 
 type ReceivePurchaseOrderLine struct {

@@ -3,6 +3,7 @@ package supplychain
 import (
 	"context"
 	"errors"
+	"sort"
 	"testing"
 
 	"github.com/nikkofu/erp-claw/internal/application/shared"
@@ -218,6 +219,72 @@ func TestServiceListApprovalRequestsFailsForInvalidStatus(t *testing.T) {
 	})
 	if !errors.Is(err, approval.ErrInvalidRequestQuery) {
 		t.Fatalf("expected invalid approval request query, got %v", err)
+	}
+}
+
+func TestServiceListApprovalRequestsSupportsSortAndPagination(t *testing.T) {
+	ctx := context.Background()
+	svc := newTestService()
+
+	_, reqA := createSubmittedOrder(t, ctx, svc)
+	_, reqB := createSubmittedOrder(t, ctx, svc)
+	_, reqC := createSubmittedOrder(t, ctx, svc)
+
+	ids := []string{reqA.ID, reqB.ID, reqC.ID}
+	sort.Strings(ids)
+
+	page1, err := svc.ListApprovalRequests(ctx, ListApprovalRequestsInput{
+		TenantID: "tenant-a",
+		Sort:     "id_asc",
+		Page:     1,
+		PageSize: 2,
+	})
+	if err != nil {
+		t.Fatalf("list approvals page1: %v", err)
+	}
+	if len(page1) != 2 {
+		t.Fatalf("expected 2 approvals in page1, got %d", len(page1))
+	}
+	if page1[0].ID != ids[0] || page1[1].ID != ids[1] {
+		t.Fatalf("expected page1 ids [%s,%s], got [%s,%s]", ids[0], ids[1], page1[0].ID, page1[1].ID)
+	}
+
+	page2, err := svc.ListApprovalRequests(ctx, ListApprovalRequestsInput{
+		TenantID: "tenant-a",
+		Sort:     "id_asc",
+		Page:     2,
+		PageSize: 2,
+	})
+	if err != nil {
+		t.Fatalf("list approvals page2: %v", err)
+	}
+	if len(page2) != 1 {
+		t.Fatalf("expected 1 approval in page2, got %d", len(page2))
+	}
+	if page2[0].ID != ids[2] {
+		t.Fatalf("expected page2 id %s, got %s", ids[2], page2[0].ID)
+	}
+}
+
+func TestServiceListApprovalRequestsFailsForInvalidSortAndPagination(t *testing.T) {
+	ctx := context.Background()
+	svc := newTestService()
+
+	_, err := svc.ListApprovalRequests(ctx, ListApprovalRequestsInput{
+		TenantID: "tenant-a",
+		Sort:     "unknown",
+	})
+	if !errors.Is(err, approval.ErrInvalidRequestQuery) {
+		t.Fatalf("expected invalid approval request query for invalid sort, got %v", err)
+	}
+
+	_, err = svc.ListApprovalRequests(ctx, ListApprovalRequestsInput{
+		TenantID: "tenant-a",
+		Page:     -1,
+		PageSize: 10,
+	})
+	if !errors.Is(err, approval.ErrInvalidRequestQuery) {
+		t.Fatalf("expected invalid approval request query for invalid page, got %v", err)
 	}
 }
 

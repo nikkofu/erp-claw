@@ -260,10 +260,47 @@ func (s *Service) ListApprovalRequests(ctx context.Context, input ListApprovalRe
 		requests = filtered
 	}
 
-	sort.Slice(requests, func(i, j int) bool {
-		return requests[i].ID > requests[j].ID
-	})
-	return requests, nil
+	sortMode := strings.TrimSpace(input.Sort)
+	if sortMode == "" {
+		sortMode = "id_desc"
+	}
+	switch sortMode {
+	case "id_asc":
+		sort.Slice(requests, func(i, j int) bool {
+			return requests[i].ID < requests[j].ID
+		})
+	case "id_desc":
+		sort.Slice(requests, func(i, j int) bool {
+			return requests[i].ID > requests[j].ID
+		})
+	default:
+		return nil, approval.ErrInvalidRequestQuery
+	}
+
+	page := input.Page
+	if page == 0 {
+		page = 1
+	}
+	pageSize := input.PageSize
+	if pageSize == 0 {
+		pageSize = 20
+	}
+	if page < 1 || pageSize < 1 {
+		return nil, approval.ErrInvalidRequestQuery
+	}
+
+	start := (page - 1) * pageSize
+	if start >= len(requests) {
+		return []approval.Request{}, nil
+	}
+	end := start + pageSize
+	if end > len(requests) {
+		end = len(requests)
+	}
+
+	out := make([]approval.Request, 0, end-start)
+	out = append(out, requests[start:end]...)
+	return out, nil
 }
 
 func (s *Service) ReceivePurchaseOrder(ctx context.Context, input ReceivePurchaseOrderInput) (inventory.Receipt, []inventory.LedgerEntry, procurement.PurchaseOrder, error) {
