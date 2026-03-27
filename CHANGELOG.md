@@ -2,6 +2,26 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.38] - 2026-03-27
+
+### Added
+
+- Workspace finance list query endpoints now support sort/pagination and status filtering:
+  - `GET /api/workspace/v1/payables` supports `status=open`, `sort=id_asc|id_desc`, `page`, `page_size`
+  - `GET /api/workspace/v1/receivables` supports `status=open`, `sort=id_asc|id_desc`, `page`, `page_size`
+- Integration finance list query endpoints now support sort/pagination and status filtering:
+  - `GET /api/integration/v1/payables` supports `status=open`, `sort=id_asc|id_desc`, `page`, `page_size`
+  - `GET /api/integration/v1/receivables` supports `status=open`, `sort=id_asc|id_desc`, `page`, `page_size`
+- New integration tests for workspace/integration finance list queries:
+  - `TestWorkspaceFinanceListSupportsStatusSortAndPagination`
+  - `TestWorkspaceFinanceListRejectsInvalidQuery`
+  - `TestIntegrationFinanceListSupportsStatusSortAndPagination`
+  - `TestIntegrationFinanceListRejectsInvalidQuery`
+
+### Changed
+
+- Updated `README.md` and `docs/phase-2-coverage-status.md` to include workspace/integration payable/receivable query semantics.
+
 ## [0.2.36] - 2026-03-27
 
 ### Added

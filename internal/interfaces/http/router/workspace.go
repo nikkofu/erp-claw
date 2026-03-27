@@ -78,8 +78,23 @@ func registerWorkspaceRoutes(rg *gin.RouterGroup, container *bootstrap.Container
 
 	payableGroup := rg.Group("/payables")
 	payableGroup.GET("", func(c *gin.Context) {
+		page, err := parsePositivePayableQueryInt(c.Query("page"), 1)
+		if err != nil {
+			renderSupplyChainError(c, err)
+			return
+		}
+		pageSize, err := parsePositivePayableQueryInt(c.Query("page_size"), 20)
+		if err != nil {
+			renderSupplyChainError(c, err)
+			return
+		}
+
 		bills, err := container.SupplyChain.ListPayableBills(c.Request.Context(), supplychain.ListPayableBillsInput{
 			TenantID: tenantIDFromContext(c),
+			Status:   c.Query("status"),
+			Sort:     c.DefaultQuery("sort", "id_desc"),
+			Page:     page,
+			PageSize: pageSize,
 		})
 		if err != nil {
 			renderSupplyChainError(c, err)
@@ -110,8 +125,23 @@ func registerWorkspaceRoutes(rg *gin.RouterGroup, container *bootstrap.Container
 
 	receivableGroup := rg.Group("/receivables")
 	receivableGroup.GET("", func(c *gin.Context) {
+		page, err := parsePositiveReceivableQueryInt(c.Query("page"), 1)
+		if err != nil {
+			renderSupplyChainError(c, err)
+			return
+		}
+		pageSize, err := parsePositiveReceivableQueryInt(c.Query("page_size"), 20)
+		if err != nil {
+			renderSupplyChainError(c, err)
+			return
+		}
+
 		bills, err := container.SupplyChain.ListReceivableBills(c.Request.Context(), supplychain.ListReceivableBillsInput{
 			TenantID: tenantIDFromContext(c),
+			Status:   c.Query("status"),
+			Sort:     c.DefaultQuery("sort", "id_desc"),
+			Page:     page,
+			PageSize: pageSize,
 		})
 		if err != nil {
 			renderSupplyChainError(c, err)
