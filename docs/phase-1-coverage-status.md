@@ -131,7 +131,7 @@
 | --- | --- | --- | --- | --- | --- |
 | Execution Plane | Command Pipeline | 命令进入应用处理器、策略前置、事务边界、审计记录 | P0 | 部分实现 | `internal/application/shared/pipeline.go`、`command.go`、`transaction.go`；当前只完成基础执行链路 |
 | Execution Plane | Event Bus | 内存总线、NATS JetStream 总线 | P0 | 已实现 | `internal/platform/eventbus/*` |
-| Execution Plane | Worker Runtime | 装配依赖、轮询 outbox 的后台进程骨架 | P0 | 部分实现 | `cmd/worker/main.go`；轮询逻辑仍是占位函数 |
+| Execution Plane | Worker Runtime | 装配依赖、轮询 outbox 的后台进程骨架 | P0 | 部分实现 | `cmd/worker/main.go` 已实现 claim/publish/标记 published 与失败回退 pending 的最小闭环；更深层重试与死信策略仍待补齐。 |
 | Execution Plane | Scheduler Runtime | 定时 tick 产生时间驱动事件 | P0 | 部分实现 | `cmd/scheduler/main.go`；当前只发送 `platform.scheduler.tick` 骨架事件 |
 | Execution Plane | Agent Gateway Runtime | 工作台事件入口、会话 channel 注册、进程生命周期 | P1 | 部分实现 | `cmd/agent-gateway/main.go`、`internal/interfaces/ws/workspace_gateway.go` |
 | Execution Plane | Session Context Assembler | tenant/actor/business/policy/knowledge/execution context 组装 | P1 | 部分实现 | `internal/platform/runtime/request_context.go` 只覆盖 request 级元数据，没有完整 session context assembler |
@@ -147,7 +147,7 @@
 | Data Plane | Redis seam | 客户端配置校验与构建 | P0 | 已实现 | `internal/infrastructure/cache/redis/client.go` |
 | Data Plane | NATS seam | 连接配置校验与构建 | P0 | 已实现 | `internal/infrastructure/messaging/nats/client.go` |
 | Data Plane | MinIO seam | 对象存储客户端配置校验与构建 | P0 | 已实现 | `internal/infrastructure/storage/minio/client.go` |
-| Data Plane | Outbox Pattern 基础 | 表结构、worker 轮询骨架、总线发布路径 | P1 | 部分实现 | `outbox` 表已创建，`cmd/worker/main.go` 预留轮询路径，但未完成可靠发布与状态推进 |
+| Data Plane | Outbox Pattern 基础 | 表结构、worker 轮询骨架、总线发布路径 | P1 | 部分实现 | `outbox` 表与 worker 最小发布路径已落地（pending -> processing -> published，失败回退 pending+available_at）；仍缺少 attempts/DLQ/inbox 幂等等完整治理。 |
 | Data Plane | CQRS Read Models | Backoffice、Workspace、Monitoring、Analytics 读模型 | P1 | 仅设计 | 当前没有 projection、read service 或读模型表 |
 | Data Plane | Search / Vector Retrieval | PostgreSQL FTS、trigram、`pgvector` | P2 | 仅设计 | 设计已定义，当前迁移中没有相关扩展与索引结构 |
 | Integration Plane | 外部系统连接器 | webhook、ERP 外部系统、插件式连接器 | P2 | 仅设计 | 只有 `Integration API` 路由分组占位，没有 connector/runtime 实现 |
@@ -186,7 +186,7 @@
 - 审计记录持久化、查询与审计治理
 - Agent session/task 仓储、状态机、执行记录、证据模型
 - Workspace 真正的流式协议与事件订阅
-- Outbox 发布、消费确认、失败重试与幂等处理
+- Outbox 完整治理能力（attempts、DLQ、消费幂等、跨边界去重）
 - 插件注册、工具目录、模型目录、租户能力治理
 - Approval 基线（已部分落地），Workflow Orchestrator 仍未完成
 

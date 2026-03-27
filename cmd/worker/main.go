@@ -3,9 +3,11 @@ package main
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"log"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -14,6 +16,86 @@ import (
 	"github.com/nikkofu/erp-claw/internal/infrastructure/persistence/postgres"
 	"github.com/nikkofu/erp-claw/internal/platform/eventbus"
 )
+
+const (
+	defaultOutboxBatchSize  = 100
+	defaultOutboxRetryDelay = 5 * time.Second
+)
+
+const claimPendingOutboxSQL = `
+with picked as (
+	select id
+	from outbox
+	where status = 'pending'
+	  and available_at <= now()
+	order by id
+	for update skip locked
+	limit $1
+)
+update outbox o
+set status = 'processing'
+from picked
+where o.id = picked.id
+returning o.id, o.tenant_id, o.topic, o.event_type, o.payload;
+`
+
+type outboxRecord struct {
+	ID        int64
+	TenantID  int64
+	Topic     string
+	EventType string
+	Payload   []byte
+}
+
+type outboxStore interface {
+	ClaimPending(ctx context.Context, limit int) ([]outboxRecord, error)
+	MarkPublished(ctx context.Context, id int64) error
+	MarkPendingRetry(ctx context.Context, id int64, nextAvailableAt time.Time) error
+}
+
+type postgresOutboxStore struct {
+	db *sql.DB
+}
+
+func (s *postgresOutboxStore) ClaimPending(ctx context.Context, limit int) ([]outboxRecord, error) {
+	rows, err := s.db.QueryContext(ctx, claimPendingOutboxSQL, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	records := make([]outboxRecord, 0, limit)
+	for rows.Next() {
+		var rec outboxRecord
+		if err := rows.Scan(&rec.ID, &rec.TenantID, &rec.Topic, &rec.EventType, &rec.Payload); err != nil {
+			return nil, err
+		}
+		records = append(records, rec)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return records, nil
+}
+
+func (s *postgresOutboxStore) MarkPublished(ctx context.Context, id int64) error {
+	_, err := s.db.ExecContext(
+		ctx,
+		`update outbox set status = 'published', published_at = now() where id = $1`,
+		id,
+	)
+	return err
+}
+
+func (s *postgresOutboxStore) MarkPendingRetry(ctx context.Context, id int64, nextAvailableAt time.Time) error {
+	_, err := s.db.ExecContext(
+		ctx,
+		`update outbox set status = 'pending', available_at = $2, published_at = null where id = $1`,
+		id,
+		nextAvailableAt.UTC(),
+	)
+	return err
+}
 
 func main() {
 	configPath := os.Getenv("ERP_CONFIG_PATH")
@@ -92,6 +174,82 @@ func runOutboxPoller(ctx context.Context, db *sql.DB, bus eventbus.Bus, interval
 	}
 }
 
-func pollOutboxBatch(_ context.Context, _ *sql.DB, _ eventbus.Bus) error {
+func pollOutboxBatch(ctx context.Context, db *sql.DB, bus eventbus.Bus) error {
+	if db == nil {
+		return fmt.Errorf("outbox db is required")
+	}
+	if bus == nil {
+		return fmt.Errorf("event bus is required")
+	}
+	store := &postgresOutboxStore{db: db}
+	return pollOutboxBatchWithStore(ctx, store, bus, time.Now(), defaultOutboxBatchSize, defaultOutboxRetryDelay)
+}
+
+func pollOutboxBatchWithStore(
+	ctx context.Context,
+	store outboxStore,
+	bus eventbus.Bus,
+	now time.Time,
+	batchSize int,
+	retryDelay time.Duration,
+) error {
+	if store == nil {
+		return fmt.Errorf("outbox store is required")
+	}
+	if bus == nil {
+		return fmt.Errorf("event bus is required")
+	}
+	if batchSize <= 0 {
+		batchSize = defaultOutboxBatchSize
+	}
+	if retryDelay <= 0 {
+		retryDelay = defaultOutboxRetryDelay
+	}
+
+	records, err := store.ClaimPending(ctx, batchSize)
+	if err != nil {
+		return fmt.Errorf("claim pending outbox: %w", err)
+	}
+	if len(records) == 0 {
+		return nil
+	}
+
+	var firstErr error
+	nextAvailableAt := now.UTC().Add(retryDelay)
+
+	for _, rec := range records {
+		evt := eventbus.Event{
+			Topic:       rec.Topic,
+			TenantID:    strconv.FormatInt(rec.TenantID, 10),
+			Correlation: fmt.Sprintf("outbox:%d", rec.ID),
+			Payload:     rec.Payload,
+		}
+		if err := bus.Publish(ctx, evt); err != nil {
+			log.Printf(
+				"outbox publish failed (id=%d topic=%s event_type=%s): %v",
+				rec.ID,
+				rec.Topic,
+				rec.EventType,
+				err,
+			)
+			if retryErr := store.MarkPendingRetry(ctx, rec.ID, nextAvailableAt); retryErr != nil {
+				err = fmt.Errorf("publish failed: %v; mark retry failed: %w", err, retryErr)
+			}
+			if firstErr == nil {
+				firstErr = fmt.Errorf("publish outbox id=%d: %w", rec.ID, err)
+			}
+			continue
+		}
+		if err := store.MarkPublished(ctx, rec.ID); err != nil {
+			if firstErr == nil {
+				firstErr = fmt.Errorf("mark published outbox id=%d: %w", rec.ID, err)
+			}
+			continue
+		}
+	}
+
+	if firstErr != nil {
+		return firstErr
+	}
 	return nil
 }

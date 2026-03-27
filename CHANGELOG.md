@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.22] - 2026-03-27
+
+### Added
+
+- Worker outbox polling now implements a minimal publish loop:
+  - claim pending records with `FOR UPDATE SKIP LOCKED`
+  - publish events through `eventbus.Bus`
+  - mark success as `published`
+  - mark failures back to `pending` with delayed `available_at`
+- Unit tests for outbox polling behavior in `cmd/worker/main_test.go` (happy path, publish failure retry path, claim error path).
+
+### Changed
+
+- `docs/phase-1-coverage-status.md` now reflects outbox progression from placeholder loop to minimal executable processing path.
+
 ## [0.2.21] - 2026-03-27
 
 ### Added
