@@ -152,6 +152,84 @@ func TestAdminSupplyChainRejectFlow(t *testing.T) {
 	}
 }
 
+func TestAdminApprovalListSupportsStatusFilter(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	container := bootstrap.NewContainer(bootstrap.DefaultConfig())
+	h := router.New(router.WithContainer(container))
+
+	supplierID := stringField(t, postJSONData(t, h, "/api/admin/v1/master-data/suppliers", map[string]any{
+		"code": "SUP-001",
+		"name": "Acme Supply",
+	}), "id")
+
+	productID := stringField(t, postJSONData(t, h, "/api/admin/v1/master-data/products", map[string]any{
+		"sku":  "SKU-001",
+		"name": "Copper Wire",
+		"unit": "roll",
+	}), "id")
+
+	warehouseID := stringField(t, postJSONData(t, h, "/api/admin/v1/master-data/warehouses", map[string]any{
+		"code": "WH-SH",
+		"name": "Shanghai Warehouse",
+	}), "id")
+
+	orderA := stringField(t, postJSONData(t, h, "/api/admin/v1/procurement/purchase-orders", map[string]any{
+		"supplier_id":  supplierID,
+		"warehouse_id": warehouseID,
+		"lines": []map[string]any{{
+			"product_id": productID,
+			"quantity":   5,
+		}},
+	}), "id")
+	submitA := postJSONData(t, h, "/api/admin/v1/procurement/purchase-orders/"+orderA+"/submit", map[string]any{})
+	approvalA := stringField(t, nestedMap(t, submitA, "approval"), "id")
+
+	orderB := stringField(t, postJSONData(t, h, "/api/admin/v1/procurement/purchase-orders", map[string]any{
+		"supplier_id":  supplierID,
+		"warehouse_id": warehouseID,
+		"lines": []map[string]any{{
+			"product_id": productID,
+			"quantity":   6,
+		}},
+	}), "id")
+	submitB := postJSONData(t, h, "/api/admin/v1/procurement/purchase-orders/"+orderB+"/submit", map[string]any{})
+	approvalB := stringField(t, nestedMap(t, submitB, "approval"), "id")
+
+	postJSONData(t, h, "/api/admin/v1/approvals/"+approvalB+"/approve", map[string]any{})
+
+	all := doJSONForArray(t, h, http.MethodGet, "/api/admin/v1/approvals", nil, http.StatusOK).Data
+	if len(all) != 2 {
+		t.Fatalf("expected 2 approvals in list, got %d", len(all))
+	}
+
+	pending := doJSONForArray(t, h, http.MethodGet, "/api/admin/v1/approvals?status=pending", nil, http.StatusOK).Data
+	if len(pending) != 1 {
+		t.Fatalf("expected 1 pending approval, got %d", len(pending))
+	}
+	if got := stringField(t, pending[0], "id"); got != approvalA {
+		t.Fatalf("expected pending approval id %s, got %s", approvalA, got)
+	}
+
+	approved := doJSONForArray(t, h, http.MethodGet, "/api/admin/v1/approvals?status=approved", nil, http.StatusOK).Data
+	if len(approved) != 1 {
+		t.Fatalf("expected 1 approved approval, got %d", len(approved))
+	}
+	if got := stringField(t, approved[0], "id"); got != approvalB {
+		t.Fatalf("expected approved approval id %s, got %s", approvalB, got)
+	}
+}
+
+func TestAdminApprovalListRejectsInvalidStatusFilter(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	container := bootstrap.NewContainer(bootstrap.DefaultConfig())
+	h := router.New(router.WithContainer(container))
+
+	env := doJSON(t, h, http.MethodGet, "/api/admin/v1/approvals?status=invalid", nil, http.StatusBadRequest)
+	if env.Meta["request_id"] == "" {
+		t.Fatal("expected request_id metadata in bad request response")
+	}
+}
+
 type envelope struct {
 	Data  map[string]any `json:"data"`
 	Error map[string]any `json:"error"`

@@ -2,6 +2,26 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.28] - 2026-03-27
+
+### Added
+
+- Admin approval query endpoint:
+  - `GET /api/admin/v1/approvals` (supports `status=pending|approved|rejected`)
+- Supply-chain service query capability:
+  - `ListApprovalRequests` with tenant scope + status filter validation
+- Approval repository contract extended with tenant-scoped list:
+  - `ListByTenant(ctx, tenantID)`
+- New tests for approval query behavior:
+  - `TestServiceListApprovalRequestsSupportsStatusFilter`
+  - `TestServiceListApprovalRequestsFailsForInvalidStatus`
+  - `TestAdminApprovalListSupportsStatusFilter`
+  - `TestAdminApprovalListRejectsInvalidStatusFilter`
+
+### Changed
+
+- Updated `README.md` and `docs/phase-2-coverage-status.md` to reflect approval list query coverage.
+
 ## [0.2.27] - 2026-03-27
 
 ### Added
