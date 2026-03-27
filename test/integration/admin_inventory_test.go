@@ -63,6 +63,24 @@ func TestAdminInventoryReceiptFlow(t *testing.T) {
 	}
 }
 
+func TestAdminInventoryBalanceRequiresProductAndWarehouseQuery(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	container := bootstrap.NewContainer(bootstrap.DefaultConfig())
+	h := router.New(router.WithContainer(container))
+
+	cases := []string{
+		"/api/admin/v1/inventory/balances",
+		"/api/admin/v1/inventory/balances?product_id=prd-001",
+		"/api/admin/v1/inventory/balances?warehouse_id=wh-001",
+	}
+	for _, path := range cases {
+		env := doJSON(t, h, http.MethodGet, path, nil, http.StatusBadRequest)
+		if env.Meta["request_id"] == "" {
+			t.Fatalf("expected request_id metadata for %s", path)
+		}
+	}
+}
+
 func TestAdminInventoryReceiptRequiresApprovedOrder(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	container := bootstrap.NewContainer(bootstrap.DefaultConfig())

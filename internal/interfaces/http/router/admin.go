@@ -671,6 +671,7 @@ func renderSupplyChainError(c *gin.Context, err error) {
 	case errors.Is(err, masterdata.ErrInvalidSupplier),
 		errors.Is(err, masterdata.ErrInvalidProduct),
 		errors.Is(err, masterdata.ErrInvalidWarehouse),
+		errors.Is(err, inventory.ErrInvalidInventoryQuery),
 		errors.Is(err, inventory.ErrInvalidReceipt),
 		errors.Is(err, inventory.ErrInvalidReservation),
 		errors.Is(err, inventory.ErrInvalidTransferOrder),
