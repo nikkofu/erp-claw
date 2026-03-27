@@ -67,6 +67,11 @@ Use the playbook whenever a delivery wave is paused and another session (or agen
    - or `make handoff-check HANDOFF_DOC=<handoff-doc-path>`
 4. Optional resume helper for next morning:
    - `./scripts/phase_resume_from_latest.sh`
+5. Optional local pre-push gate:
+   - `./scripts/phase_handoff_pre_push.sh`
+   - or `make handoff-prepush`
+
+PR/main now enforces changed handoff docs via `.github/workflows/handoff-quality-gate.yml`.
 
 Reusable templates/checklists live in `skills/phase-handoff-playbook/`; project-specific outputs live in `docs/phase-handoff-playbook/`.
 

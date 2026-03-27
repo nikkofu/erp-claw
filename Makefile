@@ -4,7 +4,7 @@ DOCKER_COMPOSE := docker compose --env-file $(DOCKER_ENV_FILE)
 HANDOFF_TOPIC ?=
 HANDOFF_DOC ?=
 
-.PHONY: infra-up infra-down infra-reset api gateway worker scheduler test test-integration smoke migrate-up migrate-down handoff-new handoff-check
+.PHONY: infra-up infra-down infra-reset api gateway worker scheduler test test-integration smoke migrate-up migrate-down handoff-new handoff-check handoff-prepush
 
 infra-up:
 	$(DOCKER_COMPOSE) up -d --build
@@ -51,6 +51,9 @@ handoff-check:
 		exit 1; \
 	fi
 	./scripts/phase_handoff_check.sh "$(HANDOFF_DOC)"
+
+handoff-prepush:
+	./scripts/phase_handoff_pre_push.sh
 
 migrate-up:
 	go run ./cmd/migrate

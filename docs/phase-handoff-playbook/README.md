@@ -11,6 +11,21 @@ Use this workflow when pausing a non-trivial delivery wave so the next session c
 3. Run the quality gate:
    - `./scripts/phase_handoff_check.sh <handoff-doc-path>`
    - or `make handoff-check HANDOFF_DOC=<handoff-doc-path>`
+4. Optional local pre-push gate:
+   - `./scripts/phase_handoff_pre_push.sh`
+   - or `make handoff-prepush`
+
+## CI Gate
+
+`main`/PR now has an automated handoff quality gate at:
+
+- `.github/workflows/handoff-quality-gate.yml`
+
+Behavior:
+
+- only checks changed files under `docs/phase-handoff-playbook/*.md`
+- excludes `docs/phase-handoff-playbook/README.md`
+- fails the workflow if any changed handoff doc does not pass `scripts/phase_handoff_check.sh`
 
 ## Purpose
 
