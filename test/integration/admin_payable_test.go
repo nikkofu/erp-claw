@@ -102,7 +102,7 @@ func TestAdminPayableFlow(t *testing.T) {
 	}
 }
 
-func TestAdminPayableCreateBeforeReceiveReturnsBadRequest(t *testing.T) {
+func TestAdminPayableCreateBeforeReceiveReturnsConflict(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	container := bootstrap.NewContainer(bootstrap.DefaultConfig())
 	h := router.New(router.WithContainer(container))
@@ -137,7 +137,7 @@ func TestAdminPayableCreateBeforeReceiveReturnsBadRequest(t *testing.T) {
 	approvalID := stringField(t, nestedMap(t, submitResp, "approval"), "id")
 	postJSONData(t, h, "/api/admin/v1/approvals/"+approvalID+"/approve", map[string]any{})
 
-	env := doJSON(t, h, http.MethodPost, "/api/admin/v1/procurement/purchase-orders/"+orderID+"/payable-bills", map[string]any{}, http.StatusBadRequest)
+	env := doJSON(t, h, http.MethodPost, "/api/admin/v1/procurement/purchase-orders/"+orderID+"/payable-bills", map[string]any{}, http.StatusConflict)
 	if env.Meta["request_id"] == "" {
 		t.Fatal("expected request_id metadata in bad request response")
 	}
