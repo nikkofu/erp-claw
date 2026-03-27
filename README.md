@@ -122,14 +122,14 @@ The first executable Phase 2 slice is now available through the admin surface. I
 - `GET /api/admin/v1/payables/:id`
 - `POST /api/admin/v1/payables/:id/payment-plans`
 - `POST /api/admin/v1/sales-orders`
-- `GET /api/admin/v1/sales-orders`
+- `GET /api/admin/v1/sales-orders` (supports `status=draft|shipped`, `sort=id_asc|id_desc`, `page`, `page_size`)
 - `GET /api/admin/v1/sales-orders/:id`
 - `POST /api/admin/v1/sales-orders/:id/ship`
 - `GET /api/admin/v1/read-models/overview`
 - `POST /api/admin/v1/approvals/:id/approve`
 - `POST /api/admin/v1/approvals/:id/reject`
 
-Run `go test ./test/integration -run 'TestAdminSupplyChainFlow|TestAdminApprovalListSupportsStatusFilter|TestAdminApprovalListSupportsSortAndPagination|TestAdminPurchaseOrderListSupportsStatusSortAndPagination|TestAdminInventoryReceiptFlow|TestAdminInventoryReservationFlow|TestAdminInventoryReservationRejectsExcessQuantity|TestAdminInventoryOutboundFlow|TestAdminInventoryOutboundRejectsExcessQuantity|TestAdminInventoryTransferFlow|TestAdminInventoryTransferRejectsExcessQuantity|TestAdminInventoryTransferOrderWorkflow|TestAdminInventoryTransferOrderListSupportsStatusSortAndPagination|TestAdminInventoryTransferOrderCancelFlow|TestAdminInventoryLedgerListFlow|TestAdminPayableFlow|TestAdminReceivableFlow|TestAdminSalesOrderShipFlow|TestAdminSalesOrderShipRejectsInsufficientInventory|TestAdminBackofficeOverviewReadModel' -v` to verify the end-to-end Phase 2 admin flow locally, including approval and purchase-order list queries (status/sort/pagination), inventory reservation/outbound/transfer, transfer-order execution/query/cancel (status/sort/pagination), and ledger query, payable/receivable basics, minimal sales shipment loop, and the backoffice overview read model.
+Run `go test ./test/integration -run 'TestAdminSupplyChainFlow|TestAdminApprovalListSupportsStatusFilter|TestAdminApprovalListSupportsSortAndPagination|TestAdminPurchaseOrderListSupportsStatusSortAndPagination|TestAdminInventoryReceiptFlow|TestAdminInventoryReservationFlow|TestAdminInventoryReservationRejectsExcessQuantity|TestAdminInventoryOutboundFlow|TestAdminInventoryOutboundRejectsExcessQuantity|TestAdminInventoryTransferFlow|TestAdminInventoryTransferRejectsExcessQuantity|TestAdminInventoryTransferOrderWorkflow|TestAdminInventoryTransferOrderListSupportsStatusSortAndPagination|TestAdminInventoryTransferOrderCancelFlow|TestAdminInventoryLedgerListFlow|TestAdminPayableFlow|TestAdminReceivableFlow|TestAdminSalesOrderShipFlow|TestAdminSalesOrderShipRejectsInsufficientInventory|TestAdminSalesOrderListSupportsStatusSortAndPagination|TestAdminSalesOrderListRejectsInvalidQuery|TestAdminBackofficeOverviewReadModel' -v` to verify the end-to-end Phase 2 admin flow locally, including approval/purchase-order/sales-order list queries (status/sort/pagination), inventory reservation/outbound/transfer, transfer-order execution/query/cancel (status/sort/pagination), ledger query, payable/receivable basics, minimal sales shipment loop, and the backoffice overview read model.
 
 ## Workspace API (Phase 2 Minimal Query Slice)
 

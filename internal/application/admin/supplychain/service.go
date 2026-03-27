@@ -989,7 +989,76 @@ func (s *Service) GetSalesOrder(ctx context.Context, input GetSalesOrderInput) (
 }
 
 func (s *Service) ListSalesOrders(ctx context.Context, input ListSalesOrdersInput) ([]sales.Order, error) {
-	return s.salesOrders.ListByTenant(ctx, input.TenantID)
+	tenantID := strings.TrimSpace(input.TenantID)
+	if tenantID == "" {
+		return nil, sales.ErrInvalidOrderQuery
+	}
+
+	statusFilter := strings.TrimSpace(input.Status)
+	if statusFilter != "" {
+		status := sales.OrderStatus(statusFilter)
+		switch status {
+		case sales.OrderStatusDraft, sales.OrderStatusShipped:
+		default:
+			return nil, sales.ErrInvalidOrderQuery
+		}
+	}
+
+	orders, err := s.salesOrders.ListByTenant(ctx, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	if statusFilter != "" {
+		filtered := make([]sales.Order, 0, len(orders))
+		for _, order := range orders {
+			if string(order.Status) == statusFilter {
+				filtered = append(filtered, order)
+			}
+		}
+		orders = filtered
+	}
+
+	sortMode := strings.TrimSpace(input.Sort)
+	if sortMode == "" {
+		sortMode = "id_desc"
+	}
+	switch sortMode {
+	case "id_asc":
+		sort.Slice(orders, func(i, j int) bool {
+			return orders[i].ID < orders[j].ID
+		})
+	case "id_desc":
+		sort.Slice(orders, func(i, j int) bool {
+			return orders[i].ID > orders[j].ID
+		})
+	default:
+		return nil, sales.ErrInvalidOrderQuery
+	}
+
+	page := input.Page
+	if page == 0 {
+		page = 1
+	}
+	pageSize := input.PageSize
+	if pageSize == 0 {
+		pageSize = 20
+	}
+	if page < 1 || pageSize < 1 {
+		return nil, sales.ErrInvalidOrderQuery
+	}
+
+	start := (page - 1) * pageSize
+	if start >= len(orders) {
+		return []sales.Order{}, nil
+	}
+	end := start + pageSize
+	if end > len(orders) {
+		end = len(orders)
+	}
+
+	out := make([]sales.Order, 0, end-start)
+	out = append(out, orders[start:end]...)
+	return out, nil
 }
 
 func (s *Service) ShipSalesOrder(ctx context.Context, input ShipSalesOrderInput) (sales.Order, []inventory.LedgerEntry, error) {
