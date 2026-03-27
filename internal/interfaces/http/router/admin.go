@@ -88,6 +88,31 @@ func registerAdminRoutes(rg *gin.RouterGroup, container *bootstrap.Container) {
 	})
 
 	procurementGroup := rg.Group("/procurement/purchase-orders")
+	procurementGroup.GET("", func(c *gin.Context) {
+		page, err := parsePositivePurchaseOrderQueryInt(c.Query("page"), 1)
+		if err != nil {
+			renderSupplyChainError(c, err)
+			return
+		}
+		pageSize, err := parsePositivePurchaseOrderQueryInt(c.Query("page_size"), 20)
+		if err != nil {
+			renderSupplyChainError(c, err)
+			return
+		}
+
+		orders, err := container.SupplyChain.ListPurchaseOrders(c.Request.Context(), supplychain.ListPurchaseOrdersInput{
+			TenantID: tenantIDFromContext(c),
+			Status:   c.Query("status"),
+			Sort:     c.DefaultQuery("sort", "id_desc"),
+			Page:     page,
+			PageSize: pageSize,
+		})
+		if err != nil {
+			renderSupplyChainError(c, err)
+			return
+		}
+		presenter.OK(c, purchaseOrdersResponse(orders))
+	})
 	procurementGroup.POST("", func(c *gin.Context) {
 		var req createPurchaseOrderRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
@@ -677,6 +702,10 @@ func parsePositiveApprovalQueryInt(raw string, defaultValue int) (int, error) {
 	return parsePositiveQueryIntWithErr(raw, defaultValue, approval.ErrInvalidRequestQuery)
 }
 
+func parsePositivePurchaseOrderQueryInt(raw string, defaultValue int) (int, error) {
+	return parsePositiveQueryIntWithErr(raw, defaultValue, procurement.ErrInvalidPurchaseOrderQuery)
+}
+
 func parsePositiveQueryIntWithErr(raw string, defaultValue int, errValue error) (int, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
@@ -705,6 +734,7 @@ func renderSupplyChainError(c *gin.Context, err error) {
 		errors.Is(err, masterdata.ErrInvalidProduct),
 		errors.Is(err, masterdata.ErrInvalidWarehouse),
 		errors.Is(err, approval.ErrInvalidRequestQuery),
+		errors.Is(err, procurement.ErrInvalidPurchaseOrderQuery),
 		errors.Is(err, inventory.ErrInvalidInventoryQuery),
 		errors.Is(err, inventory.ErrInvalidReceipt),
 		errors.Is(err, inventory.ErrInvalidReservation),
@@ -780,6 +810,14 @@ func purchaseOrderResponse(order procurement.PurchaseOrder) gin.H {
 		"approval_id":  order.ApprovalID,
 		"lines":        lines,
 	}
+}
+
+func purchaseOrdersResponse(orders []procurement.PurchaseOrder) []gin.H {
+	out := make([]gin.H, 0, len(orders))
+	for _, order := range orders {
+		out = append(out, purchaseOrderResponse(order))
+	}
+	return out
 }
 
 func approvalResponse(request approval.Request) any {

@@ -2,6 +2,28 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.31] - 2026-03-27
+
+### Added
+
+- Admin purchase-order list query endpoint:
+  - `GET /api/admin/v1/procurement/purchase-orders`
+  - supports `status=draft|pending_approval|approved|rejected|received`
+  - supports `sort=id_asc|id_desc`, `page`, `page_size`
+- Supply-chain service query capability:
+  - `ListPurchaseOrders` with status/sort/pagination validation and tenant scope
+- Procurement repository contract extended with tenant-scoped list:
+  - `ListByTenant(ctx, tenantID)`
+- New tests for purchase-order list query behavior:
+  - `TestServiceListPurchaseOrdersSupportsStatusSortAndPagination`
+  - `TestServiceListPurchaseOrdersFailsForInvalidQuery`
+  - `TestAdminPurchaseOrderListSupportsStatusSortAndPagination`
+  - `TestAdminPurchaseOrderListRejectsInvalidQuery`
+
+### Changed
+
+- Updated `README.md` and `docs/phase-2-coverage-status.md` to include purchase-order list query coverage.
+
 ## [0.2.30] - 2026-03-27
 
 ### Added

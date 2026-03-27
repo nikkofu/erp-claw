@@ -35,6 +35,14 @@ type CreatePurchaseOrderInput struct {
 	Lines       []CreatePurchaseOrderLine
 }
 
+type ListPurchaseOrdersInput struct {
+	TenantID string
+	Status   string
+	Sort     string
+	Page     int
+	PageSize int
+}
+
 type SubmitPurchaseOrderInput struct {
 	TenantID        string
 	ActorID         string

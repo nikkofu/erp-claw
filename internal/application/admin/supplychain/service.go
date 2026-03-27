@@ -230,6 +230,83 @@ func (s *Service) GetPurchaseOrder(ctx context.Context, tenantID, orderID string
 	return order, request, nil
 }
 
+func (s *Service) ListPurchaseOrders(ctx context.Context, input ListPurchaseOrdersInput) ([]procurement.PurchaseOrder, error) {
+	tenantID := strings.TrimSpace(input.TenantID)
+	if tenantID == "" {
+		return nil, procurement.ErrInvalidPurchaseOrderQuery
+	}
+
+	statusFilter := strings.TrimSpace(input.Status)
+	if statusFilter != "" {
+		status := procurement.PurchaseOrderStatus(statusFilter)
+		switch status {
+		case procurement.PurchaseOrderStatusDraft,
+			procurement.PurchaseOrderStatusPendingApproval,
+			procurement.PurchaseOrderStatusApproved,
+			procurement.PurchaseOrderStatusRejected,
+			procurement.PurchaseOrderStatusReceived:
+		default:
+			return nil, procurement.ErrInvalidPurchaseOrderQuery
+		}
+	}
+
+	orders, err := s.purchaseOrders.ListByTenant(ctx, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	if statusFilter != "" {
+		filtered := make([]procurement.PurchaseOrder, 0, len(orders))
+		for _, order := range orders {
+			if string(order.Status) == statusFilter {
+				filtered = append(filtered, order)
+			}
+		}
+		orders = filtered
+	}
+
+	sortMode := strings.TrimSpace(input.Sort)
+	if sortMode == "" {
+		sortMode = "id_desc"
+	}
+	switch sortMode {
+	case "id_asc":
+		sort.Slice(orders, func(i, j int) bool {
+			return orders[i].ID < orders[j].ID
+		})
+	case "id_desc":
+		sort.Slice(orders, func(i, j int) bool {
+			return orders[i].ID > orders[j].ID
+		})
+	default:
+		return nil, procurement.ErrInvalidPurchaseOrderQuery
+	}
+
+	page := input.Page
+	if page == 0 {
+		page = 1
+	}
+	pageSize := input.PageSize
+	if pageSize == 0 {
+		pageSize = 20
+	}
+	if page < 1 || pageSize < 1 {
+		return nil, procurement.ErrInvalidPurchaseOrderQuery
+	}
+
+	start := (page - 1) * pageSize
+	if start >= len(orders) {
+		return []procurement.PurchaseOrder{}, nil
+	}
+	end := start + pageSize
+	if end > len(orders) {
+		end = len(orders)
+	}
+
+	out := make([]procurement.PurchaseOrder, 0, end-start)
+	out = append(out, orders[start:end]...)
+	return out, nil
+}
+
 func (s *Service) ListApprovalRequests(ctx context.Context, input ListApprovalRequestsInput) ([]approval.Request, error) {
 	tenantID := strings.TrimSpace(input.TenantID)
 	if tenantID == "" {
