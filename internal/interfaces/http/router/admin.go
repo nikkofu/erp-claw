@@ -182,9 +182,23 @@ func registerAdminRoutes(rg *gin.RouterGroup, container *bootstrap.Container) {
 
 	approvalGroup := rg.Group("/approvals")
 	approvalGroup.GET("", func(c *gin.Context) {
+		page, err := parsePositiveApprovalQueryInt(c.Query("page"), 1)
+		if err != nil {
+			renderSupplyChainError(c, err)
+			return
+		}
+		pageSize, err := parsePositiveApprovalQueryInt(c.Query("page_size"), 20)
+		if err != nil {
+			renderSupplyChainError(c, err)
+			return
+		}
+
 		requests, err := container.SupplyChain.ListApprovalRequests(c.Request.Context(), supplychain.ListApprovalRequestsInput{
 			TenantID: tenantIDFromContext(c),
 			Status:   c.Query("status"),
+			Sort:     c.DefaultQuery("sort", "id_desc"),
+			Page:     page,
+			PageSize: pageSize,
 		})
 		if err != nil {
 			renderSupplyChainError(c, err)
@@ -656,13 +670,21 @@ func actorIDFromContext(c *gin.Context) string {
 }
 
 func parsePositiveQueryInt(raw string, defaultValue int) (int, error) {
+	return parsePositiveQueryIntWithErr(raw, defaultValue, inventory.ErrInvalidTransferOrderQuery)
+}
+
+func parsePositiveApprovalQueryInt(raw string, defaultValue int) (int, error) {
+	return parsePositiveQueryIntWithErr(raw, defaultValue, approval.ErrInvalidRequestQuery)
+}
+
+func parsePositiveQueryIntWithErr(raw string, defaultValue int, errValue error) (int, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return defaultValue, nil
 	}
 	value, err := strconv.Atoi(raw)
 	if err != nil || value < 1 {
-		return 0, inventory.ErrInvalidTransferOrderQuery
+		return 0, errValue
 	}
 	return value, nil
 }

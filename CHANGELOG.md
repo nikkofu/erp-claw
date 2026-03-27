@@ -2,6 +2,24 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.30] - 2026-03-27
+
+### Added
+
+- Admin approval query now supports stable sorting and pagination:
+  - `GET /api/admin/v1/approvals?sort=id_asc|id_desc&page=<n>&page_size=<n>`
+- Supply-chain approval query input now supports:
+  - `sort`, `page`, `page_size`
+- New tests for approval sort/pagination behavior:
+  - `TestServiceListApprovalRequestsSupportsSortAndPagination`
+  - `TestServiceListApprovalRequestsFailsForInvalidSortAndPagination`
+  - `TestAdminApprovalListSupportsSortAndPagination`
+  - `TestAdminApprovalListRejectsInvalidSortAndPaginationQuery`
+
+### Changed
+
+- Updated `README.md` and `docs/phase-2-coverage-status.md` to reflect approval list sorting/pagination support.
+
 ## [0.2.29] - 2026-03-27
 
 ### Added
