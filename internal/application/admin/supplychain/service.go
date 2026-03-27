@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
+	"strings"
 	"sync/atomic"
 
 	"github.com/nikkofu/erp-claw/internal/application/shared"
@@ -463,7 +465,70 @@ func (s *Service) GetTransferOrder(ctx context.Context, input GetTransferOrderIn
 }
 
 func (s *Service) ListTransferOrders(ctx context.Context, input ListTransferOrdersInput) ([]inventory.TransferOrder, error) {
-	return s.inventory.ListTransferOrdersByTenant(ctx, input.TenantID)
+	orders, err := s.inventory.ListTransferOrdersByTenant(ctx, input.TenantID)
+	if err != nil {
+		return nil, err
+	}
+
+	statusFilter := strings.TrimSpace(input.Status)
+	if statusFilter != "" {
+		status := inventory.TransferOrderStatus(statusFilter)
+		switch status {
+		case inventory.TransferOrderStatusPlanned, inventory.TransferOrderStatusExecuted:
+		default:
+			return nil, inventory.ErrInvalidTransferOrderQuery
+		}
+
+		filtered := make([]inventory.TransferOrder, 0, len(orders))
+		for _, order := range orders {
+			if order.Status == status {
+				filtered = append(filtered, order)
+			}
+		}
+		orders = filtered
+	}
+
+	sortMode := strings.TrimSpace(input.Sort)
+	if sortMode == "" {
+		sortMode = "id_desc"
+	}
+	switch sortMode {
+	case "id_asc":
+		sort.Slice(orders, func(i, j int) bool {
+			return orders[i].ID < orders[j].ID
+		})
+	case "id_desc":
+		sort.Slice(orders, func(i, j int) bool {
+			return orders[i].ID > orders[j].ID
+		})
+	default:
+		return nil, inventory.ErrInvalidTransferOrderQuery
+	}
+
+	page := input.Page
+	if page == 0 {
+		page = 1
+	}
+	pageSize := input.PageSize
+	if pageSize == 0 {
+		pageSize = 20
+	}
+	if page < 1 || pageSize < 1 {
+		return nil, inventory.ErrInvalidTransferOrderQuery
+	}
+
+	start := (page - 1) * pageSize
+	if start >= len(orders) {
+		return []inventory.TransferOrder{}, nil
+	}
+	end := start + pageSize
+	if end > len(orders) {
+		end = len(orders)
+	}
+
+	out := make([]inventory.TransferOrder, 0, end-start)
+	out = append(out, orders[start:end]...)
+	return out, nil
 }
 
 func (s *Service) ExecuteTransferOrder(ctx context.Context, input ExecuteTransferOrderInput) (inventory.TransferOrder, []inventory.LedgerEntry, error) {

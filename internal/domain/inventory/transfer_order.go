@@ -7,6 +7,7 @@ import (
 
 var (
 	ErrInvalidTransferOrder       = errors.New("invalid transfer order")
+	ErrInvalidTransferOrderQuery  = errors.New("invalid transfer order query")
 	ErrTransferOrderNotFound      = errors.New("transfer order not found")
 	ErrTransferOrderNotExecutable = errors.New("transfer order not executable")
 )

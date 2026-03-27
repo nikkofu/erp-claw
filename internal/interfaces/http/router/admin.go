@@ -3,6 +3,8 @@ package router
 import (
 	"errors"
 	"net/http"
+	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/nikkofu/erp-claw/internal/application/admin/supplychain"
@@ -319,8 +321,23 @@ func registerAdminRoutes(rg *gin.RouterGroup, container *bootstrap.Container) {
 		presenter.OK(c, transferOrderResponse(order))
 	})
 	inventoryGroup.GET("/transfer-orders", func(c *gin.Context) {
+		page, err := parsePositiveQueryInt(c.Query("page"), 1)
+		if err != nil {
+			renderSupplyChainError(c, err)
+			return
+		}
+		pageSize, err := parsePositiveQueryInt(c.Query("page_size"), 20)
+		if err != nil {
+			renderSupplyChainError(c, err)
+			return
+		}
+
 		orders, err := container.SupplyChain.ListTransferOrders(c.Request.Context(), supplychain.ListTransferOrdersInput{
 			TenantID: tenantIDFromContext(c),
+			Status:   c.Query("status"),
+			Sort:     c.DefaultQuery("sort", "id_desc"),
+			Page:     page,
+			PageSize: pageSize,
 		})
 		if err != nil {
 			renderSupplyChainError(c, err)
@@ -615,6 +632,18 @@ func actorIDFromContext(c *gin.Context) string {
 	return c.GetString("actor_id")
 }
 
+func parsePositiveQueryInt(raw string, defaultValue int) (int, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return defaultValue, nil
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil || value < 1 {
+		return 0, inventory.ErrInvalidTransferOrderQuery
+	}
+	return value, nil
+}
+
 func renderSupplyChainError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, masterdata.ErrSupplierNotFound),
@@ -633,6 +662,7 @@ func renderSupplyChainError(c *gin.Context, err error) {
 		errors.Is(err, inventory.ErrInvalidReceipt),
 		errors.Is(err, inventory.ErrInvalidReservation),
 		errors.Is(err, inventory.ErrInvalidTransferOrder),
+		errors.Is(err, inventory.ErrInvalidTransferOrderQuery),
 		errors.Is(err, inventory.ErrTransferOrderNotExecutable),
 		errors.Is(err, inventory.ErrInsufficientAvailableInventory),
 		errors.Is(err, procurement.ErrInvalidPurchaseOrder),

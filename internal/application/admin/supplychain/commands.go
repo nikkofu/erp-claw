@@ -112,6 +112,10 @@ type GetTransferOrderInput struct {
 
 type ListTransferOrdersInput struct {
 	TenantID string
+	Status   string
+	Sort     string
+	Page     int
+	PageSize int
 }
 
 type ExecuteTransferOrderInput struct {

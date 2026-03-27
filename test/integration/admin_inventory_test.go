@@ -562,6 +562,114 @@ func TestAdminInventoryTransferOrderWorkflow(t *testing.T) {
 	}
 }
 
+func TestAdminInventoryTransferOrderListSupportsStatusSortAndPagination(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	container := bootstrap.NewContainer(bootstrap.DefaultConfig())
+	h := router.New(router.WithContainer(container))
+
+	supplierID := stringField(t, postJSONData(t, h, "/api/admin/v1/master-data/suppliers", map[string]any{
+		"code": "SUP-001",
+		"name": "Acme Supply",
+	}), "id")
+	productID := stringField(t, postJSONData(t, h, "/api/admin/v1/master-data/products", map[string]any{
+		"sku":  "SKU-001",
+		"name": "Copper Wire",
+		"unit": "roll",
+	}), "id")
+	sourceWarehouseID := stringField(t, postJSONData(t, h, "/api/admin/v1/master-data/warehouses", map[string]any{
+		"code": "WH-SH",
+		"name": "Shanghai Warehouse",
+	}), "id")
+	targetWarehouseA := stringField(t, postJSONData(t, h, "/api/admin/v1/master-data/warehouses", map[string]any{
+		"code": "WH-BJ-A",
+		"name": "Beijing Warehouse A",
+	}), "id")
+	targetWarehouseB := stringField(t, postJSONData(t, h, "/api/admin/v1/master-data/warehouses", map[string]any{
+		"code": "WH-BJ-B",
+		"name": "Beijing Warehouse B",
+	}), "id")
+	targetWarehouseC := stringField(t, postJSONData(t, h, "/api/admin/v1/master-data/warehouses", map[string]any{
+		"code": "WH-BJ-C",
+		"name": "Beijing Warehouse C",
+	}), "id")
+
+	orderID := stringField(t, postJSONData(t, h, "/api/admin/v1/procurement/purchase-orders", map[string]any{
+		"supplier_id":  supplierID,
+		"warehouse_id": sourceWarehouseID,
+		"lines": []map[string]any{{
+			"product_id": productID,
+			"quantity":   5,
+		}},
+	}), "id")
+	submitResp := postJSONData(t, h, "/api/admin/v1/procurement/purchase-orders/"+orderID+"/submit", map[string]any{})
+	approvalID := stringField(t, nestedMap(t, submitResp, "approval"), "id")
+	postJSONData(t, h, "/api/admin/v1/approvals/"+approvalID+"/approve", map[string]any{})
+	postJSONData(t, h, "/api/admin/v1/procurement/purchase-orders/"+orderID+"/receive", map[string]any{
+		"lines": []map[string]any{{
+			"product_id": productID,
+			"quantity":   5,
+		}},
+	})
+
+	orderA := postJSONData(t, h, "/api/admin/v1/inventory/transfer-orders", map[string]any{
+		"product_id":        productID,
+		"from_warehouse_id": sourceWarehouseID,
+		"to_warehouse_id":   targetWarehouseA,
+		"quantity":          1,
+	})
+	orderAID := stringField(t, orderA, "id")
+
+	orderB := postJSONData(t, h, "/api/admin/v1/inventory/transfer-orders", map[string]any{
+		"product_id":        productID,
+		"from_warehouse_id": sourceWarehouseID,
+		"to_warehouse_id":   targetWarehouseB,
+		"quantity":          1,
+	})
+	orderBID := stringField(t, orderB, "id")
+
+	orderC := postJSONData(t, h, "/api/admin/v1/inventory/transfer-orders", map[string]any{
+		"product_id":        productID,
+		"from_warehouse_id": sourceWarehouseID,
+		"to_warehouse_id":   targetWarehouseC,
+		"quantity":          1,
+	})
+	orderCID := stringField(t, orderC, "id")
+
+	postJSONData(t, h, "/api/admin/v1/inventory/transfer-orders/"+orderBID+"/execute", map[string]any{})
+
+	page1 := getJSONArrayData(t, h, "/api/admin/v1/inventory/transfer-orders?status=planned&sort=id_asc&page=1&page_size=1")
+	if len(page1) != 1 {
+		t.Fatalf("expected 1 planned order on page1, got %d", len(page1))
+	}
+	if got := stringField(t, page1[0], "id"); got != orderAID {
+		t.Fatalf("expected first planned order %s, got %s", orderAID, got)
+	}
+
+	page2 := getJSONArrayData(t, h, "/api/admin/v1/inventory/transfer-orders?status=planned&sort=id_asc&page=2&page_size=1")
+	if len(page2) != 1 {
+		t.Fatalf("expected 1 planned order on page2, got %d", len(page2))
+	}
+	if got := stringField(t, page2[0], "id"); got != orderCID {
+		t.Fatalf("expected second planned order %s, got %s", orderCID, got)
+	}
+
+	executed := getJSONArrayData(t, h, "/api/admin/v1/inventory/transfer-orders?status=executed&sort=id_desc&page=1&page_size=10")
+	if len(executed) != 1 {
+		t.Fatalf("expected 1 executed order, got %d", len(executed))
+	}
+	if got := stringField(t, executed[0], "id"); got != orderBID {
+		t.Fatalf("expected executed order %s, got %s", orderBID, got)
+	}
+	if got := stringField(t, executed[0], "status"); got != "executed" {
+		t.Fatalf("expected executed status, got %s", got)
+	}
+
+	env := doJSONForArray(t, h, http.MethodGet, "/api/admin/v1/inventory/transfer-orders?page=0", nil, http.StatusBadRequest)
+	if env.Meta["request_id"] == "" {
+		t.Fatal("expected request_id metadata")
+	}
+}
+
 func TestAdminInventoryLedgerListFlow(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	container := bootstrap.NewContainer(bootstrap.DefaultConfig())
