@@ -12,6 +12,9 @@ import (
 type fakeOutboxStore struct {
 	claimRecords      []outboxRecord
 	claimErr          error
+	claimLimit        int
+	claimReadyBefore  time.Time
+	claimLeaseUntil   time.Time
 	publishedIDs      []int64
 	retryIDs          []int64
 	retryAvailableAts []time.Time
@@ -23,10 +26,13 @@ type fakeOutboxStore struct {
 	failedErrors      []string
 }
 
-func (f *fakeOutboxStore) ClaimPending(_ context.Context, _ int) ([]outboxRecord, error) {
+func (f *fakeOutboxStore) ClaimReady(_ context.Context, limit int, readyBefore time.Time, leaseUntil time.Time) ([]outboxRecord, error) {
 	if f.claimErr != nil {
 		return nil, f.claimErr
 	}
+	f.claimLimit = limit
+	f.claimReadyBefore = readyBefore
+	f.claimLeaseUntil = leaseUntil
 	return append([]outboxRecord(nil), f.claimRecords...), nil
 }
 
@@ -74,9 +80,19 @@ func TestPollOutboxBatchWithStorePublishesAndMarksPublished(t *testing.T) {
 	bus := &fakeBus{}
 	now := time.Date(2026, 3, 27, 9, 45, 0, 0, time.UTC)
 
-	err := pollOutboxBatchWithStore(context.Background(), store, bus, now, 100, 5*time.Second, 3)
+	err := pollOutboxBatchWithStore(context.Background(), store, bus, now, 100, 5*time.Second, 3, 30*time.Second)
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
+	}
+	if store.claimLimit != 100 {
+		t.Fatalf("expected claim limit 100, got %d", store.claimLimit)
+	}
+	if !store.claimReadyBefore.Equal(now) {
+		t.Fatalf("expected claim readyBefore %s, got %s", now, store.claimReadyBefore)
+	}
+	expectedLeaseUntil := now.Add(30 * time.Second)
+	if !store.claimLeaseUntil.Equal(expectedLeaseUntil) {
+		t.Fatalf("expected leaseUntil %s, got %s", expectedLeaseUntil, store.claimLeaseUntil)
 	}
 
 	if len(bus.published) != 2 {
@@ -113,7 +129,7 @@ func TestPollOutboxBatchWithStoreRetriesWhenPublishFails(t *testing.T) {
 	now := time.Date(2026, 3, 27, 10, 0, 0, 0, time.UTC)
 	retryDelay := 7 * time.Second
 
-	err := pollOutboxBatchWithStore(context.Background(), store, bus, now, 100, retryDelay, 3)
+	err := pollOutboxBatchWithStore(context.Background(), store, bus, now, 100, retryDelay, 3, 30*time.Second)
 	if err == nil {
 		t.Fatal("expected error when publish fails")
 	}
@@ -151,7 +167,7 @@ func TestPollOutboxBatchWithStoreMarksFailedWhenAttemptsExhausted(t *testing.T) 
 	}
 	now := time.Date(2026, 3, 27, 10, 5, 0, 0, time.UTC)
 
-	err := pollOutboxBatchWithStore(context.Background(), store, bus, now, 100, 5*time.Second, 3)
+	err := pollOutboxBatchWithStore(context.Background(), store, bus, now, 100, 5*time.Second, 3, 30*time.Second)
 	if err == nil {
 		t.Fatal("expected error when terminal publish failure occurs")
 	}
@@ -175,7 +191,7 @@ func TestPollOutboxBatchWithStoreReturnsClaimError(t *testing.T) {
 	}
 	bus := &fakeBus{}
 
-	err := pollOutboxBatchWithStore(context.Background(), store, bus, time.Now(), 100, 5*time.Second, 3)
+	err := pollOutboxBatchWithStore(context.Background(), store, bus, time.Now(), 100, 5*time.Second, 3, 30*time.Second)
 	if err == nil {
 		t.Fatal("expected claim error")
 	}
