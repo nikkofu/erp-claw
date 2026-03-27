@@ -368,6 +368,18 @@ func registerAdminRoutes(rg *gin.RouterGroup, container *bootstrap.Container) {
 		}
 		presenter.OK(c, transferOrderExecuteResponse(order, entries))
 	})
+	inventoryGroup.POST("/transfer-orders/:id/cancel", func(c *gin.Context) {
+		order, err := container.SupplyChain.CancelTransferOrder(c.Request.Context(), supplychain.CancelTransferOrderInput{
+			TenantID:        tenantIDFromContext(c),
+			ActorID:         actorIDFromContext(c),
+			TransferOrderID: c.Param("id"),
+		})
+		if err != nil {
+			renderSupplyChainError(c, err)
+			return
+		}
+		presenter.OK(c, transferOrderResponse(order))
+	})
 
 	readModelGroup := rg.Group("/read-models")
 	readModelGroup.GET("/overview", func(c *gin.Context) {
@@ -664,6 +676,7 @@ func renderSupplyChainError(c *gin.Context, err error) {
 		errors.Is(err, inventory.ErrInvalidTransferOrder),
 		errors.Is(err, inventory.ErrInvalidTransferOrderQuery),
 		errors.Is(err, inventory.ErrTransferOrderNotExecutable),
+		errors.Is(err, inventory.ErrTransferOrderNotCancelable),
 		errors.Is(err, inventory.ErrInsufficientAvailableInventory),
 		errors.Is(err, procurement.ErrInvalidPurchaseOrder),
 		errors.Is(err, procurement.ErrPurchaseOrderAlreadySubmitted),
@@ -855,6 +868,7 @@ func transferOrderResponse(order inventory.TransferOrder) gin.H {
 		"status":            order.Status,
 		"created_by":        order.CreatedBy,
 		"executed_by":       order.ExecutedBy,
+		"canceled_by":       order.CanceledBy,
 	}
 }
 

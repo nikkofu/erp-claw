@@ -670,6 +670,74 @@ func TestAdminInventoryTransferOrderListSupportsStatusSortAndPagination(t *testi
 	}
 }
 
+func TestAdminInventoryTransferOrderCancelFlow(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	container := bootstrap.NewContainer(bootstrap.DefaultConfig())
+	h := router.New(router.WithContainer(container))
+
+	supplierID := stringField(t, postJSONData(t, h, "/api/admin/v1/master-data/suppliers", map[string]any{
+		"code": "SUP-001",
+		"name": "Acme Supply",
+	}), "id")
+	productID := stringField(t, postJSONData(t, h, "/api/admin/v1/master-data/products", map[string]any{
+		"sku":  "SKU-001",
+		"name": "Copper Wire",
+		"unit": "roll",
+	}), "id")
+	sourceWarehouseID := stringField(t, postJSONData(t, h, "/api/admin/v1/master-data/warehouses", map[string]any{
+		"code": "WH-SH",
+		"name": "Shanghai Warehouse",
+	}), "id")
+	targetWarehouseID := stringField(t, postJSONData(t, h, "/api/admin/v1/master-data/warehouses", map[string]any{
+		"code": "WH-BJ-CAN",
+		"name": "Beijing Warehouse Cancel",
+	}), "id")
+
+	orderID := stringField(t, postJSONData(t, h, "/api/admin/v1/procurement/purchase-orders", map[string]any{
+		"supplier_id":  supplierID,
+		"warehouse_id": sourceWarehouseID,
+		"lines": []map[string]any{{
+			"product_id": productID,
+			"quantity":   5,
+		}},
+	}), "id")
+	submitResp := postJSONData(t, h, "/api/admin/v1/procurement/purchase-orders/"+orderID+"/submit", map[string]any{})
+	approvalID := stringField(t, nestedMap(t, submitResp, "approval"), "id")
+	postJSONData(t, h, "/api/admin/v1/approvals/"+approvalID+"/approve", map[string]any{})
+	postJSONData(t, h, "/api/admin/v1/procurement/purchase-orders/"+orderID+"/receive", map[string]any{
+		"lines": []map[string]any{{
+			"product_id": productID,
+			"quantity":   5,
+		}},
+	})
+
+	createResp := postJSONData(t, h, "/api/admin/v1/inventory/transfer-orders", map[string]any{
+		"product_id":        productID,
+		"from_warehouse_id": sourceWarehouseID,
+		"to_warehouse_id":   targetWarehouseID,
+		"quantity":          1,
+	})
+	transferOrderID := stringField(t, createResp, "id")
+
+	cancelResp := postJSONData(t, h, "/api/admin/v1/inventory/transfer-orders/"+transferOrderID+"/cancel", map[string]any{})
+	if got := stringField(t, cancelResp, "status"); got != "cancelled" {
+		t.Fatalf("expected canceled transfer order status, got %s", got)
+	}
+
+	canceledList := getJSONArrayData(t, h, "/api/admin/v1/inventory/transfer-orders?status=cancelled&sort=id_desc&page=1&page_size=10")
+	if len(canceledList) != 1 {
+		t.Fatalf("expected 1 canceled transfer order, got %d", len(canceledList))
+	}
+	if got := stringField(t, canceledList[0], "id"); got != transferOrderID {
+		t.Fatalf("expected canceled transfer order %s, got %s", transferOrderID, got)
+	}
+
+	env := doJSON(t, h, http.MethodPost, "/api/admin/v1/inventory/transfer-orders/"+transferOrderID+"/execute", map[string]any{}, http.StatusBadRequest)
+	if env.Meta["request_id"] == "" {
+		t.Fatal("expected request_id metadata")
+	}
+}
+
 func TestAdminInventoryLedgerListFlow(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	container := bootstrap.NewContainer(bootstrap.DefaultConfig())

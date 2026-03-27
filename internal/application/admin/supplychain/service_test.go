@@ -930,6 +930,103 @@ func TestServiceListTransferOrdersFailsForInvalidQuery(t *testing.T) {
 	}
 }
 
+func TestServiceCancelsTransferOrder(t *testing.T) {
+	ctx := context.Background()
+	svc := newTestService()
+	receivedOrder := createReceivedOrder(t, ctx, svc)
+
+	targetWarehouse, err := svc.CreateWarehouse(ctx, CreateWarehouseInput{
+		TenantID: "tenant-a",
+		ActorID:  "actor-a",
+		Code:     "WH-CANCEL-1",
+		Name:     "Warehouse Cancel 1",
+	})
+	if err != nil {
+		t.Fatalf("create target warehouse: %v", err)
+	}
+
+	order, err := svc.CreateTransferOrder(ctx, CreateTransferOrderInput{
+		TenantID:        "tenant-a",
+		ActorID:         "planner-a",
+		ProductID:       receivedOrder.Lines[0].ProductID,
+		FromWarehouseID: receivedOrder.WarehouseID,
+		ToWarehouseID:   targetWarehouse.ID,
+		Quantity:        1,
+	})
+	if err != nil {
+		t.Fatalf("create transfer order: %v", err)
+	}
+
+	canceled, err := svc.CancelTransferOrder(ctx, CancelTransferOrderInput{
+		TenantID:        "tenant-a",
+		ActorID:         "planner-a",
+		TransferOrderID: order.ID,
+	})
+	if err != nil {
+		t.Fatalf("cancel transfer order: %v", err)
+	}
+	if canceled.Status != inventory.TransferOrderStatusCancelled {
+		t.Fatalf("expected canceled status, got %s", canceled.Status)
+	}
+	if canceled.CanceledBy != "planner-a" {
+		t.Fatalf("expected canceled_by planner-a, got %s", canceled.CanceledBy)
+	}
+
+	_, _, err = svc.ExecuteTransferOrder(ctx, ExecuteTransferOrderInput{
+		TenantID:        "tenant-a",
+		ActorID:         "warehouse-a",
+		TransferOrderID: order.ID,
+	})
+	if !errors.Is(err, inventory.ErrTransferOrderNotExecutable) {
+		t.Fatalf("expected transfer order not executable after cancellation, got %v", err)
+	}
+}
+
+func TestServiceCancelTransferOrderFailsWhenAlreadyExecuted(t *testing.T) {
+	ctx := context.Background()
+	svc := newTestService()
+	receivedOrder := createReceivedOrder(t, ctx, svc)
+
+	targetWarehouse, err := svc.CreateWarehouse(ctx, CreateWarehouseInput{
+		TenantID: "tenant-a",
+		ActorID:  "actor-a",
+		Code:     "WH-CANCEL-2",
+		Name:     "Warehouse Cancel 2",
+	})
+	if err != nil {
+		t.Fatalf("create target warehouse: %v", err)
+	}
+
+	order, err := svc.CreateTransferOrder(ctx, CreateTransferOrderInput{
+		TenantID:        "tenant-a",
+		ActorID:         "planner-a",
+		ProductID:       receivedOrder.Lines[0].ProductID,
+		FromWarehouseID: receivedOrder.WarehouseID,
+		ToWarehouseID:   targetWarehouse.ID,
+		Quantity:        1,
+	})
+	if err != nil {
+		t.Fatalf("create transfer order: %v", err)
+	}
+
+	if _, _, err := svc.ExecuteTransferOrder(ctx, ExecuteTransferOrderInput{
+		TenantID:        "tenant-a",
+		ActorID:         "warehouse-a",
+		TransferOrderID: order.ID,
+	}); err != nil {
+		t.Fatalf("execute transfer order: %v", err)
+	}
+
+	_, err = svc.CancelTransferOrder(ctx, CancelTransferOrderInput{
+		TenantID:        "tenant-a",
+		ActorID:         "planner-a",
+		TransferOrderID: order.ID,
+	})
+	if !errors.Is(err, inventory.ErrTransferOrderNotCancelable) {
+		t.Fatalf("expected transfer order not cancelable, got %v", err)
+	}
+}
+
 func TestServiceListsInventoryLedgerEntriesForWarehouseProduct(t *testing.T) {
 	ctx := context.Background()
 	svc := newTestService()
