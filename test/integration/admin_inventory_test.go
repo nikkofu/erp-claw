@@ -114,7 +114,7 @@ func TestAdminInventoryReceiptRequiresApprovedOrder(t *testing.T) {
 			"product_id": productID,
 			"quantity":   5,
 		}},
-	}, http.StatusBadRequest)
+	}, http.StatusConflict)
 	if env.Meta["request_id"] == "" {
 		t.Fatal("expected request_id metadata")
 	}
@@ -750,7 +750,7 @@ func TestAdminInventoryTransferOrderCancelFlow(t *testing.T) {
 		t.Fatalf("expected canceled transfer order %s, got %s", transferOrderID, got)
 	}
 
-	env := doJSON(t, h, http.MethodPost, "/api/admin/v1/inventory/transfer-orders/"+transferOrderID+"/execute", map[string]any{}, http.StatusBadRequest)
+	env := doJSON(t, h, http.MethodPost, "/api/admin/v1/inventory/transfer-orders/"+transferOrderID+"/execute", map[string]any{}, http.StatusConflict)
 	if env.Meta["request_id"] == "" {
 		t.Fatal("expected request_id metadata")
 	}

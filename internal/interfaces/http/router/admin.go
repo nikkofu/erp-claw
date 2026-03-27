@@ -676,25 +676,25 @@ func renderSupplyChainError(c *gin.Context, err error) {
 		errors.Is(err, inventory.ErrInvalidReservation),
 		errors.Is(err, inventory.ErrInvalidTransferOrder),
 		errors.Is(err, inventory.ErrInvalidTransferOrderQuery),
-		errors.Is(err, inventory.ErrTransferOrderNotExecutable),
-		errors.Is(err, inventory.ErrTransferOrderNotCancelable),
 		errors.Is(err, inventory.ErrInsufficientAvailableInventory),
 		errors.Is(err, procurement.ErrInvalidPurchaseOrder),
 		errors.Is(err, procurement.ErrPurchaseOrderAlreadySubmitted),
-		errors.Is(err, procurement.ErrPurchaseOrderNotReceivable),
 		errors.Is(err, payable.ErrInvalidBill),
 		errors.Is(err, payable.ErrBillAlreadyExists),
-		errors.Is(err, payable.ErrOrderNotBillable),
 		errors.Is(err, payable.ErrInvalidPaymentPlan),
 		errors.Is(err, receivable.ErrInvalidBill),
 		errors.Is(err, sales.ErrInvalidOrder),
-		errors.Is(err, sales.ErrOrderNotShippable),
 		errors.Is(err, approval.ErrInvalidRequest),
 		errors.Is(err, approval.ErrApprovalNotPending):
 		presenter.Error(c, http.StatusBadRequest, err.Error())
 	case errors.Is(err, shared.ErrPolicyDenied):
 		presenter.Error(c, http.StatusForbidden, err.Error())
-	case errors.Is(err, shared.ErrApprovalRequired):
+	case errors.Is(err, shared.ErrApprovalRequired),
+		errors.Is(err, procurement.ErrPurchaseOrderNotReceivable),
+		errors.Is(err, payable.ErrOrderNotBillable),
+		errors.Is(err, inventory.ErrTransferOrderNotExecutable),
+		errors.Is(err, inventory.ErrTransferOrderNotCancelable),
+		errors.Is(err, sales.ErrOrderNotShippable):
 		presenter.Error(c, http.StatusConflict, err.Error())
 	default:
 		presenter.Error(c, http.StatusInternalServerError, err.Error())
