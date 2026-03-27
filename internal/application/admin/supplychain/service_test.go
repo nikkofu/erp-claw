@@ -382,6 +382,68 @@ func TestServiceReceivesApprovedPurchaseOrderWithDuplicateProductLines(t *testin
 	}
 }
 
+func TestServiceReceivePurchaseOrderKeepsOrderApprovedWhenSaveReceiptFails(t *testing.T) {
+	ctx := context.Background()
+	saveReceiptErr := errors.New("save receipt failed")
+	svc := newTestServiceWithInventoryRepository(failingInventoryRepository{
+		delegate:       memory.NewInventoryRepository(),
+		saveReceiptErr: saveReceiptErr,
+	})
+	approvedOrder := createApprovedOrder(t, ctx, svc)
+
+	_, _, _, err := svc.ReceivePurchaseOrder(ctx, ReceivePurchaseOrderInput{
+		TenantID:        "tenant-a",
+		ActorID:         "receiver-a",
+		PurchaseOrderID: approvedOrder.ID,
+		Lines: []ReceivePurchaseOrderLine{{
+			ProductID: approvedOrder.Lines[0].ProductID,
+			Quantity:  approvedOrder.Lines[0].Quantity,
+		}},
+	})
+	if !errors.Is(err, saveReceiptErr) {
+		t.Fatalf("expected save receipt error, got %v", err)
+	}
+
+	storedOrder, err := svc.purchaseOrders.Get(ctx, "tenant-a", approvedOrder.ID)
+	if err != nil {
+		t.Fatalf("get purchase order: %v", err)
+	}
+	if storedOrder.Status != procurement.PurchaseOrderStatusApproved {
+		t.Fatalf("expected purchase order to remain approved, got %s", storedOrder.Status)
+	}
+}
+
+func TestServiceReceivePurchaseOrderKeepsOrderApprovedWhenAppendLedgerFails(t *testing.T) {
+	ctx := context.Background()
+	appendLedgerErr := errors.New("append ledger failed")
+	svc := newTestServiceWithInventoryRepository(failingInventoryRepository{
+		delegate:        memory.NewInventoryRepository(),
+		appendLedgerErr: appendLedgerErr,
+	})
+	approvedOrder := createApprovedOrder(t, ctx, svc)
+
+	_, _, _, err := svc.ReceivePurchaseOrder(ctx, ReceivePurchaseOrderInput{
+		TenantID:        "tenant-a",
+		ActorID:         "receiver-a",
+		PurchaseOrderID: approvedOrder.ID,
+		Lines: []ReceivePurchaseOrderLine{{
+			ProductID: approvedOrder.Lines[0].ProductID,
+			Quantity:  approvedOrder.Lines[0].Quantity,
+		}},
+	})
+	if !errors.Is(err, appendLedgerErr) {
+		t.Fatalf("expected append ledger error, got %v", err)
+	}
+
+	storedOrder, err := svc.purchaseOrders.Get(ctx, "tenant-a", approvedOrder.ID)
+	if err != nil {
+		t.Fatalf("get purchase order: %v", err)
+	}
+	if storedOrder.Status != procurement.PurchaseOrderStatusApproved {
+		t.Fatalf("expected purchase order to remain approved, got %s", storedOrder.Status)
+	}
+}
+
 func TestServiceReturnsInventoryBalanceFromPostedReceipts(t *testing.T) {
 	ctx := context.Background()
 	svc := newTestService()
@@ -1697,16 +1759,67 @@ func TestServiceListReceivableBillsReturnsTenantScopedBills(t *testing.T) {
 }
 
 func newTestService() *Service {
+	return newTestServiceWithInventoryRepository(memory.NewInventoryRepository())
+}
+
+func newTestServiceWithInventoryRepository(inventoryRepo inventory.Repository) *Service {
+	if inventoryRepo == nil {
+		inventoryRepo = memory.NewInventoryRepository()
+	}
 	return NewService(ServiceDeps{
 		MasterData:     memory.NewMasterDataRepository(),
 		PurchaseOrders: memory.NewPurchaseOrderRepository(),
 		Approvals:      memory.NewApprovalRepository(),
-		Inventory:      memory.NewInventoryRepository(),
+		Inventory:      inventoryRepo,
 		Payables:       memory.NewPayableRepository(),
 		Receivables:    memory.NewReceivableRepository(),
 		SalesOrders:    memory.NewSalesOrderRepository(),
 		Pipeline:       shared.NewPipeline(shared.PipelineDeps{}),
 	})
+}
+
+type failingInventoryRepository struct {
+	delegate        inventory.Repository
+	saveReceiptErr  error
+	appendLedgerErr error
+}
+
+func (r failingInventoryRepository) SaveReceipt(ctx context.Context, receipt inventory.Receipt) error {
+	if r.saveReceiptErr != nil {
+		return r.saveReceiptErr
+	}
+	return r.delegate.SaveReceipt(ctx, receipt)
+}
+
+func (r failingInventoryRepository) AppendLedgerEntries(ctx context.Context, entries []inventory.LedgerEntry) error {
+	if r.appendLedgerErr != nil {
+		return r.appendLedgerErr
+	}
+	return r.delegate.AppendLedgerEntries(ctx, entries)
+}
+
+func (r failingInventoryRepository) ListLedgerEntries(ctx context.Context, tenantID, productID, warehouseID string) ([]inventory.LedgerEntry, error) {
+	return r.delegate.ListLedgerEntries(ctx, tenantID, productID, warehouseID)
+}
+
+func (r failingInventoryRepository) SaveReservation(ctx context.Context, reservation inventory.Reservation) error {
+	return r.delegate.SaveReservation(ctx, reservation)
+}
+
+func (r failingInventoryRepository) ListReservations(ctx context.Context, tenantID, productID, warehouseID string) ([]inventory.Reservation, error) {
+	return r.delegate.ListReservations(ctx, tenantID, productID, warehouseID)
+}
+
+func (r failingInventoryRepository) SaveTransferOrder(ctx context.Context, order inventory.TransferOrder) error {
+	return r.delegate.SaveTransferOrder(ctx, order)
+}
+
+func (r failingInventoryRepository) GetTransferOrder(ctx context.Context, tenantID, transferOrderID string) (inventory.TransferOrder, error) {
+	return r.delegate.GetTransferOrder(ctx, tenantID, transferOrderID)
+}
+
+func (r failingInventoryRepository) ListTransferOrdersByTenant(ctx context.Context, tenantID string) ([]inventory.TransferOrder, error) {
+	return r.delegate.ListTransferOrdersByTenant(ctx, tenantID)
 }
 
 func createSubmittedOrder(t *testing.T, ctx context.Context, svc *Service) (procurement.PurchaseOrder, approval.Request) {
