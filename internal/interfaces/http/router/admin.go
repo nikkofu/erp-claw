@@ -463,8 +463,23 @@ func registerAdminRoutes(rg *gin.RouterGroup, container *bootstrap.Container) {
 		presenter.OK(c, receivableBillResponse(bill))
 	})
 	receivableGroup.GET("", func(c *gin.Context) {
+		page, err := parsePositiveReceivableQueryInt(c.Query("page"), 1)
+		if err != nil {
+			renderSupplyChainError(c, err)
+			return
+		}
+		pageSize, err := parsePositiveReceivableQueryInt(c.Query("page_size"), 20)
+		if err != nil {
+			renderSupplyChainError(c, err)
+			return
+		}
+
 		bills, err := container.SupplyChain.ListReceivableBills(c.Request.Context(), supplychain.ListReceivableBillsInput{
 			TenantID: tenantIDFromContext(c),
+			Status:   c.Query("status"),
+			Sort:     c.DefaultQuery("sort", "id_desc"),
+			Page:     page,
+			PageSize: pageSize,
 		})
 		if err != nil {
 			renderSupplyChainError(c, err)
@@ -486,8 +501,23 @@ func registerAdminRoutes(rg *gin.RouterGroup, container *bootstrap.Container) {
 
 	payableGroup := rg.Group("/payables")
 	payableGroup.GET("", func(c *gin.Context) {
+		page, err := parsePositivePayableQueryInt(c.Query("page"), 1)
+		if err != nil {
+			renderSupplyChainError(c, err)
+			return
+		}
+		pageSize, err := parsePositivePayableQueryInt(c.Query("page_size"), 20)
+		if err != nil {
+			renderSupplyChainError(c, err)
+			return
+		}
+
 		bills, err := container.SupplyChain.ListPayableBills(c.Request.Context(), supplychain.ListPayableBillsInput{
 			TenantID: tenantIDFromContext(c),
+			Status:   c.Query("status"),
+			Sort:     c.DefaultQuery("sort", "id_desc"),
+			Page:     page,
+			PageSize: pageSize,
 		})
 		if err != nil {
 			renderSupplyChainError(c, err)
@@ -725,6 +755,14 @@ func parsePositiveSalesOrderQueryInt(raw string, defaultValue int) (int, error) 
 	return parsePositiveQueryIntWithErr(raw, defaultValue, sales.ErrInvalidOrderQuery)
 }
 
+func parsePositivePayableQueryInt(raw string, defaultValue int) (int, error) {
+	return parsePositiveQueryIntWithErr(raw, defaultValue, payable.ErrInvalidBillQuery)
+}
+
+func parsePositiveReceivableQueryInt(raw string, defaultValue int) (int, error) {
+	return parsePositiveQueryIntWithErr(raw, defaultValue, receivable.ErrInvalidBillQuery)
+}
+
 func parsePositiveQueryIntWithErr(raw string, defaultValue int, errValue error) (int, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
@@ -763,9 +801,11 @@ func renderSupplyChainError(c *gin.Context, err error) {
 		errors.Is(err, procurement.ErrInvalidPurchaseOrder),
 		errors.Is(err, procurement.ErrPurchaseOrderAlreadySubmitted),
 		errors.Is(err, payable.ErrInvalidBill),
+		errors.Is(err, payable.ErrInvalidBillQuery),
 		errors.Is(err, payable.ErrBillAlreadyExists),
 		errors.Is(err, payable.ErrInvalidPaymentPlan),
 		errors.Is(err, receivable.ErrInvalidBill),
+		errors.Is(err, receivable.ErrInvalidBillQuery),
 		errors.Is(err, sales.ErrInvalidOrder),
 		errors.Is(err, sales.ErrInvalidOrderQuery),
 		errors.Is(err, approval.ErrInvalidRequest),

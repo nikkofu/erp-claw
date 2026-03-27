@@ -2,6 +2,32 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.36] - 2026-03-27
+
+### Added
+
+- Admin finance list query endpoints now support sort/pagination and status filtering:
+  - `GET /api/admin/v1/payables` supports `status=open`, `sort=id_asc|id_desc`, `page`, `page_size`
+  - `GET /api/admin/v1/receivables` supports `status=open`, `sort=id_asc|id_desc`, `page`, `page_size`
+- Supply-chain service query capability:
+  - `ListPayableBills` with status/sort/pagination validation and tenant scope
+  - `ListReceivableBills` with status/sort/pagination validation and tenant scope
+- New tests for payable/receivable list query behavior:
+  - service:
+    - `TestServiceListPayableBillsSupportsStatusSortAndPagination`
+    - `TestServiceListPayableBillsFailsForInvalidQuery`
+    - `TestServiceListReceivableBillsSupportsStatusSortAndPagination`
+    - `TestServiceListReceivableBillsFailsForInvalidQuery`
+  - integration:
+    - `TestAdminPayableListSupportsStatusSortAndPagination`
+    - `TestAdminPayableListRejectsInvalidQuery`
+    - `TestAdminReceivableListSupportsStatusSortAndPagination`
+    - `TestAdminReceivableListRejectsInvalidQuery`
+
+### Changed
+
+- Updated `README.md` and `docs/phase-2-coverage-status.md` to include admin payable/receivable list query semantics.
+
 ## [0.2.35] - 2026-03-27
 
 ### Added

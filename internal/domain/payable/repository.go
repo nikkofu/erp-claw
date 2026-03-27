@@ -6,6 +6,7 @@ import (
 )
 
 var ErrBillNotFound = errors.New("payable bill not found")
+var ErrInvalidBillQuery = errors.New("invalid payable bill query")
 
 type Repository interface {
 	Save(ctx context.Context, bill Bill) error

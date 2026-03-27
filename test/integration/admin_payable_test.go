@@ -193,3 +193,92 @@ func TestAdminPayableListReturnsTenantScopedBills(t *testing.T) {
 		t.Fatalf("expected payable id %s, got %s", createdPayableID, got)
 	}
 }
+
+func TestAdminPayableListSupportsStatusSortAndPagination(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	container := bootstrap.NewContainer(bootstrap.DefaultConfig())
+	h := router.New(router.WithContainer(container))
+
+	supplierID := stringField(t, postJSONData(t, h, "/api/admin/v1/master-data/suppliers", map[string]any{
+		"code": "SUP-001",
+		"name": "Acme Supply",
+	}), "id")
+	productID := stringField(t, postJSONData(t, h, "/api/admin/v1/master-data/products", map[string]any{
+		"sku":  "SKU-001",
+		"name": "Copper Wire",
+		"unit": "roll",
+	}), "id")
+	warehouseID := stringField(t, postJSONData(t, h, "/api/admin/v1/master-data/warehouses", map[string]any{
+		"code": "WH-SH",
+		"name": "Shanghai Warehouse",
+	}), "id")
+
+	createPayable := func(quantity int) string {
+		orderID := stringField(t, postJSONData(t, h, "/api/admin/v1/procurement/purchase-orders", map[string]any{
+			"supplier_id":  supplierID,
+			"warehouse_id": warehouseID,
+			"lines": []map[string]any{{
+				"product_id": productID,
+				"quantity":   quantity,
+			}},
+		}), "id")
+		submitResp := postJSONData(t, h, "/api/admin/v1/procurement/purchase-orders/"+orderID+"/submit", map[string]any{})
+		approvalID := stringField(t, nestedMap(t, submitResp, "approval"), "id")
+		postJSONData(t, h, "/api/admin/v1/approvals/"+approvalID+"/approve", map[string]any{})
+		postJSONData(t, h, "/api/admin/v1/procurement/purchase-orders/"+orderID+"/receive", map[string]any{
+			"lines": []map[string]any{{
+				"product_id": productID,
+				"quantity":   quantity,
+			}},
+		})
+		resp := postJSONData(t, h, "/api/admin/v1/procurement/purchase-orders/"+orderID+"/payable-bills", map[string]any{})
+		return stringField(t, resp, "id")
+	}
+
+	payableA := createPayable(2)
+	payableB := createPayable(3)
+	payableC := createPayable(4)
+
+	page1 := doJSONForArray(t, h, http.MethodGet, "/api/admin/v1/payables?sort=id_asc&page=1&page_size=2", nil, http.StatusOK).Data
+	if len(page1) != 2 {
+		t.Fatalf("expected 2 payable bills in page1, got %d", len(page1))
+	}
+	if got := stringField(t, page1[0], "id"); got != payableA {
+		t.Fatalf("expected page1 first payable id %s, got %s", payableA, got)
+	}
+	if got := stringField(t, page1[1], "id"); got != payableB {
+		t.Fatalf("expected page1 second payable id %s, got %s", payableB, got)
+	}
+
+	page2 := doJSONForArray(t, h, http.MethodGet, "/api/admin/v1/payables?sort=id_asc&page=2&page_size=2", nil, http.StatusOK).Data
+	if len(page2) != 1 {
+		t.Fatalf("expected 1 payable bill in page2, got %d", len(page2))
+	}
+	if got := stringField(t, page2[0], "id"); got != payableC {
+		t.Fatalf("expected page2 payable id %s, got %s", payableC, got)
+	}
+
+	openBills := doJSONForArray(t, h, http.MethodGet, "/api/admin/v1/payables?status=open", nil, http.StatusOK).Data
+	if len(openBills) != 3 {
+		t.Fatalf("expected 3 open payable bills, got %d", len(openBills))
+	}
+}
+
+func TestAdminPayableListRejectsInvalidQuery(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	container := bootstrap.NewContainer(bootstrap.DefaultConfig())
+	h := router.New(router.WithContainer(container))
+
+	cases := []string{
+		"/api/admin/v1/payables?status=closed",
+		"/api/admin/v1/payables?sort=unknown",
+		"/api/admin/v1/payables?page=0",
+		"/api/admin/v1/payables?page_size=0",
+	}
+	for _, path := range cases {
+		env := doJSON(t, h, http.MethodGet, path, nil, http.StatusBadRequest)
+		if env.Meta["request_id"] == "" {
+			t.Fatalf("expected request_id metadata in bad request response for %s", path)
+		}
+	}
+}
