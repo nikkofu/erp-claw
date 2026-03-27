@@ -474,7 +474,7 @@ func (s *Service) ListTransferOrders(ctx context.Context, input ListTransferOrde
 	if statusFilter != "" {
 		status := inventory.TransferOrderStatus(statusFilter)
 		switch status {
-		case inventory.TransferOrderStatusPlanned, inventory.TransferOrderStatusExecuted:
+		case inventory.TransferOrderStatusPlanned, inventory.TransferOrderStatusExecuted, inventory.TransferOrderStatusCancelled:
 		default:
 			return nil, inventory.ErrInvalidTransferOrderQuery
 		}
@@ -602,6 +602,30 @@ func (s *Service) ExecuteTransferOrder(ctx context.Context, input ExecuteTransfe
 		return nil
 	})
 	return order, entries, err
+}
+
+func (s *Service) CancelTransferOrder(ctx context.Context, input CancelTransferOrderInput) (inventory.TransferOrder, error) {
+	var order inventory.TransferOrder
+	err := s.pipeline.Execute(ctx, shared.Command{
+		Name:     "inventory.transfer_orders.cancel",
+		TenantID: input.TenantID,
+		ActorID:  input.ActorID,
+		Payload:  input,
+	}, func(txCtx context.Context, _ shared.Command) error {
+		current, err := s.inventory.GetTransferOrder(txCtx, input.TenantID, input.TransferOrderID)
+		if err != nil {
+			return err
+		}
+		if err := current.MarkCanceled(input.ActorID); err != nil {
+			return err
+		}
+		if err := s.inventory.SaveTransferOrder(txCtx, current); err != nil {
+			return err
+		}
+		order = current
+		return nil
+	})
+	return order, err
 }
 
 func (s *Service) TransferInventory(ctx context.Context, input TransferInventoryInput) ([]inventory.LedgerEntry, error) {

@@ -124,6 +124,12 @@ type ExecuteTransferOrderInput struct {
 	TransferOrderID string
 }
 
+type CancelTransferOrderInput struct {
+	TenantID        string
+	ActorID         string
+	TransferOrderID string
+}
+
 type ListInventoryLedgerInput struct {
 	TenantID    string
 	ProductID   string
