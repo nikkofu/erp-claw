@@ -12,6 +12,46 @@ func registerIntegrationRoutes(rg *gin.RouterGroup, container *bootstrap.Contain
 		panic("router: integration container must provide supply-chain service")
 	}
 
+	inventoryGroup := rg.Group("/inventory")
+	inventoryGroup.GET("/balances", func(c *gin.Context) {
+		balance, err := container.SupplyChain.GetInventoryBalance(c.Request.Context(), supplychain.GetInventoryBalanceInput{
+			TenantID:    tenantIDFromContext(c),
+			ProductID:   c.Query("product_id"),
+			WarehouseID: c.Query("warehouse_id"),
+		})
+		if err != nil {
+			renderSupplyChainError(c, err)
+			return
+		}
+		presenter.OK(c, inventoryBalanceResponse(balance))
+	})
+	inventoryGroup.GET("/ledger", func(c *gin.Context) {
+		page, err := parsePositiveInventoryQueryInt(c.Query("page"), 1)
+		if err != nil {
+			renderSupplyChainError(c, err)
+			return
+		}
+		pageSize, err := parsePositiveInventoryQueryInt(c.Query("page_size"), 20)
+		if err != nil {
+			renderSupplyChainError(c, err)
+			return
+		}
+
+		entries, err := container.SupplyChain.ListInventoryLedger(c.Request.Context(), supplychain.ListInventoryLedgerInput{
+			TenantID:    tenantIDFromContext(c),
+			ProductID:   c.Query("product_id"),
+			WarehouseID: c.Query("warehouse_id"),
+			Sort:        c.DefaultQuery("sort", "id_asc"),
+			Page:        page,
+			PageSize:    pageSize,
+		})
+		if err != nil {
+			renderSupplyChainError(c, err)
+			return
+		}
+		presenter.OK(c, ledgerEntriesResponse(entries))
+	})
+
 	readModelGroup := rg.Group("/read-models")
 	readModelGroup.GET("/overview", func(c *gin.Context) {
 		overview, err := container.SupplyChain.GetBackofficeOverview(c.Request.Context(), supplychain.GetBackofficeOverviewInput{

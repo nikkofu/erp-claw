@@ -146,6 +146,8 @@ Run `go test ./test/integration -run 'TestWorkspaceInventoryQueriesReturnBalance
 
 ## Integration API (Phase 2 Minimal Query Slice)
 
+- `GET /api/integration/v1/inventory/balances?product_id=<id>&warehouse_id=<id>`
+- `GET /api/integration/v1/inventory/ledger` (requires `product_id`, `warehouse_id`; supports `sort=id_asc|id_desc`, `page`, `page_size`)
 - `GET /api/integration/v1/read-models/overview`
 - `GET /api/integration/v1/sales-orders` (supports `status=draft|shipped`, `sort=id_asc|id_desc`, `page`, `page_size`)
 - `GET /api/integration/v1/sales-orders/:id`
@@ -154,7 +156,7 @@ Run `go test ./test/integration -run 'TestWorkspaceInventoryQueriesReturnBalance
 - `GET /api/integration/v1/receivables` (supports `status=open`, `sort=id_asc|id_desc`, `page`, `page_size`)
 - `GET /api/integration/v1/receivables/:id`
 
-Run `go test ./test/integration -run 'TestIntegrationReadModelAndSalesQueries|TestIntegrationSalesOrderListSupportsStatusSortAndPagination|TestIntegrationSalesOrderListRejectsInvalidQuery|TestIntegrationFinanceQueriesReturnPayableAndReceivableReadModels|TestIntegrationFinanceListSupportsStatusSortAndPagination|TestIntegrationFinanceListRejectsInvalidQuery' -v` to verify integration overview/sales/finance query routing.
+Run `go test ./test/integration -run 'TestIntegrationInventoryQueriesReturnBalanceAndLedger|TestIntegrationInventoryLedgerListSupportsSortAndPagination|TestIntegrationInventoryQueriesRejectInvalidQuery|TestIntegrationReadModelAndSalesQueries|TestIntegrationSalesOrderListSupportsStatusSortAndPagination|TestIntegrationSalesOrderListRejectsInvalidQuery|TestIntegrationFinanceQueriesReturnPayableAndReceivableReadModels|TestIntegrationFinanceListSupportsStatusSortAndPagination|TestIntegrationFinanceListRejectsInvalidQuery' -v` to verify integration inventory/overview/sales/finance query routing.
 
 ## Smoke Run
 
