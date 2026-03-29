@@ -229,18 +229,21 @@ type AdvanceTaskInput struct {
 }
 
 func (s *Service) StartTask(ctx context.Context, input AdvanceTaskInput) (platformruntime.Task, error) {
+	input = normalizeAdvanceTaskInput(input)
 	return s.mutateTask(ctx, "runtime.tasks.start", "runtime.task.running", input, func(task *platformruntime.Task) error {
 		return task.Start(time.Now().UTC())
 	})
 }
 
 func (s *Service) CompleteTask(ctx context.Context, input AdvanceTaskInput) (platformruntime.Task, error) {
+	input = normalizeAdvanceTaskInput(input)
 	return s.mutateTask(ctx, "runtime.tasks.complete", "runtime.task.succeeded", input, func(task *platformruntime.Task) error {
 		return task.Complete(input.Output, time.Now().UTC())
 	})
 }
 
 func (s *Service) FailTask(ctx context.Context, input AdvanceTaskInput) (platformruntime.Task, error) {
+	input = normalizeAdvanceTaskInput(input)
 	return s.mutateTask(ctx, "runtime.tasks.fail", "runtime.task.failed", input, func(task *platformruntime.Task) error {
 		return task.Fail(input.Reason, time.Now().UTC())
 	})
@@ -398,6 +401,14 @@ func (s *Service) emitWorkspaceEvent(evt platformruntime.WorkspaceEvent) error {
 		return nil
 	}
 	return s.workspaceEvents.Broadcast(evt)
+}
+
+func normalizeAdvanceTaskInput(input AdvanceTaskInput) AdvanceTaskInput {
+	input.TenantID = strings.TrimSpace(input.TenantID)
+	input.ActorID = strings.TrimSpace(input.ActorID)
+	input.TaskID = strings.TrimSpace(input.TaskID)
+	input.Reason = strings.TrimSpace(input.Reason)
+	return input
 }
 
 func normalizeRoles(roles []string) []string {

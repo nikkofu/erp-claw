@@ -12,6 +12,47 @@ import (
 	"github.com/nikkofu/erp-claw/internal/interfaces/http/router"
 )
 
+func TestControlPlaneCommandRequiresActorContext(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	container := bootstrap.NewContainer(bootstrap.DefaultConfig())
+	h := router.New(router.WithContainer(container))
+
+	tenantID := "tenant-actor-required"
+	actorID := "actor-runtime"
+
+	postJSONData(t, h, "/api/platform/v1/control/actors", map[string]any{
+		"tenant_id":     tenantID,
+		"actor_id":      actorID,
+		"roles":         []string{"workspace_operator"},
+		"department_id": "ops",
+	})
+
+	doJSONWithHeaders(t, h, http.MethodPost, "/api/platform/v1/agent/sessions", map[string]any{
+		"session_id": "sess-require-actor",
+	}, http.StatusOK, map[string]string{
+		"X-Tenant-ID": tenantID,
+		"X-Actor-ID":  actorID,
+	})
+
+	doJSONWithHeaders(t, h, http.MethodPost, "/api/platform/v1/agent/sessions/sess-require-actor/tasks", map[string]any{
+		"task_id":   "task-require-actor",
+		"task_type": "tool.call",
+		"input": map[string]any{
+			"tool": "search",
+		},
+	}, http.StatusOK, map[string]string{
+		"X-Tenant-ID": tenantID,
+		"X-Actor-ID":  actorID,
+	})
+
+	forbidden := doJSONWithHeaders(t, h, http.MethodPost, "/api/platform/v1/agent/tasks/task-require-actor/start", map[string]any{}, http.StatusForbidden, map[string]string{
+		"X-Tenant-ID": tenantID,
+	})
+	if forbidden.Error["message"] == "" {
+		t.Fatal("expected forbidden error message")
+	}
+}
+
 func TestPlatformControlPlaneActorPolicyAndAgentRuntimeFlow(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	container := bootstrap.NewContainer(bootstrap.DefaultConfig())
@@ -40,7 +81,7 @@ func TestPlatformControlPlaneActorPolicyAndAgentRuntimeFlow(t *testing.T) {
 	postJSONData(t, h, "/api/platform/v1/control/actors", map[string]any{
 		"tenant_id":     tenantID,
 		"actor_id":      "actor-buyer",
-		"roles":         []string{"supplychain_operator"},
+		"roles":         []string{"supplychain_operator", "workspace_operator"},
 		"department_id": "ops",
 	})
 
@@ -76,8 +117,11 @@ func TestPlatformControlPlaneActorPolicyAndAgentRuntimeFlow(t *testing.T) {
 		t.Fatalf("expected pending task, got %s", got)
 	}
 
-	started := postJSONData(t, h, "/api/platform/v1/agent/tasks/task-001/start", map[string]any{})
-	if got := stringField(t, started, "status"); got != "running" {
+	started := doJSONWithHeaders(t, h, http.MethodPost, "/api/platform/v1/agent/tasks/task-001/start", map[string]any{}, http.StatusOK, map[string]string{
+		"X-Tenant-ID": "tenant-admin",
+		"X-Actor-ID":  "system",
+	})
+	if got := stringField(t, started.Data, "status"); got != "running" {
 		t.Fatalf("expected running task, got %s", got)
 	}
 
@@ -95,12 +139,15 @@ func TestPlatformControlPlaneActorPolicyAndAgentRuntimeFlow(t *testing.T) {
 		t.Fatalf("expected 1 task item, got %d", len(taskItems))
 	}
 
-	completed := postJSONData(t, h, "/api/platform/v1/agent/tasks/task-001/complete", map[string]any{
+	completed := doJSONWithHeaders(t, h, http.MethodPost, "/api/platform/v1/agent/tasks/task-001/complete", map[string]any{
 		"output": map[string]any{
 			"result": "ok",
 		},
+	}, http.StatusOK, map[string]string{
+		"X-Tenant-ID": "tenant-admin",
+		"X-Actor-ID":  "system",
 	})
-	if got := stringField(t, completed, "status"); got != "succeeded" {
+	if got := stringField(t, completed.Data, "status"); got != "succeeded" {
 		t.Fatalf("expected succeeded task, got %s", got)
 	}
 
