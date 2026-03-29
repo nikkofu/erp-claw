@@ -86,6 +86,18 @@ The first executable Phase 2 slice is now available through the admin surface. I
 
 Run `go test ./test/integration -run 'TestAdminSupplyChainFlow|TestAdminInventoryReceiptFlow' -v` to verify the end-to-end Phase 2 admin flow locally.
 
+### Phase 2 Strict Verification (test evidence only; not final sign-off)
+
+```bash
+go test ./internal/application/admin/supplychain ./internal/infrastructure/persistence/memory -v
+go test ./test/integration -run 'TestAdminSupplyChainFlow|TestAdminInventoryReceiptFlow|TestAdminInventoryReceiptRequiresApprovedOrder|TestPhase2Wave2MigrationContract' -v
+go test ./...
+```
+
+- Wave 2 baseline for strict gate evidence is solely: `docs/superpowers/plans/2026-03-26-phase-2-wave-2-inbound-inventory-implementation-plan.md`.
+- Final strict sign-off requires evidence that the baseline plan task list is fully completed.
+- After Task 4 completes, the strict integration gate expands to include additional negative-path tests.
+
 ## Smoke Run
 
 Start the API server and hit the health endpoint to confirm the router boots:
