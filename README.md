@@ -88,15 +88,18 @@ Run `go test ./test/integration -run 'TestAdminSupplyChainFlow|TestAdminInventor
 
 ### Phase 2 Strict Verification (test evidence only; not final sign-off)
 
+These strict commands are additive to the existing local verification flow (for example `make test` and `make test-integration`); they do not replace that baseline workflow.
+
 ```bash
 go test ./internal/application/admin/supplychain ./internal/infrastructure/persistence/memory -v
 go test ./test/integration -run 'TestAdminSupplyChainFlow|TestAdminInventoryReceiptFlow|TestAdminInventoryReceiptRequiresApprovedOrder|TestPhase2Wave2MigrationContract' -v
 go test ./...
 ```
 
+- Local baseline evidence (2026-03-29): strict command set executed in local scope as gate-matrix evidence only, not final sign-off.
 - Wave 2 baseline for strict gate evidence is solely: `docs/superpowers/plans/2026-03-26-phase-2-wave-2-inbound-inventory-implementation-plan.md`.
 - Final strict sign-off requires evidence that the baseline plan task list is fully completed.
-- After Task 4 completes, the strict integration gate expands to include additional negative-path tests.
+- After strict negative-path inventory validations are implemented in this plan, the strict integration gate expands to include additional negative-path tests.
 
 ## Smoke Run
 
