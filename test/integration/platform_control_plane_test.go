@@ -45,11 +45,17 @@ func TestControlPlaneCommandRequiresActorContext(t *testing.T) {
 		"X-Actor-ID":  actorID,
 	})
 
-	forbidden := doJSONWithHeaders(t, h, http.MethodPost, "/api/platform/v1/agent/tasks/task-require-actor/start", map[string]any{}, http.StatusForbidden, map[string]string{
-		"X-Tenant-ID": tenantID,
-	})
-	if forbidden.Error["message"] == "" {
-		t.Fatal("expected forbidden error message")
+	for _, path := range []string{
+		"/api/platform/v1/agent/tasks/task-require-actor/pause",
+		"/api/platform/v1/agent/tasks/task-require-actor/resume",
+		"/api/platform/v1/agent/tasks/task-require-actor/handoff",
+	} {
+		forbidden := doJSONWithHeaders(t, h, http.MethodPost, path, map[string]any{}, http.StatusForbidden, map[string]string{
+			"X-Tenant-ID": tenantID,
+		})
+		if forbidden.Error["message"] == "" {
+			t.Fatalf("expected forbidden error message for %s", path)
+		}
 	}
 }
 

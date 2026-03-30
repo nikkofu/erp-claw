@@ -229,23 +229,53 @@ type AdvanceTaskInput struct {
 }
 
 func (s *Service) StartTask(ctx context.Context, input AdvanceTaskInput) (platformruntime.Task, error) {
-	input = normalizeAdvanceTaskInput(input)
+	input, _ = normalizeAdvanceTaskInput(ctx, input)
 	return s.mutateTask(ctx, "runtime.tasks.start", "runtime.task.running", input, func(task *platformruntime.Task) error {
 		return task.Start(time.Now().UTC())
 	})
 }
 
 func (s *Service) CompleteTask(ctx context.Context, input AdvanceTaskInput) (platformruntime.Task, error) {
-	input = normalizeAdvanceTaskInput(input)
+	input, _ = normalizeAdvanceTaskInput(ctx, input)
 	return s.mutateTask(ctx, "runtime.tasks.complete", "runtime.task.succeeded", input, func(task *platformruntime.Task) error {
 		return task.Complete(input.Output, time.Now().UTC())
 	})
 }
 
 func (s *Service) FailTask(ctx context.Context, input AdvanceTaskInput) (platformruntime.Task, error) {
-	input = normalizeAdvanceTaskInput(input)
+	input, _ = normalizeAdvanceTaskInput(ctx, input)
 	return s.mutateTask(ctx, "runtime.tasks.fail", "runtime.task.failed", input, func(task *platformruntime.Task) error {
 		return task.Fail(input.Reason, time.Now().UTC())
+	})
+}
+
+func (s *Service) PauseTask(ctx context.Context, input AdvanceTaskInput) (platformruntime.Task, error) {
+	input, actorProvided := normalizeAdvanceTaskInput(ctx, input)
+	if !actorProvided {
+		return platformruntime.Task{}, shared.ErrPolicyDenied
+	}
+	return s.mutateTask(ctx, "runtime.tasks.pause", "runtime.task.paused", input, func(task *platformruntime.Task) error {
+		return nil
+	})
+}
+
+func (s *Service) ResumeTask(ctx context.Context, input AdvanceTaskInput) (platformruntime.Task, error) {
+	input, actorProvided := normalizeAdvanceTaskInput(ctx, input)
+	if !actorProvided {
+		return platformruntime.Task{}, shared.ErrPolicyDenied
+	}
+	return s.mutateTask(ctx, "runtime.tasks.resume", "runtime.task.resumed", input, func(task *platformruntime.Task) error {
+		return nil
+	})
+}
+
+func (s *Service) HandoffTask(ctx context.Context, input AdvanceTaskInput) (platformruntime.Task, error) {
+	input, actorProvided := normalizeAdvanceTaskInput(ctx, input)
+	if !actorProvided {
+		return platformruntime.Task{}, shared.ErrPolicyDenied
+	}
+	return s.mutateTask(ctx, "runtime.tasks.handoff", "runtime.task.handoff", input, func(task *platformruntime.Task) error {
+		return nil
 	})
 }
 
@@ -403,12 +433,23 @@ func (s *Service) emitWorkspaceEvent(evt platformruntime.WorkspaceEvent) error {
 	return s.workspaceEvents.Broadcast(evt)
 }
 
-func normalizeAdvanceTaskInput(input AdvanceTaskInput) AdvanceTaskInput {
+func normalizeAdvanceTaskInput(ctx context.Context, input AdvanceTaskInput) (AdvanceTaskInput, bool) {
 	input.TenantID = strings.TrimSpace(input.TenantID)
 	input.ActorID = strings.TrimSpace(input.ActorID)
 	input.TaskID = strings.TrimSpace(input.TaskID)
 	input.Reason = strings.TrimSpace(input.Reason)
-	return input
+
+	actorProvided := input.ActorID != ""
+	if rc, ok := platformruntime.RequestContextFromContext(ctx); ok && rc != nil {
+		if tenantID := strings.TrimSpace(rc.TenantID); tenantID != "" {
+			input.TenantID = tenantID
+		}
+		if actorID := strings.TrimSpace(rc.ActorID); actorID != "" {
+			input.ActorID = actorID
+		}
+		actorProvided = rc.ActorProvided
+	}
+	return input, actorProvided
 }
 
 func normalizeRoles(roles []string) []string {

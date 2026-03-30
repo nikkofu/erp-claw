@@ -149,10 +149,6 @@ func registerControlPlaneRoutes(rg *gin.RouterGroup, container *bootstrap.Contai
 	})
 
 	agentGroup.POST("/tasks/:id/start", func(c *gin.Context) {
-		if !actorHeaderProvided(c) {
-			presenter.Error(c, http.StatusForbidden, "actor context is required")
-			return
-		}
 		task, err := container.ControlPlane.StartTask(c.Request.Context(), controlplane.AdvanceTaskInput{
 			TenantID: tenantIDFromContext(c),
 			ActorID:  actorIDFromContext(c),
@@ -166,10 +162,6 @@ func registerControlPlaneRoutes(rg *gin.RouterGroup, container *bootstrap.Contai
 	})
 
 	agentGroup.POST("/tasks/:id/complete", func(c *gin.Context) {
-		if !actorHeaderProvided(c) {
-			presenter.Error(c, http.StatusForbidden, "actor context is required")
-			return
-		}
 		var req completeTaskRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
 			presenter.Error(c, http.StatusBadRequest, err.Error())
@@ -190,10 +182,6 @@ func registerControlPlaneRoutes(rg *gin.RouterGroup, container *bootstrap.Contai
 	})
 
 	agentGroup.POST("/tasks/:id/fail", func(c *gin.Context) {
-		if !actorHeaderProvided(c) {
-			presenter.Error(c, http.StatusForbidden, "actor context is required")
-			return
-		}
 		var req failTaskRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
 			presenter.Error(c, http.StatusBadRequest, err.Error())
@@ -205,6 +193,45 @@ func registerControlPlaneRoutes(rg *gin.RouterGroup, container *bootstrap.Contai
 			ActorID:  actorIDFromContext(c),
 			TaskID:   c.Param("id"),
 			Reason:   req.Reason,
+		})
+		if err != nil {
+			renderControlPlaneError(c, err)
+			return
+		}
+		presenter.OK(c, taskResponse(task))
+	})
+
+	agentGroup.POST("/tasks/:id/pause", func(c *gin.Context) {
+		task, err := container.ControlPlane.PauseTask(c.Request.Context(), controlplane.AdvanceTaskInput{
+			TenantID: tenantIDFromContext(c),
+			ActorID:  actorIDFromContext(c),
+			TaskID:   c.Param("id"),
+		})
+		if err != nil {
+			renderControlPlaneError(c, err)
+			return
+		}
+		presenter.OK(c, taskResponse(task))
+	})
+
+	agentGroup.POST("/tasks/:id/resume", func(c *gin.Context) {
+		task, err := container.ControlPlane.ResumeTask(c.Request.Context(), controlplane.AdvanceTaskInput{
+			TenantID: tenantIDFromContext(c),
+			ActorID:  actorIDFromContext(c),
+			TaskID:   c.Param("id"),
+		})
+		if err != nil {
+			renderControlPlaneError(c, err)
+			return
+		}
+		presenter.OK(c, taskResponse(task))
+	})
+
+	agentGroup.POST("/tasks/:id/handoff", func(c *gin.Context) {
+		task, err := container.ControlPlane.HandoffTask(c.Request.Context(), controlplane.AdvanceTaskInput{
+			TenantID: tenantIDFromContext(c),
+			ActorID:  actorIDFromContext(c),
+			TaskID:   c.Param("id"),
 		})
 		if err != nil {
 			renderControlPlaneError(c, err)
@@ -379,13 +406,4 @@ func parseLimit(raw string, fallback int) (int, error) {
 		return 0, errors.New("limit must be greater than 0")
 	}
 	return limit, nil
-}
-
-func actorHeaderProvided(c *gin.Context) bool {
-	provided, ok := c.Get("actor_id_provided")
-	if !ok {
-		return false
-	}
-	isProvided, ok := provided.(bool)
-	return ok && isProvided
 }
