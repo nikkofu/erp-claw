@@ -192,6 +192,18 @@ func TestPlatformControlPlaneActorPolicyAndAgentRuntimeFlow(t *testing.T) {
 		t.Fatalf("expected session id sess-001, got %s", got)
 	}
 
+	sessionList := getJSONData(t, h, "/api/platform/v1/agent/sessions?status=open&limit=10")
+	sessionItems, ok := sessionList["items"].([]any)
+	if !ok {
+		t.Fatalf("expected session items array, got %#v", sessionList["items"])
+	}
+	if len(sessionItems) != 1 {
+		t.Fatalf("expected 1 open session, got %d", len(sessionItems))
+	}
+	if stringField(t, sessionList, "as_of") == "" {
+		t.Fatal("expected session list as_of")
+	}
+
 	sessionTasks := getJSONData(t, h, "/api/platform/v1/agent/sessions/sess-001/tasks")
 	taskItems, ok := sessionTasks["tasks"].([]any)
 	if !ok {
@@ -199,6 +211,18 @@ func TestPlatformControlPlaneActorPolicyAndAgentRuntimeFlow(t *testing.T) {
 	}
 	if len(taskItems) != 1 {
 		t.Fatalf("expected 1 task item, got %d", len(taskItems))
+	}
+
+	runningTasks := getJSONData(t, h, "/api/platform/v1/agent/tasks?status=running&limit=1")
+	runningItems, ok := runningTasks["items"].([]any)
+	if !ok {
+		t.Fatalf("expected running items array, got %#v", runningTasks["items"])
+	}
+	if len(runningItems) != 1 {
+		t.Fatalf("expected 1 running task item, got %d", len(runningItems))
+	}
+	if stringField(t, runningTasks, "as_of") == "" {
+		t.Fatal("expected task list as_of")
 	}
 
 	completed := doJSONWithHeaders(t, h, http.MethodPost, "/api/platform/v1/agent/tasks/task-001/complete", map[string]any{

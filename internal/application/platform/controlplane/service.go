@@ -372,6 +372,70 @@ func (s *Service) ListSessionTasks(ctx context.Context, input ListSessionTasksIn
 	return tasks, err
 }
 
+type ListTasksInput struct {
+	TenantID  string
+	ActorID   string
+	SessionID string
+	Status    platformruntime.TaskStatus
+	Limit     int
+	Cursor    string
+}
+
+func (s *Service) ListTasks(ctx context.Context, input ListTasksInput) (platformruntime.TaskListPage, error) {
+	var page platformruntime.TaskListPage
+	err := s.pipeline.Execute(ctx, shared.Command{
+		Name:     "runtime.tasks.list",
+		TenantID: input.TenantID,
+		ActorID:  input.ActorID,
+		Payload:  input,
+	}, func(txCtx context.Context, _ shared.Command) error {
+		listed, err := s.tasks.List(txCtx, platformruntime.TaskListQuery{
+			TenantID:  strings.TrimSpace(input.TenantID),
+			ActorID:   strings.TrimSpace(input.ActorID),
+			SessionID: strings.TrimSpace(input.SessionID),
+			Status:    input.Status,
+			Limit:     input.Limit,
+			Cursor:    strings.TrimSpace(input.Cursor),
+		})
+		if err != nil {
+			return err
+		}
+		page = listed
+		return nil
+	})
+	return page, err
+}
+
+type ListSessionsInput struct {
+	TenantID string
+	ActorID  string
+	Status   platformruntime.SessionStatus
+	Limit    int
+}
+
+func (s *Service) ListSessions(ctx context.Context, input ListSessionsInput) (platformruntime.SessionListPage, error) {
+	var page platformruntime.SessionListPage
+	err := s.pipeline.Execute(ctx, shared.Command{
+		Name:     "runtime.sessions.list",
+		TenantID: input.TenantID,
+		ActorID:  input.ActorID,
+		Payload:  input,
+	}, func(txCtx context.Context, _ shared.Command) error {
+		listed, err := s.sessions.List(txCtx, platformruntime.SessionListQuery{
+			TenantID: strings.TrimSpace(input.TenantID),
+			ActorID:  strings.TrimSpace(input.ActorID),
+			Status:   input.Status,
+			Limit:    input.Limit,
+		})
+		if err != nil {
+			return err
+		}
+		page = listed
+		return nil
+	})
+	return page, err
+}
+
 type ListAuditInput struct {
 	TenantID    string
 	ActorID     string

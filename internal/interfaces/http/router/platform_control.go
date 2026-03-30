@@ -87,6 +87,27 @@ func registerControlPlaneRoutes(rg *gin.RouterGroup, container *bootstrap.Contai
 		presenter.OK(c, sessionResponse(session))
 	})
 
+	agentGroup.GET("/sessions", func(c *gin.Context) {
+		limit, err := parseLimit(c.Query("limit"), 20)
+		if err != nil {
+			presenter.Error(c, http.StatusBadRequest, err.Error())
+			return
+		}
+		status := platformruntime.SessionStatus(strings.TrimSpace(c.Query("status")))
+
+		page, err := container.ControlPlane.ListSessions(c.Request.Context(), controlplane.ListSessionsInput{
+			TenantID: tenantIDFromContext(c),
+			ActorID:  actorIDFromContext(c),
+			Status:   status,
+			Limit:    limit,
+		})
+		if err != nil {
+			renderControlPlaneError(c, err)
+			return
+		}
+		presenter.OK(c, sessionListPageResponse(page))
+	})
+
 	agentGroup.GET("/sessions/:id", func(c *gin.Context) {
 		session, err := container.ControlPlane.GetSession(c.Request.Context(), controlplane.GetSessionInput{
 			TenantID:  tenantIDFromContext(c),
@@ -133,6 +154,29 @@ func registerControlPlaneRoutes(rg *gin.RouterGroup, container *bootstrap.Contai
 			return
 		}
 		presenter.OK(c, gin.H{"tasks": taskListResponse(tasks)})
+	})
+
+	agentGroup.GET("/tasks", func(c *gin.Context) {
+		limit, err := parseLimit(c.Query("limit"), 20)
+		if err != nil {
+			presenter.Error(c, http.StatusBadRequest, err.Error())
+			return
+		}
+		status := platformruntime.TaskStatus(strings.TrimSpace(c.Query("status")))
+
+		page, err := container.ControlPlane.ListTasks(c.Request.Context(), controlplane.ListTasksInput{
+			TenantID:  tenantIDFromContext(c),
+			ActorID:   actorIDFromContext(c),
+			SessionID: strings.TrimSpace(c.Query("session_id")),
+			Status:    status,
+			Limit:     limit,
+			Cursor:    c.Query("cursor"),
+		})
+		if err != nil {
+			renderControlPlaneError(c, err)
+			return
+		}
+		presenter.OK(c, taskListPageResponse(page))
 	})
 
 	agentGroup.GET("/tasks/:id", func(c *gin.Context) {
@@ -385,6 +429,29 @@ func taskListResponse(tasks []platformruntime.Task) []gin.H {
 		out = append(out, taskResponse(task))
 	}
 	return out
+}
+
+func taskListPageResponse(page platformruntime.TaskListPage) gin.H {
+	return gin.H{
+		"items":       taskListResponse(page.Items),
+		"next_cursor": page.NextCursor,
+		"as_of":       formatTime(page.AsOf),
+	}
+}
+
+func sessionListResponse(sessions []platformruntime.Session) []gin.H {
+	out := make([]gin.H, 0, len(sessions))
+	for _, session := range sessions {
+		out = append(out, sessionResponse(session))
+	}
+	return out
+}
+
+func sessionListPageResponse(page platformruntime.SessionListPage) gin.H {
+	return gin.H{
+		"items": sessionListResponse(page.Items),
+		"as_of": formatTime(page.AsOf),
+	}
 }
 
 func formatTime(ts time.Time) string {

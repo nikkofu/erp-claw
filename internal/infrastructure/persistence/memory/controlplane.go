@@ -2,7 +2,11 @@ package memory
 
 import (
 	"context"
+	"sort"
+	"strconv"
+	"strings"
 	"sync"
+	"time"
 
 	"github.com/nikkofu/erp-claw/internal/platform/iam"
 	platformruntime "github.com/nikkofu/erp-claw/internal/platform/runtime"
@@ -111,6 +115,38 @@ func (r sessionRepository) Get(_ context.Context, tenantID, sessionID string) (p
 	return cloneSession(session), nil
 }
 
+func (r sessionRepository) List(_ context.Context, query platformruntime.SessionListQuery) (platformruntime.SessionListPage, error) {
+	r.store.mu.RLock()
+	defer r.store.mu.RUnlock()
+
+	items := make([]platformruntime.Session, 0)
+	for _, session := range r.store.sessions {
+		if query.TenantID != "" && session.TenantID != query.TenantID {
+			continue
+		}
+		if query.Status != "" && session.Status != query.Status {
+			continue
+		}
+		items = append(items, cloneSession(session))
+	}
+
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].StartedAt.Equal(items[j].StartedAt) {
+			return items[i].ID < items[j].ID
+		}
+		return items[i].StartedAt.Before(items[j].StartedAt)
+	})
+
+	limit := query.Limit
+	if limit <= 0 || limit > len(items) {
+		limit = len(items)
+	}
+	return platformruntime.SessionListPage{
+		Items: items[:limit],
+		AsOf:  time.Now().UTC(),
+	}, nil
+}
+
 type taskRepository struct {
 	store *ControlPlaneStore
 }
@@ -160,6 +196,65 @@ func (r taskRepository) ListBySession(_ context.Context, tenantID, sessionID str
 		out = append(out, cloneTask(task))
 	}
 	return out, nil
+}
+
+func (r taskRepository) List(_ context.Context, query platformruntime.TaskListQuery) (platformruntime.TaskListPage, error) {
+	r.store.mu.RLock()
+	defer r.store.mu.RUnlock()
+
+	items := make([]platformruntime.Task, 0)
+	for _, task := range r.store.tasks {
+		if query.TenantID != "" && task.TenantID != query.TenantID {
+			continue
+		}
+		if query.SessionID != "" && task.SessionID != query.SessionID {
+			continue
+		}
+		if query.Status != "" && task.Status != query.Status {
+			continue
+		}
+		items = append(items, cloneTask(task))
+	}
+
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].QueuedAt.Equal(items[j].QueuedAt) {
+			return items[i].ID < items[j].ID
+		}
+		return items[i].QueuedAt.Before(items[j].QueuedAt)
+	})
+
+	start := 0
+	if query.Cursor != "" {
+		parts := strings.Split(query.Cursor, ":")
+		if len(parts) == 2 {
+			if parsed, err := strconv.Atoi(parts[1]); err == nil && parsed > 0 {
+				start = parsed
+			}
+		}
+	}
+	if start > len(items) {
+		start = len(items)
+	}
+
+	limit := query.Limit
+	if limit <= 0 {
+		limit = 20
+	}
+	end := start + limit
+	if end > len(items) {
+		end = len(items)
+	}
+
+	nextCursor := ""
+	if end < len(items) {
+		nextCursor = "idx:" + strconv.Itoa(end)
+	}
+
+	return platformruntime.TaskListPage{
+		Items:      items[start:end],
+		NextCursor: nextCursor,
+		AsOf:       time.Now().UTC(),
+	}, nil
 }
 
 func cloneActor(actor iam.Actor) iam.Actor {
