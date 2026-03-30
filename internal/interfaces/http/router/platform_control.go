@@ -297,7 +297,8 @@ func renderControlPlaneError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, shared.ErrPolicyDenied):
 		presenter.Error(c, http.StatusForbidden, err.Error())
-	case errors.Is(err, shared.ErrApprovalRequired):
+	case errors.Is(err, shared.ErrApprovalRequired),
+		errors.Is(err, controlplane.ErrGovernanceCommandNotImplemented):
 		presenter.Error(c, http.StatusConflict, err.Error())
 	case errors.Is(err, tenant.ErrTenantNotFound),
 		errors.Is(err, iam.ErrActorNotFound),

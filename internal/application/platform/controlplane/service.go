@@ -2,6 +2,7 @@ package controlplane
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync/atomic"
@@ -35,6 +36,8 @@ type Service struct {
 }
 
 var ids atomic.Uint64
+
+var ErrGovernanceCommandNotImplemented = errors.New("governance command not implemented")
 
 func NewService(deps ServiceDeps) *Service {
 	if deps.Pipeline == nil {
@@ -254,9 +257,15 @@ func (s *Service) PauseTask(ctx context.Context, input AdvanceTaskInput) (platfo
 	if !actorProvided {
 		return platformruntime.Task{}, shared.ErrPolicyDenied
 	}
-	return s.mutateTask(ctx, "runtime.tasks.pause", "runtime.task.paused", input, func(task *platformruntime.Task) error {
-		return nil
+	err := s.pipeline.Execute(ctx, shared.Command{
+		Name:     "runtime.tasks.pause",
+		TenantID: input.TenantID,
+		ActorID:  input.ActorID,
+		Payload:  input,
+	}, func(context.Context, shared.Command) error {
+		return ErrGovernanceCommandNotImplemented
 	})
+	return platformruntime.Task{}, err
 }
 
 func (s *Service) ResumeTask(ctx context.Context, input AdvanceTaskInput) (platformruntime.Task, error) {
@@ -264,9 +273,15 @@ func (s *Service) ResumeTask(ctx context.Context, input AdvanceTaskInput) (platf
 	if !actorProvided {
 		return platformruntime.Task{}, shared.ErrPolicyDenied
 	}
-	return s.mutateTask(ctx, "runtime.tasks.resume", "runtime.task.resumed", input, func(task *platformruntime.Task) error {
-		return nil
+	err := s.pipeline.Execute(ctx, shared.Command{
+		Name:     "runtime.tasks.resume",
+		TenantID: input.TenantID,
+		ActorID:  input.ActorID,
+		Payload:  input,
+	}, func(context.Context, shared.Command) error {
+		return ErrGovernanceCommandNotImplemented
 	})
+	return platformruntime.Task{}, err
 }
 
 func (s *Service) HandoffTask(ctx context.Context, input AdvanceTaskInput) (platformruntime.Task, error) {
@@ -274,9 +289,15 @@ func (s *Service) HandoffTask(ctx context.Context, input AdvanceTaskInput) (plat
 	if !actorProvided {
 		return platformruntime.Task{}, shared.ErrPolicyDenied
 	}
-	return s.mutateTask(ctx, "runtime.tasks.handoff", "runtime.task.handoff", input, func(task *platformruntime.Task) error {
-		return nil
+	err := s.pipeline.Execute(ctx, shared.Command{
+		Name:     "runtime.tasks.handoff",
+		TenantID: input.TenantID,
+		ActorID:  input.ActorID,
+		Payload:  input,
+	}, func(context.Context, shared.Command) error {
+		return ErrGovernanceCommandNotImplemented
 	})
+	return platformruntime.Task{}, err
 }
 
 type GetSessionInput struct {

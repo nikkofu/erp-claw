@@ -128,6 +128,82 @@ func TestServiceEmitsFailureEventOnTaskFail(t *testing.T) {
 	assertWorkspaceEvent(t, got[3], "runtime.task.failed", "tenant-a", session.ID, task.ID)
 }
 
+func TestGovernanceTaskCommandsRejectWithoutSuccessNoop(t *testing.T) {
+	store := memory.NewControlPlaneStore()
+	sink := &recordingWorkspaceEventSink{}
+	svc := NewService(ServiceDeps{
+		TenantCatalog:   store.TenantCatalog(),
+		IAMDirectory:    store.IAMDirectory(),
+		Sessions:        store.SessionRepository(),
+		Tasks:           store.TaskRepository(),
+		WorkspaceEvents: sink,
+		Pipeline: shared.NewPipeline(shared.PipelineDeps{
+			Policy: policy.StaticEvaluator(policy.DecisionAllow),
+		}),
+	})
+
+	ctx := context.Background()
+	session, err := svc.OpenSession(ctx, OpenSessionInput{
+		TenantID:  "tenant-a",
+		ActorID:   "actor-a",
+		SessionID: "sess-001",
+	})
+	if err != nil {
+		t.Fatalf("open session: %v", err)
+	}
+	task, err := svc.EnqueueTask(ctx, EnqueueTaskInput{
+		TenantID:  "tenant-a",
+		ActorID:   "actor-a",
+		SessionID: session.ID,
+		TaskID:    "task-001",
+		TaskType:  "tool.call",
+	})
+	if err != nil {
+		t.Fatalf("enqueue task: %v", err)
+	}
+
+	if _, err := svc.PauseTask(ctx, AdvanceTaskInput{
+		TenantID: "tenant-a",
+		ActorID:  "actor-a",
+		TaskID:   task.ID,
+	}); err == nil {
+		t.Fatal("expected pause task to be rejected")
+	}
+	if _, err := svc.ResumeTask(ctx, AdvanceTaskInput{
+		TenantID: "tenant-a",
+		ActorID:  "actor-a",
+		TaskID:   task.ID,
+	}); err == nil {
+		t.Fatal("expected resume task to be rejected")
+	}
+	if _, err := svc.HandoffTask(ctx, AdvanceTaskInput{
+		TenantID: "tenant-a",
+		ActorID:  "actor-a",
+		TaskID:   task.ID,
+	}); err == nil {
+		t.Fatal("expected handoff task to be rejected")
+	}
+
+	current, err := svc.GetTask(ctx, GetTaskInput{
+		TenantID: "tenant-a",
+		ActorID:  "actor-a",
+		TaskID:   task.ID,
+	})
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	if current.Status != platformruntime.TaskStatusPending {
+		t.Fatalf("expected task to stay pending, got %s", current.Status)
+	}
+
+	got := sink.Events()
+	if len(got) != 2 {
+		t.Fatalf("expected no extra events from governance commands, got %d events", len(got))
+	}
+	assertWorkspaceEvent(t, got[0], "runtime.session.opened", "tenant-a", session.ID, "")
+	assertWorkspaceEvent(t, got[1], "runtime.task.enqueued", "tenant-a", session.ID, task.ID)
+}
+
 type recordingWorkspaceEventSink struct {
 	events []platformruntime.WorkspaceEvent
 }

@@ -12,6 +12,62 @@ import (
 	"github.com/nikkofu/erp-claw/internal/interfaces/http/router"
 )
 
+func TestControlPlaneGovernanceCommandsReturnExplicitRejection(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	container := bootstrap.NewContainer(bootstrap.DefaultConfig())
+	h := router.New(router.WithContainer(container))
+
+	tenantID := "tenant-governance-reject"
+	actorID := "actor-governance"
+
+	postJSONData(t, h, "/api/platform/v1/control/actors", map[string]any{
+		"tenant_id":     tenantID,
+		"actor_id":      actorID,
+		"roles":         []string{"workspace_operator"},
+		"department_id": "ops",
+	})
+
+	doJSONWithHeaders(t, h, http.MethodPost, "/api/platform/v1/agent/sessions", map[string]any{
+		"session_id": "sess-governance",
+	}, http.StatusOK, map[string]string{
+		"X-Tenant-ID": tenantID,
+		"X-Actor-ID":  actorID,
+	})
+
+	doJSONWithHeaders(t, h, http.MethodPost, "/api/platform/v1/agent/sessions/sess-governance/tasks", map[string]any{
+		"task_id":   "task-governance",
+		"task_type": "tool.call",
+		"input": map[string]any{
+			"tool": "search",
+		},
+	}, http.StatusOK, map[string]string{
+		"X-Tenant-ID": tenantID,
+		"X-Actor-ID":  actorID,
+	})
+
+	for _, path := range []string{
+		"/api/platform/v1/agent/tasks/task-governance/pause",
+		"/api/platform/v1/agent/tasks/task-governance/resume",
+		"/api/platform/v1/agent/tasks/task-governance/handoff",
+	} {
+		rejected := doJSONWithHeaders(t, h, http.MethodPost, path, map[string]any{}, http.StatusConflict, map[string]string{
+			"X-Tenant-ID": tenantID,
+			"X-Actor-ID":  actorID,
+		})
+		if rejected.Error["message"] == "" {
+			t.Fatalf("expected explicit rejection message for %s", path)
+		}
+	}
+
+	gotTask := doJSONWithHeaders(t, h, http.MethodGet, "/api/platform/v1/agent/tasks/task-governance", nil, http.StatusOK, map[string]string{
+		"X-Tenant-ID": tenantID,
+		"X-Actor-ID":  actorID,
+	})
+	if got := stringField(t, gotTask.Data, "status"); got != "pending" {
+		t.Fatalf("expected task status pending after governance rejection, got %s", got)
+	}
+}
+
 func TestControlPlaneCommandRequiresActorContext(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	container := bootstrap.NewContainer(bootstrap.DefaultConfig())
