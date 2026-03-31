@@ -252,6 +252,102 @@ func TestPlatformControlPlaneActorPolicyAndAgentRuntimeFlow(t *testing.T) {
 	}
 }
 
+func TestControlPlaneSessionAndTaskQueriesAreActorScopedWithinTenant(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	container := bootstrap.NewContainer(bootstrap.DefaultConfig())
+	h := router.New(router.WithContainer(container))
+
+	tenantID := "tenant-integration-actor-scope"
+	actorA := "actor-integration-a"
+	actorB := "actor-integration-b"
+
+	for _, actorID := range []string{actorA, actorB} {
+		postJSONData(t, h, "/api/platform/v1/control/actors", map[string]any{
+			"tenant_id":     tenantID,
+			"actor_id":      actorID,
+			"roles":         []string{"workspace_operator"},
+			"department_id": "ops",
+		})
+	}
+
+	doJSONWithHeaders(t, h, http.MethodPost, "/api/platform/v1/agent/sessions", map[string]any{
+		"session_id": "sess-int-actor-a",
+	}, http.StatusOK, map[string]string{
+		"X-Tenant-ID": tenantID,
+		"X-Actor-ID":  actorA,
+	})
+	doJSONWithHeaders(t, h, http.MethodPost, "/api/platform/v1/agent/sessions", map[string]any{
+		"session_id": "sess-int-actor-b",
+	}, http.StatusOK, map[string]string{
+		"X-Tenant-ID": tenantID,
+		"X-Actor-ID":  actorB,
+	})
+
+	doJSONWithHeaders(t, h, http.MethodPost, "/api/platform/v1/agent/sessions/sess-int-actor-a/tasks", map[string]any{
+		"task_id":   "task-int-actor-a",
+		"task_type": "tool.call",
+		"input":     map[string]any{"tool": "search"},
+	}, http.StatusOK, map[string]string{
+		"X-Tenant-ID": tenantID,
+		"X-Actor-ID":  actorA,
+	})
+	doJSONWithHeaders(t, h, http.MethodPost, "/api/platform/v1/agent/tasks/task-int-actor-a/start", map[string]any{}, http.StatusOK, map[string]string{
+		"X-Tenant-ID": tenantID,
+		"X-Actor-ID":  actorA,
+	})
+
+	doJSONWithHeaders(t, h, http.MethodPost, "/api/platform/v1/agent/sessions/sess-int-actor-b/tasks", map[string]any{
+		"task_id":   "task-int-actor-b",
+		"task_type": "tool.call",
+		"input":     map[string]any{"tool": "search"},
+	}, http.StatusOK, map[string]string{
+		"X-Tenant-ID": tenantID,
+		"X-Actor-ID":  actorB,
+	})
+	doJSONWithHeaders(t, h, http.MethodPost, "/api/platform/v1/agent/tasks/task-int-actor-b/start", map[string]any{}, http.StatusOK, map[string]string{
+		"X-Tenant-ID": tenantID,
+		"X-Actor-ID":  actorB,
+	})
+
+	sessionsForA := doJSONWithHeaders(t, h, http.MethodGet, "/api/platform/v1/agent/sessions?status=open&limit=10", nil, http.StatusOK, map[string]string{
+		"X-Tenant-ID": tenantID,
+		"X-Actor-ID":  actorA,
+	})
+	sessionItems, ok := sessionsForA.Data["items"].([]any)
+	if !ok {
+		t.Fatalf("expected sessions items array, got %#v", sessionsForA.Data["items"])
+	}
+	if len(sessionItems) != 1 {
+		t.Fatalf("expected 1 actor-scoped session, got %d", len(sessionItems))
+	}
+	sessionItem, ok := sessionItems[0].(map[string]any)
+	if !ok {
+		t.Fatalf("expected session object, got %#v", sessionItems[0])
+	}
+	if stringField(t, sessionItem, "id") != "sess-int-actor-a" {
+		t.Fatalf("expected sess-int-actor-a, got %s", stringField(t, sessionItem, "id"))
+	}
+
+	tasksForA := doJSONWithHeaders(t, h, http.MethodGet, "/api/platform/v1/agent/tasks?status=running&limit=10", nil, http.StatusOK, map[string]string{
+		"X-Tenant-ID": tenantID,
+		"X-Actor-ID":  actorA,
+	})
+	taskItems, ok := tasksForA.Data["items"].([]any)
+	if !ok {
+		t.Fatalf("expected tasks items array, got %#v", tasksForA.Data["items"])
+	}
+	if len(taskItems) != 1 {
+		t.Fatalf("expected 1 actor-scoped task, got %d", len(taskItems))
+	}
+	taskItem, ok := taskItems[0].(map[string]any)
+	if !ok {
+		t.Fatalf("expected task object, got %#v", taskItems[0])
+	}
+	if stringField(t, taskItem, "id") != "task-int-actor-a" {
+		t.Fatalf("expected task-int-actor-a, got %s", stringField(t, taskItem, "id"))
+	}
+}
+
 func doJSONWithHeaders(
 	t *testing.T,
 	h http.Handler,

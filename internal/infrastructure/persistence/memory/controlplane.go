@@ -124,6 +124,9 @@ func (r sessionRepository) List(_ context.Context, query platformruntime.Session
 		if query.TenantID != "" && session.TenantID != query.TenantID {
 			continue
 		}
+		if query.ActorID != "" && session.ActorID != query.ActorID {
+			continue
+		}
 		if query.Status != "" && session.Status != query.Status {
 			continue
 		}
@@ -212,6 +215,15 @@ func (r taskRepository) List(_ context.Context, query platformruntime.TaskListQu
 		}
 		if query.Status != "" && task.Status != query.Status {
 			continue
+		}
+		if query.ActorID != "" {
+			session, ok := r.store.sessions[key(task.TenantID, task.SessionID)]
+			if !ok {
+				continue
+			}
+			if session.ActorID != query.ActorID {
+				continue
+			}
 		}
 		items = append(items, cloneTask(task))
 	}
