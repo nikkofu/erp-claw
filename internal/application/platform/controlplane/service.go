@@ -318,6 +318,9 @@ func (s *Service) GetSession(ctx context.Context, input GetSessionInput) (platfo
 		if err != nil {
 			return err
 		}
+		if input.ActorID != "" && current.ActorID != input.ActorID {
+			return platformruntime.ErrSessionNotFound
+		}
 		session = current
 		return nil
 	})
@@ -342,6 +345,15 @@ func (s *Service) GetTask(ctx context.Context, input GetTaskInput) (platformrunt
 		if err != nil {
 			return err
 		}
+		if input.ActorID != "" {
+			session, err := s.sessions.Get(txCtx, current.TenantID, current.SessionID)
+			if err != nil {
+				return err
+			}
+			if session.ActorID != input.ActorID {
+				return platformruntime.ErrTaskNotFound
+			}
+		}
 		task = current
 		return nil
 	})
@@ -362,6 +374,13 @@ func (s *Service) ListSessionTasks(ctx context.Context, input ListSessionTasksIn
 		ActorID:  input.ActorID,
 		Payload:  input,
 	}, func(txCtx context.Context, _ shared.Command) error {
+		session, err := s.sessions.Get(txCtx, input.TenantID, input.SessionID)
+		if err != nil {
+			return err
+		}
+		if input.ActorID != "" && session.ActorID != input.ActorID {
+			return platformruntime.ErrSessionNotFound
+		}
 		current, err := s.tasks.ListBySession(txCtx, input.TenantID, input.SessionID)
 		if err != nil {
 			return err

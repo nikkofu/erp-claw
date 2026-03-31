@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -264,18 +265,20 @@ func TestSessionAndTaskListsAreIsolatedByActorWithinTenant(t *testing.T) {
 		"X-Actor-ID":  actorB,
 	})
 
-	doJSONWithHeaders(t, h, http.MethodPost, "/api/platform/v1/agent/sessions/sess-actor-a/tasks", map[string]any{
-		"task_id":   "task-actor-a",
-		"task_type": "tool.call",
-		"input":     map[string]any{"tool": "search"},
-	}, http.StatusOK, map[string]string{
-		"X-Tenant-ID": tenantID,
-		"X-Actor-ID":  actorA,
-	})
-	doJSONWithHeaders(t, h, http.MethodPost, "/api/platform/v1/agent/tasks/task-actor-a/start", map[string]any{}, http.StatusOK, map[string]string{
-		"X-Tenant-ID": tenantID,
-		"X-Actor-ID":  actorA,
-	})
+	for _, taskID := range []string{"task-actor-a-1", "task-actor-a-2"} {
+		doJSONWithHeaders(t, h, http.MethodPost, "/api/platform/v1/agent/sessions/sess-actor-a/tasks", map[string]any{
+			"task_id":   taskID,
+			"task_type": "tool.call",
+			"input":     map[string]any{"tool": "search"},
+		}, http.StatusOK, map[string]string{
+			"X-Tenant-ID": tenantID,
+			"X-Actor-ID":  actorA,
+		})
+		doJSONWithHeaders(t, h, http.MethodPost, "/api/platform/v1/agent/tasks/"+taskID+"/start", map[string]any{}, http.StatusOK, map[string]string{
+			"X-Tenant-ID": tenantID,
+			"X-Actor-ID":  actorA,
+		})
+	}
 
 	doJSONWithHeaders(t, h, http.MethodPost, "/api/platform/v1/agent/sessions/sess-actor-b/tasks", map[string]any{
 		"task_id":   "task-actor-b",
@@ -309,24 +312,63 @@ func TestSessionAndTaskListsAreIsolatedByActorWithinTenant(t *testing.T) {
 		t.Fatalf("expected sess-actor-a, got %s", stringField(t, sessionItem, "id"))
 	}
 
-	tasksForA := doJSONWithHeaders(t, h, http.MethodGet, "/api/platform/v1/agent/tasks?status=running&limit=10", nil, http.StatusOK, map[string]string{
+	page1 := doJSONWithHeaders(t, h, http.MethodGet, "/api/platform/v1/agent/tasks?status=running&limit=1", nil, http.StatusOK, map[string]string{
 		"X-Tenant-ID": tenantID,
 		"X-Actor-ID":  actorA,
 	}).Data
-	taskItems, ok := tasksForA["items"].([]any)
+	page1Items, ok := page1["items"].([]any)
 	if !ok {
-		t.Fatalf("expected tasks items array, got %#v", tasksForA["items"])
+		t.Fatalf("expected page1 items array, got %#v", page1["items"])
 	}
-	if len(taskItems) != 1 {
-		t.Fatalf("expected 1 actor-scoped task, got %d", len(taskItems))
+	if len(page1Items) != 1 {
+		t.Fatalf("expected 1 actor-scoped task on page1, got %d", len(page1Items))
 	}
-	taskItem, ok := taskItems[0].(map[string]any)
+	page1Task, ok := page1Items[0].(map[string]any)
 	if !ok {
-		t.Fatalf("expected task object, got %#v", taskItems[0])
+		t.Fatalf("expected task object, got %#v", page1Items[0])
 	}
-	if stringField(t, taskItem, "id") != "task-actor-a" {
-		t.Fatalf("expected task-actor-a, got %s", stringField(t, taskItem, "id"))
+	if strings.HasSuffix(stringField(t, page1Task, "id"), "actor-b") {
+		t.Fatalf("expected actor-a task on page1, got %s", stringField(t, page1Task, "id"))
 	}
+	nextCursor := stringField(t, page1, "next_cursor")
+	if nextCursor == "" {
+		t.Fatal("expected non-empty next_cursor for actor-a page1")
+	}
+
+	page2 := doJSONWithHeaders(t, h, http.MethodGet, "/api/platform/v1/agent/tasks?status=running&limit=1&cursor="+nextCursor, nil, http.StatusOK, map[string]string{
+		"X-Tenant-ID": tenantID,
+		"X-Actor-ID":  actorA,
+	}).Data
+	page2Items, ok := page2["items"].([]any)
+	if !ok {
+		t.Fatalf("expected page2 items array, got %#v", page2["items"])
+	}
+	if len(page2Items) != 1 {
+		t.Fatalf("expected 1 actor-scoped task on page2, got %d", len(page2Items))
+	}
+	page2Task, ok := page2Items[0].(map[string]any)
+	if !ok {
+		t.Fatalf("expected task object, got %#v", page2Items[0])
+	}
+	if strings.HasSuffix(stringField(t, page2Task, "id"), "actor-b") {
+		t.Fatalf("expected actor-a task on page2, got %s", stringField(t, page2Task, "id"))
+	}
+	if stringField(t, page2, "next_cursor") != "" {
+		t.Fatalf("expected empty next_cursor on actor-a final page, got %s", stringField(t, page2, "next_cursor"))
+	}
+
+	doJSONWithHeaders(t, h, http.MethodGet, "/api/platform/v1/agent/sessions/sess-actor-b", nil, http.StatusNotFound, map[string]string{
+		"X-Tenant-ID": tenantID,
+		"X-Actor-ID":  actorA,
+	})
+	doJSONWithHeaders(t, h, http.MethodGet, "/api/platform/v1/agent/tasks/task-actor-b", nil, http.StatusNotFound, map[string]string{
+		"X-Tenant-ID": tenantID,
+		"X-Actor-ID":  actorA,
+	})
+	doJSONWithHeaders(t, h, http.MethodGet, "/api/platform/v1/agent/sessions/sess-actor-b/tasks", nil, http.StatusNotFound, map[string]string{
+		"X-Tenant-ID": tenantID,
+		"X-Actor-ID":  actorA,
+	})
 }
 
 type routerEnvelope struct {

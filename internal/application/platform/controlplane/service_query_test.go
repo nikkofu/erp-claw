@@ -207,11 +207,13 @@ func TestServiceQueriesAreIsolatedByActorWithinTenant(t *testing.T) {
 		t.Fatalf("open actor-b session: %v", err)
 	}
 
-	if _, err := svc.EnqueueTask(ctx, EnqueueTaskInput{TenantID: "tenant-a", ActorID: "actor-a", SessionID: "sess-actor-a", TaskID: "task-actor-a", TaskType: "tool.call"}); err != nil {
-		t.Fatalf("enqueue actor-a task: %v", err)
-	}
-	if _, err := svc.StartTask(ctx, AdvanceTaskInput{TenantID: "tenant-a", ActorID: "actor-a", TaskID: "task-actor-a"}); err != nil {
-		t.Fatalf("start actor-a task: %v", err)
+	for _, taskID := range []string{"task-actor-a-1", "task-actor-a-2"} {
+		if _, err := svc.EnqueueTask(ctx, EnqueueTaskInput{TenantID: "tenant-a", ActorID: "actor-a", SessionID: "sess-actor-a", TaskID: taskID, TaskType: "tool.call"}); err != nil {
+			t.Fatalf("enqueue actor-a task %s: %v", taskID, err)
+		}
+		if _, err := svc.StartTask(ctx, AdvanceTaskInput{TenantID: "tenant-a", ActorID: "actor-a", TaskID: taskID}); err != nil {
+			t.Fatalf("start actor-a task %s: %v", taskID, err)
+		}
 	}
 	if _, err := svc.EnqueueTask(ctx, EnqueueTaskInput{TenantID: "tenant-a", ActorID: "actor-b", SessionID: "sess-actor-b", TaskID: "task-actor-b", TaskType: "tool.call"}); err != nil {
 		t.Fatalf("enqueue actor-b task: %v", err)
@@ -236,19 +238,59 @@ func TestServiceQueriesAreIsolatedByActorWithinTenant(t *testing.T) {
 		t.Fatalf("expected sess-actor-a, got %s", sessionsForA.Items[0].ID)
 	}
 
-	tasksForA, err := svc.ListTasks(ctx, ListTasksInput{
+	taskPage1, err := svc.ListTasks(ctx, ListTasksInput{
 		TenantID: "tenant-a",
 		ActorID:  "actor-a",
 		Status:   platformruntime.TaskStatusRunning,
-		Limit:    10,
+		Limit:    1,
 	})
 	if err != nil {
-		t.Fatalf("list tasks for actor-a: %v", err)
+		t.Fatalf("list tasks page1 for actor-a: %v", err)
 	}
-	if len(tasksForA.Items) != 1 {
-		t.Fatalf("expected 1 task for actor-a, got %d", len(tasksForA.Items))
+	if len(taskPage1.Items) != 1 {
+		t.Fatalf("expected 1 task on page1 for actor-a, got %d", len(taskPage1.Items))
 	}
-	if tasksForA.Items[0].ID != "task-actor-a" {
-		t.Fatalf("expected task-actor-a, got %s", tasksForA.Items[0].ID)
+	if taskPage1.Items[0].ID == "task-actor-b" {
+		t.Fatalf("expected actor-a scoped task only, got %s", taskPage1.Items[0].ID)
+	}
+	if taskPage1.NextCursor == "" {
+		t.Fatal("expected next cursor for actor-a page1")
+	}
+
+	taskPage2, err := svc.ListTasks(ctx, ListTasksInput{
+		TenantID: "tenant-a",
+		ActorID:  "actor-a",
+		Status:   platformruntime.TaskStatusRunning,
+		Limit:    1,
+		Cursor:   taskPage1.NextCursor,
+	})
+	if err != nil {
+		t.Fatalf("list tasks page2 for actor-a: %v", err)
+	}
+	if len(taskPage2.Items) != 1 {
+		t.Fatalf("expected 1 task on page2 for actor-a, got %d", len(taskPage2.Items))
+	}
+	if taskPage2.Items[0].ID == "task-actor-b" {
+		t.Fatalf("expected actor-a scoped task only, got %s", taskPage2.Items[0].ID)
+	}
+	if taskPage2.NextCursor != "" {
+		t.Fatalf("expected empty next cursor on actor-a final page, got %s", taskPage2.NextCursor)
+	}
+
+	if _, err := svc.GetSession(ctx, GetSessionInput{TenantID: "tenant-a", ActorID: "actor-a", SessionID: "sess-actor-b"}); err == nil {
+		t.Fatal("expected not found when actor-a gets actor-b session")
+	}
+	if _, err := svc.GetTask(ctx, GetTaskInput{TenantID: "tenant-a", ActorID: "actor-a", TaskID: "task-actor-b"}); err == nil {
+		t.Fatal("expected not found when actor-a gets actor-b task")
+	}
+	if _, err := svc.ListSessionTasks(ctx, ListSessionTasksInput{TenantID: "tenant-a", ActorID: "actor-a", SessionID: "sess-actor-b"}); err == nil {
+		t.Fatal("expected not found when actor-a lists actor-b session tasks")
+	}
+
+	if _, err := svc.GetSession(ctx, GetSessionInput{TenantID: "tenant-a", ActorID: "actor-a", SessionID: "sess-actor-a"}); err != nil {
+		t.Fatalf("get own session: %v", err)
+	}
+	if _, err := svc.GetTask(ctx, GetTaskInput{TenantID: "tenant-a", ActorID: "actor-a", TaskID: "task-actor-a-1"}); err != nil {
+		t.Fatalf("get own task: %v", err)
 	}
 }
