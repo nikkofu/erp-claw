@@ -255,7 +255,7 @@ func (s *Service) FailTask(ctx context.Context, input AdvanceTaskInput) (platfor
 func (s *Service) PauseTask(ctx context.Context, input AdvanceTaskInput) (platformruntime.Task, error) {
 	input, actorProvided := normalizeAdvanceTaskInput(ctx, input)
 	if !actorProvided {
-		return platformruntime.Task{}, shared.ErrPolicyDenied
+		input.ActorID = ""
 	}
 	err := s.pipeline.Execute(ctx, shared.Command{
 		Name:     "runtime.tasks.pause",
@@ -271,7 +271,7 @@ func (s *Service) PauseTask(ctx context.Context, input AdvanceTaskInput) (platfo
 func (s *Service) ResumeTask(ctx context.Context, input AdvanceTaskInput) (platformruntime.Task, error) {
 	input, actorProvided := normalizeAdvanceTaskInput(ctx, input)
 	if !actorProvided {
-		return platformruntime.Task{}, shared.ErrPolicyDenied
+		input.ActorID = ""
 	}
 	err := s.pipeline.Execute(ctx, shared.Command{
 		Name:     "runtime.tasks.resume",
@@ -287,7 +287,7 @@ func (s *Service) ResumeTask(ctx context.Context, input AdvanceTaskInput) (platf
 func (s *Service) HandoffTask(ctx context.Context, input AdvanceTaskInput) (platformruntime.Task, error) {
 	input, actorProvided := normalizeAdvanceTaskInput(ctx, input)
 	if !actorProvided {
-		return platformruntime.Task{}, shared.ErrPolicyDenied
+		input.ActorID = ""
 	}
 	err := s.pipeline.Execute(ctx, shared.Command{
 		Name:     "runtime.tasks.handoff",

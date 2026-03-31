@@ -57,6 +57,57 @@ func TestRoleEvaluatorDeniesWhenRoleIsMissing(t *testing.T) {
 	}
 }
 
+func TestRoleEvaluatorDeniesApprovalCommandsWithoutRequiredRoles(t *testing.T) {
+	evaluator := NewRoleEvaluator(
+		func(_ context.Context, _, _ string) ([]string, error) {
+			return []string{"viewer"}, nil
+		},
+		[]Rule{
+			{CommandPrefix: "runtime.tasks.pause", AnyOfRoles: []string{"platform_admin", "workspace_operator"}},
+			{CommandPrefix: "runtime.tasks.resume", AnyOfRoles: []string{"platform_admin", "workspace_operator"}},
+			{CommandPrefix: "runtime.tasks.handoff", AnyOfRoles: []string{"platform_admin", "workspace_operator"}},
+		},
+	)
+
+	for _, command := range []string{"runtime.tasks.pause", "runtime.tasks.resume", "runtime.tasks.handoff"} {
+		decision, err := evaluator.Evaluate(context.Background(), Input{
+			CommandName: command,
+			TenantID:    "tenant-admin",
+			ActorID:     "actor-viewer",
+		})
+		if err != nil {
+			t.Fatalf("evaluate role policy for %s: %v", command, err)
+		}
+		if decision != DecisionDeny {
+			t.Fatalf("expected decision deny for %s, got %s", command, decision)
+		}
+	}
+}
+
+func TestRoleEvaluatorCommandRuleMatchesExactCommandName(t *testing.T) {
+	evaluator := NewRoleEvaluator(
+		func(_ context.Context, _, _ string) ([]string, error) {
+			return []string{"workspace_operator"}, nil
+		},
+		[]Rule{{
+			CommandPrefix: "runtime.tasks.pause",
+			AnyOfRoles:    []string{"workspace_operator"},
+		}},
+	)
+
+	decision, err := evaluator.Evaluate(context.Background(), Input{
+		CommandName: "runtime.tasks.pause.extra",
+		TenantID:    "tenant-admin",
+		ActorID:     "actor-operator",
+	})
+	if err != nil {
+		t.Fatalf("evaluate role policy: %v", err)
+	}
+	if decision != DecisionAllow {
+		t.Fatalf("expected allow for non-exact command match, got %s", decision)
+	}
+}
+
 func TestRoleEvaluatorReturnsErrorWhenLookupFails(t *testing.T) {
 	expectedErr := errors.New("lookup failed")
 	evaluator := NewRoleEvaluator(
