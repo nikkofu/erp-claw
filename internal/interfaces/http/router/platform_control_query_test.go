@@ -159,6 +159,84 @@ func TestSessionAndTaskDetailQueries(t *testing.T) {
 	}
 }
 
+func TestListTasksSupportsSessionAndStatusFilter(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	container := bootstrap.NewContainer(bootstrap.DefaultConfig())
+	h := New(WithContainer(container))
+
+	tenantID := "tenant-e1-session-filter"
+	actorID := "actor-e1-session-filter"
+
+	doJSONWithHeaders(t, h, http.MethodPost, "/api/platform/v1/control/actors", map[string]any{
+		"tenant_id":     tenantID,
+		"actor_id":      actorID,
+		"roles":         []string{"workspace_operator"},
+		"department_id": "ops",
+	}, http.StatusOK, nil)
+
+	for _, sessionID := range []string{"sess-filter-001", "sess-filter-002"} {
+		doJSONWithHeaders(t, h, http.MethodPost, "/api/platform/v1/agent/sessions", map[string]any{
+			"session_id": sessionID,
+		}, http.StatusOK, map[string]string{
+			"X-Tenant-ID": tenantID,
+			"X-Actor-ID":  actorID,
+		})
+	}
+
+	for _, taskID := range []string{"task-filter-001", "task-filter-002"} {
+		doJSONWithHeaders(t, h, http.MethodPost, "/api/platform/v1/agent/sessions/sess-filter-001/tasks", map[string]any{
+			"task_id":   taskID,
+			"task_type": "tool.call",
+			"input": map[string]any{
+				"tool": "search",
+			},
+		}, http.StatusOK, map[string]string{
+			"X-Tenant-ID": tenantID,
+			"X-Actor-ID":  actorID,
+		})
+		doJSONWithHeaders(t, h, http.MethodPost, "/api/platform/v1/agent/tasks/"+taskID+"/start", map[string]any{}, http.StatusOK, map[string]string{
+			"X-Tenant-ID": tenantID,
+			"X-Actor-ID":  actorID,
+		})
+	}
+
+	doJSONWithHeaders(t, h, http.MethodPost, "/api/platform/v1/agent/sessions/sess-filter-002/tasks", map[string]any{
+		"task_id":   "task-filter-003",
+		"task_type": "tool.call",
+		"input": map[string]any{
+			"tool": "search",
+		},
+	}, http.StatusOK, map[string]string{
+		"X-Tenant-ID": tenantID,
+		"X-Actor-ID":  actorID,
+	})
+
+	filtered := doJSONWithHeaders(t, h, http.MethodGet, "/api/platform/v1/agent/tasks?session_id=sess-filter-001&status=running&limit=10", nil, http.StatusOK, map[string]string{
+		"X-Tenant-ID": tenantID,
+		"X-Actor-ID":  actorID,
+	}).Data
+
+	items, ok := filtered["items"].([]any)
+	if !ok {
+		t.Fatalf("expected filtered items array, got %#v", filtered["items"])
+	}
+	if len(items) != 2 {
+		t.Fatalf("expected 2 running tasks for target session, got %d", len(items))
+	}
+	for _, raw := range items {
+		item, ok := raw.(map[string]any)
+		if !ok {
+			t.Fatalf("expected object task item, got %#v", raw)
+		}
+		if stringField(t, item, "session_id") != "sess-filter-001" {
+			t.Fatalf("expected only sess-filter-001 items, got %s", stringField(t, item, "session_id"))
+		}
+		if stringField(t, item, "status") != "running" {
+			t.Fatalf("expected only running items, got %s", stringField(t, item, "status"))
+		}
+	}
+}
+
 type routerEnvelope struct {
 	Data  map[string]any `json:"data"`
 	Error map[string]any `json:"error"`
