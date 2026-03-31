@@ -19,11 +19,22 @@ func TestApprovalActionsDeniedWithoutRole(t *testing.T) {
 
 	tenantID := "tenant-approval-deny"
 	operatorActorID := "actor-operator"
+	viewerActorID := "actor-viewer"
 
 	doApprovalJSON(t, h, http.MethodPost, "/api/platform/v1/control/actors", map[string]any{
 		"tenant_id":     tenantID,
 		"actor_id":      operatorActorID,
 		"roles":         []string{"workspace_operator"},
+		"department_id": "ops",
+	}, http.StatusOK, map[string]string{
+		"X-Tenant-ID": tenantID,
+		"X-Actor-ID":  "system",
+	})
+
+	doApprovalJSON(t, h, http.MethodPost, "/api/platform/v1/control/actors", map[string]any{
+		"tenant_id":     tenantID,
+		"actor_id":      viewerActorID,
+		"roles":         []string{"viewer"},
 		"department_id": "ops",
 	}, http.StatusOK, map[string]string{
 		"X-Tenant-ID": tenantID,
@@ -55,6 +66,7 @@ func TestApprovalActionsDeniedWithoutRole(t *testing.T) {
 	} {
 		resp := doApprovalJSON(t, h, http.MethodPost, path, map[string]any{}, http.StatusForbidden, map[string]string{
 			"X-Tenant-ID": tenantID,
+			"X-Actor-ID":  viewerActorID,
 		})
 		if resp.Error["message"] != shared.ErrPolicyDenied.Error() {
 			t.Fatalf("expected policy denied message for %s, got %q", path, resp.Error["message"])
