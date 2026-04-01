@@ -2,6 +2,7 @@ package controlplane
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/nikkofu/erp-claw/internal/application/shared"
@@ -230,6 +231,104 @@ func TestAuditRecordsContainApprovalLifecycleEvidence(t *testing.T) {
 	}
 }
 
+func TestEventPublishSuccessStaysPendingUntilFailureRecovery(t *testing.T) {
+	store := memory.NewControlPlaneStore()
+	sink := &recordingWorkspaceEventSink{}
+	svc := NewService(ServiceDeps{
+		TenantCatalog:   store.TenantCatalog(),
+		IAMDirectory:    store.IAMDirectory(),
+		Sessions:        store.SessionRepository(),
+		Tasks:           store.TaskRepository(),
+		Deliveries:      store.DeliveryRepository(),
+		WorkspaceEvents: sink,
+		Pipeline: shared.NewPipeline(shared.PipelineDeps{
+			Policy: policy.StaticEvaluator(policy.DecisionAllow),
+		}),
+	})
+
+	event := platformruntime.WorkspaceEvent{
+		Type:      "runtime.task.running",
+		TenantID:  "tenant-e2",
+		SessionID: "sess-e2",
+		TaskID:    "task-e2",
+	}
+
+	if err := svc.emitWorkspaceEvent(event); err != nil {
+		t.Fatalf("first publish: %v", err)
+	}
+
+	recovered, err := svc.ListDeliveries(context.Background(), ListDeliveriesInput{
+		TenantID: "tenant-e2",
+		Status:   platformruntime.DeliveryStatusRecovered,
+		Limit:    10,
+	})
+	if err != nil {
+		t.Fatalf("list recovered deliveries: %v", err)
+	}
+	if len(recovered.Items) != 0 {
+		t.Fatalf("expected 0 recovered deliveries after first success, got %d", len(recovered.Items))
+	}
+
+	pending, err := svc.ListDeliveries(context.Background(), ListDeliveriesInput{
+		TenantID: "tenant-e2",
+		Status:   platformruntime.DeliveryStatusPending,
+		Limit:    10,
+	})
+	if err != nil {
+		t.Fatalf("list pending deliveries: %v", err)
+	}
+	if len(pending.Items) != 1 {
+		t.Fatalf("expected 1 pending delivery, got %d", len(pending.Items))
+	}
+}
+
+func TestEventPublishFailureTransitionsToRecoveredOnRetry(t *testing.T) {
+	store := memory.NewControlPlaneStore()
+	sink := &recordingWorkspaceEventSink{fail: true}
+	svc := NewService(ServiceDeps{
+		TenantCatalog:   store.TenantCatalog(),
+		IAMDirectory:    store.IAMDirectory(),
+		Sessions:        store.SessionRepository(),
+		Tasks:           store.TaskRepository(),
+		Deliveries:      store.DeliveryRepository(),
+		WorkspaceEvents: sink,
+		Pipeline: shared.NewPipeline(shared.PipelineDeps{
+			Policy: policy.StaticEvaluator(policy.DecisionAllow),
+		}),
+	})
+
+	event := platformruntime.WorkspaceEvent{
+		Type:      "runtime.task.running",
+		TenantID:  "tenant-e2",
+		SessionID: "sess-e2",
+		TaskID:    "task-e2",
+	}
+
+	if err := svc.emitWorkspaceEvent(event); err == nil {
+		t.Fatal("expected first publish to fail")
+	}
+
+	sink.fail = false
+	if err := svc.emitWorkspaceEvent(event); err != nil {
+		t.Fatalf("retry publish: %v", err)
+	}
+
+	recovered, err := svc.ListDeliveries(context.Background(), ListDeliveriesInput{
+		TenantID: "tenant-e2",
+		Status:   platformruntime.DeliveryStatusRecovered,
+		Limit:    10,
+	})
+	if err != nil {
+		t.Fatalf("list recovered deliveries: %v", err)
+	}
+	if len(recovered.Items) != 1 {
+		t.Fatalf("expected 1 recovered delivery, got %d", len(recovered.Items))
+	}
+	if recovered.Items[0].AttemptCount != 2 {
+		t.Fatalf("expected attempt_count 2 after retry, got %d", recovered.Items[0].AttemptCount)
+	}
+}
+
 func TestGovernanceTaskCommandsRejectWithoutSuccessNoop(t *testing.T) {
 	store := memory.NewControlPlaneStore()
 	sink := &recordingWorkspaceEventSink{}
@@ -308,9 +407,13 @@ func TestGovernanceTaskCommandsRejectWithoutSuccessNoop(t *testing.T) {
 
 type recordingWorkspaceEventSink struct {
 	events []platformruntime.WorkspaceEvent
+	fail   bool
 }
 
 func (r *recordingWorkspaceEventSink) Broadcast(evt platformruntime.WorkspaceEvent) error {
+	if r.fail {
+		return errors.New("workspace gateway unavailable")
+	}
 	r.events = append(r.events, evt)
 	return nil
 }

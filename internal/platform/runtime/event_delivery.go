@@ -23,6 +23,7 @@ type DeliveryRecord struct {
 
 type DeliveryListQuery struct {
 	TenantID  string
+	ActorID   string
 	Status    DeliveryStatus
 	SessionID string
 	TaskID    string

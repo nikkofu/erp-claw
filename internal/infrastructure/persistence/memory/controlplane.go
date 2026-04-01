@@ -416,6 +416,15 @@ func (r deliveryRepository) List(_ context.Context, query platformruntime.Delive
 		if query.TenantID != "" && record.TenantID != query.TenantID {
 			continue
 		}
+		if query.ActorID != "" {
+			session, ok := r.store.sessions[key(record.TenantID, record.SessionID)]
+			if !ok {
+				continue
+			}
+			if session.ActorID != query.ActorID {
+				continue
+			}
+		}
 		if query.Status != "" && record.Status != query.Status {
 			continue
 		}

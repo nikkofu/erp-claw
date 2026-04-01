@@ -549,6 +549,7 @@ func (s *Service) ListDeliveries(ctx context.Context, input ListDeliveriesInput)
 		}
 		listed, err := s.deliveries.List(txCtx, platformruntime.DeliveryListQuery{
 			TenantID:  strings.TrimSpace(input.TenantID),
+			ActorID:   strings.TrimSpace(input.ActorID),
 			Status:    input.Status,
 			SessionID: strings.TrimSpace(input.SessionID),
 			TaskID:    strings.TrimSpace(input.TaskID),
@@ -679,7 +680,9 @@ func (s *Service) emitWorkspaceEvent(evt platformruntime.WorkspaceEvent) error {
 	}
 
 	if s.deliveries != nil {
-		record.Status = platformruntime.DeliveryStatusRecovered
+		if record.Status == platformruntime.DeliveryStatusFailed {
+			record.Status = platformruntime.DeliveryStatusRecovered
+		}
 		record.LastError = ""
 		record.UpdatedAt = time.Now().UTC()
 		if err := s.deliveries.Save(context.Background(), record); err != nil {
