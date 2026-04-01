@@ -7,7 +7,7 @@ import (
 
 var (
 	ErrTimelineQueryRequired = errors.New("timeline query requires session_id or task_id")
-	ErrEvidenceQueryRequired = errors.New("evidence query requires task_id or request_id")
+	ErrEvidenceQueryRequired = errors.New("evidence query requires action or request_id")
 )
 
 type TimelineEntry struct {
@@ -26,6 +26,7 @@ type EvidenceEntry struct {
 	SessionID   string
 	TaskID      string
 	EventType   string
+	Action      string
 	RequestID   string
 	ResourceRef string
 	OccurredAt  time.Time

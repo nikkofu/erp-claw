@@ -127,7 +127,7 @@ func TestEvidenceAPIReturnsAsOfAndCursor(t *testing.T) {
 		})
 	}
 
-	page1 := doJSONWithHeaders(t, h, http.MethodGet, "/api/platform/v1/agent/evidence?task_id=task-e3-evidence-001&limit=1", nil, http.StatusOK, map[string]string{
+	page1 := doJSONWithHeaders(t, h, http.MethodGet, "/api/platform/v1/agent/evidence?action=running&limit=1", nil, http.StatusOK, map[string]string{
 		"X-Tenant-ID": tenantID,
 		"X-Actor-ID":  actorID,
 	}).Data
@@ -146,7 +146,16 @@ func TestEvidenceAPIReturnsAsOfAndCursor(t *testing.T) {
 		t.Fatal("expected evidence next_cursor")
 	}
 
-	page2 := doJSONWithHeaders(t, h, http.MethodGet, "/api/platform/v1/agent/evidence?task_id=task-e3-evidence-001&limit=1&cursor="+nextCursor, nil, http.StatusOK, map[string]string{
+	first, ok := items1[0].(map[string]any)
+	if !ok {
+		t.Fatalf("expected evidence object item, got %#v", items1[0])
+	}
+	requestID := stringField(t, first, "request_id")
+	if requestID == "" {
+		t.Fatal("expected request_id in evidence entry")
+	}
+
+	page2 := doJSONWithHeaders(t, h, http.MethodGet, "/api/platform/v1/agent/evidence?action=running&limit=1&cursor="+nextCursor, nil, http.StatusOK, map[string]string{
 		"X-Tenant-ID": tenantID,
 		"X-Actor-ID":  actorID,
 	}).Data
@@ -156,5 +165,17 @@ func TestEvidenceAPIReturnsAsOfAndCursor(t *testing.T) {
 	}
 	if len(items2) == 0 {
 		t.Fatal("expected non-empty evidence page2")
+	}
+
+	byRequest := doJSONWithHeaders(t, h, http.MethodGet, "/api/platform/v1/agent/evidence?request_id="+requestID+"&limit=10", nil, http.StatusOK, map[string]string{
+		"X-Tenant-ID": tenantID,
+		"X-Actor-ID":  actorID,
+	}).Data
+	itemsByRequest, ok := byRequest["items"].([]any)
+	if !ok {
+		t.Fatalf("expected evidence request_id items array, got %#v", byRequest["items"])
+	}
+	if len(itemsByRequest) == 0 {
+		t.Fatal("expected non-empty evidence request_id result")
 	}
 }

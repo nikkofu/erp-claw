@@ -495,7 +495,7 @@ func (s *Service) ListTimeline(ctx context.Context, input ListTimelineInput) (pl
 type ListEvidenceInput struct {
 	TenantID  string
 	ActorID   string
-	TaskID    string
+	Action    string
 	RequestID string
 	Limit     int
 	Cursor    string
@@ -512,7 +512,7 @@ func (s *Service) ListEvidence(ctx context.Context, input ListEvidenceInput) (pl
 		listed, err := s.tasks.ListEvidence(
 			txCtx,
 			strings.TrimSpace(input.TenantID),
-			strings.TrimSpace(input.TaskID),
+			strings.TrimSpace(input.Action),
 			strings.TrimSpace(input.RequestID),
 			input.Limit,
 			strings.TrimSpace(input.Cursor),

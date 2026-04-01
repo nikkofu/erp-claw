@@ -314,7 +314,7 @@ func registerControlPlaneRoutes(rg *gin.RouterGroup, container *bootstrap.Contai
 		page, err := container.ControlPlane.ListEvidence(c.Request.Context(), controlplane.ListEvidenceInput{
 			TenantID:  tenantIDFromContext(c),
 			ActorID:   actorIDFromContext(c),
-			TaskID:    strings.TrimSpace(c.Query("task_id")),
+			Action:    strings.TrimSpace(c.Query("action")),
 			RequestID: strings.TrimSpace(c.Query("request_id")),
 			Limit:     limit,
 			Cursor:    c.Query("cursor"),
@@ -542,6 +542,7 @@ func evidenceEntryResponse(value platformruntime.EvidenceEntry) gin.H {
 		"session_id":   value.SessionID,
 		"task_id":      value.TaskID,
 		"event_type":   value.EventType,
+		"action":       value.Action,
 		"occurred_at":  formatTime(value.OccurredAt),
 		"request_id":   value.RequestID,
 		"resource_ref": value.ResourceRef,

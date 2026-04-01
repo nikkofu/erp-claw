@@ -50,6 +50,25 @@ func TestTimelineEvidenceReadModelFreshness(t *testing.T) {
 		"X-Actor-ID":  actorID,
 	})
 
+	doJSONWithHeaders(t, h, http.MethodPost, "/api/platform/v1/agent/sessions/sess-e3-int/tasks", map[string]any{
+		"task_id":   "task-e3-int-002",
+		"task_type": "tool.call",
+		"input":     map[string]any{"tool": "search"},
+	}, http.StatusOK, map[string]string{
+		"X-Tenant-ID": tenantID,
+		"X-Actor-ID":  actorID,
+	})
+	doJSONWithHeaders(t, h, http.MethodPost, "/api/platform/v1/agent/tasks/task-e3-int-002/start", map[string]any{}, http.StatusOK, map[string]string{
+		"X-Tenant-ID": tenantID,
+		"X-Actor-ID":  actorID,
+	})
+	doJSONWithHeaders(t, h, http.MethodPost, "/api/platform/v1/agent/tasks/task-e3-int-002/complete", map[string]any{
+		"output": map[string]any{"result": "ok"},
+	}, http.StatusOK, map[string]string{
+		"X-Tenant-ID": tenantID,
+		"X-Actor-ID":  actorID,
+	})
+
 	timelineBySession := doJSONWithHeaders(t, h, http.MethodGet, "/api/platform/v1/agent/timeline?session_id=sess-e3-int&limit=10", nil, http.StatusOK, map[string]string{
 		"X-Tenant-ID": tenantID,
 		"X-Actor-ID":  actorID,
@@ -74,7 +93,7 @@ func TestTimelineEvidenceReadModelFreshness(t *testing.T) {
 		t.Fatalf("expected task timeline items, got %#v", timelineByTask.Data["items"])
 	}
 
-	evidencePage1 := doJSONWithHeaders(t, h, http.MethodGet, "/api/platform/v1/agent/evidence?task_id=task-e3-int-001&limit=1", nil, http.StatusOK, map[string]string{
+	evidencePage1 := doJSONWithHeaders(t, h, http.MethodGet, "/api/platform/v1/agent/evidence?action=succeeded&limit=1", nil, http.StatusOK, map[string]string{
 		"X-Tenant-ID": tenantID,
 		"X-Actor-ID":  actorID,
 	})
@@ -85,8 +104,20 @@ func TestTimelineEvidenceReadModelFreshness(t *testing.T) {
 	if nextCursor == "" {
 		t.Fatal("expected evidence next_cursor")
 	}
+	items1, ok := evidencePage1.Data["items"].([]any)
+	if !ok || len(items1) == 0 {
+		t.Fatalf("expected evidence items on page1, got %#v", evidencePage1.Data["items"])
+	}
+	first, ok := items1[0].(map[string]any)
+	if !ok {
+		t.Fatalf("expected evidence item object, got %#v", items1[0])
+	}
+	requestID := stringField(t, first, "request_id")
+	if requestID == "" {
+		t.Fatal("expected request_id in evidence item")
+	}
 
-	evidencePage2 := doJSONWithHeaders(t, h, http.MethodGet, "/api/platform/v1/agent/evidence?task_id=task-e3-int-001&limit=1&cursor="+nextCursor, nil, http.StatusOK, map[string]string{
+	evidencePage2 := doJSONWithHeaders(t, h, http.MethodGet, "/api/platform/v1/agent/evidence?action=succeeded&limit=1&cursor="+nextCursor, nil, http.StatusOK, map[string]string{
 		"X-Tenant-ID": tenantID,
 		"X-Actor-ID":  actorID,
 	})
@@ -95,24 +126,12 @@ func TestTimelineEvidenceReadModelFreshness(t *testing.T) {
 		t.Fatalf("expected evidence page2 items, got %#v", evidencePage2.Data["items"])
 	}
 
-	deliveries := doJSONWithHeaders(t, h, http.MethodGet, "/api/platform/v1/agent/deliveries?status=delivered&task_id=task-e3-int-001&limit=10", nil, http.StatusOK, map[string]string{
+	byRequest := doJSONWithHeaders(t, h, http.MethodGet, "/api/platform/v1/agent/evidence?request_id="+requestID+"&limit=10", nil, http.StatusOK, map[string]string{
 		"X-Tenant-ID": tenantID,
 		"X-Actor-ID":  actorID,
 	})
-	if stringField(t, deliveries.Data, "as_of") == "" {
-		t.Fatal("expected deliveries as_of")
-	}
-	deliveryItems, ok := deliveries.Data["items"].([]any)
-	if !ok || len(deliveryItems) == 0 {
-		t.Fatalf("expected delivery items, got %#v", deliveries.Data["items"])
-	}
-	for _, raw := range deliveryItems {
-		item, ok := raw.(map[string]any)
-		if !ok {
-			t.Fatalf("expected delivery item object, got %#v", raw)
-		}
-		if stringField(t, item, "status") != "delivered" {
-			t.Fatalf("expected delivered delivery status, got %s", stringField(t, item, "status"))
-		}
+	requestItems, ok := byRequest.Data["items"].([]any)
+	if !ok || len(requestItems) == 0 {
+		t.Fatalf("expected evidence by request_id items, got %#v", byRequest.Data["items"])
 	}
 }

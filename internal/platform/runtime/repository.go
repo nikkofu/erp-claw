@@ -22,7 +22,7 @@ type TaskRepository interface {
 	ListBySession(ctx context.Context, tenantID, sessionID string) ([]Task, error)
 	List(ctx context.Context, query TaskListQuery) (TaskListPage, error)
 	ListTimeline(ctx context.Context, tenantID, sessionID, taskID string, limit int, cursor string) (ReadSnapshot[TimelineEntry], error)
-	ListEvidence(ctx context.Context, tenantID, taskID, requestID string, limit int, cursor string) (ReadSnapshot[EvidenceEntry], error)
+	ListEvidence(ctx context.Context, tenantID, action, requestID string, limit int, cursor string) (ReadSnapshot[EvidenceEntry], error)
 }
 
 type DeliveryRepository interface {

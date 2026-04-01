@@ -199,6 +199,7 @@ func (r taskRepository) Save(_ context.Context, task platformruntime.Task) error
 		SessionID:   entry.SessionID,
 		TaskID:      entry.TaskID,
 		EventType:   entry.EventType,
+		Action:      entry.Status,
 		RequestID:   entry.RequestID,
 		ResourceRef: entry.ResourceRef,
 		OccurredAt:  entry.OccurredAt,
@@ -326,11 +327,11 @@ func (r taskRepository) ListTimeline(_ context.Context, tenantID, sessionID, tas
 	return paginateReadSnapshot(filtered, limit, cursor), nil
 }
 
-func (r taskRepository) ListEvidence(_ context.Context, tenantID, taskID, requestID string, limit int, cursor string) (platformruntime.ReadSnapshot[platformruntime.EvidenceEntry], error) {
+func (r taskRepository) ListEvidence(_ context.Context, tenantID, action, requestID string, limit int, cursor string) (platformruntime.ReadSnapshot[platformruntime.EvidenceEntry], error) {
 	r.store.mu.RLock()
 	defer r.store.mu.RUnlock()
 
-	if strings.TrimSpace(taskID) == "" && strings.TrimSpace(requestID) == "" {
+	if strings.TrimSpace(action) == "" && strings.TrimSpace(requestID) == "" {
 		return platformruntime.ReadSnapshot[platformruntime.EvidenceEntry]{}, platformruntime.ErrEvidenceQueryRequired
 	}
 
@@ -339,7 +340,7 @@ func (r taskRepository) ListEvidence(_ context.Context, tenantID, taskID, reques
 		if tenantID != "" && item.TenantID != tenantID {
 			continue
 		}
-		if taskID != "" && item.TaskID != taskID {
+		if action != "" && item.Action != action {
 			continue
 		}
 		if requestID != "" && item.RequestID != requestID {
