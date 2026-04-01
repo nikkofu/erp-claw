@@ -238,6 +238,17 @@ func TestPlatformControlPlaneActorPolicyAndAgentRuntimeFlow(t *testing.T) {
 		t.Fatalf("expected succeeded task, got %s", got)
 	}
 
+	for _, path := range []string{
+		"/api/platform/v1/agent/tasks/task-001/pause",
+		"/api/platform/v1/agent/tasks/task-001/resume",
+		"/api/platform/v1/agent/tasks/task-001/handoff",
+	} {
+		doJSONWithHeaders(t, h, http.MethodPost, path, map[string]any{}, http.StatusConflict, map[string]string{
+			"X-Tenant-ID": "tenant-admin",
+			"X-Actor-ID":  "system",
+		})
+	}
+
 	gotTask := getJSONData(t, h, "/api/platform/v1/agent/tasks/task-001")
 	if got := stringField(t, gotTask, "status"); got != "succeeded" {
 		t.Fatalf("expected task status succeeded, got %s", got)
@@ -250,6 +261,28 @@ func TestPlatformControlPlaneActorPolicyAndAgentRuntimeFlow(t *testing.T) {
 	}
 	if len(records) == 0 {
 		t.Fatal("expected audit records")
+	}
+
+	hasPause := false
+	hasResume := false
+	hasHandoff := false
+	for _, raw := range records {
+		record, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		command, _ := record["command_name"].(string)
+		switch command {
+		case "runtime.tasks.pause":
+			hasPause = true
+		case "runtime.tasks.resume":
+			hasResume = true
+		case "runtime.tasks.handoff":
+			hasHandoff = true
+		}
+	}
+	if !hasPause || !hasResume || !hasHandoff {
+		t.Fatalf("expected pause/resume/handoff audit records, got pause=%v resume=%v handoff=%v", hasPause, hasResume, hasHandoff)
 	}
 }
 

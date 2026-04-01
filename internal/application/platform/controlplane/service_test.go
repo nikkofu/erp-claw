@@ -2,7 +2,6 @@ package controlplane
 
 import (
 	"context"
-	"errors"
 	"testing"
 
 	"github.com/nikkofu/erp-claw/internal/application/shared"
@@ -20,7 +19,6 @@ func TestServiceEmitsWorkspaceEventsForSessionAndTaskLifecycle(t *testing.T) {
 		IAMDirectory:    store.IAMDirectory(),
 		Sessions:        store.SessionRepository(),
 		Tasks:           store.TaskRepository(),
-		Deliveries:      store.DeliveryRepository(),
 		WorkspaceEvents: sink,
 		Pipeline: shared.NewPipeline(shared.PipelineDeps{
 			Policy: policy.StaticEvaluator(policy.DecisionAllow),
@@ -83,7 +81,6 @@ func TestServiceEmitsFailureEventOnTaskFail(t *testing.T) {
 		IAMDirectory:    store.IAMDirectory(),
 		Sessions:        store.SessionRepository(),
 		Tasks:           store.TaskRepository(),
-		Deliveries:      store.DeliveryRepository(),
 		WorkspaceEvents: sink,
 		Pipeline: shared.NewPipeline(shared.PipelineDeps{
 			Policy: policy.StaticEvaluator(policy.DecisionAllow),
@@ -233,68 +230,6 @@ func TestAuditRecordsContainApprovalLifecycleEvidence(t *testing.T) {
 	}
 }
 
-func TestEventPublishFailureUsesOutboxCompensation(t *testing.T) {
-	store := memory.NewControlPlaneStore()
-	sink := &recordingWorkspaceEventSink{fail: true}
-	svc := NewService(ServiceDeps{
-		TenantCatalog:   store.TenantCatalog(),
-		IAMDirectory:    store.IAMDirectory(),
-		Sessions:        store.SessionRepository(),
-		Tasks:           store.TaskRepository(),
-		Deliveries:      store.DeliveryRepository(),
-		WorkspaceEvents: sink,
-		Pipeline: shared.NewPipeline(shared.PipelineDeps{
-			Policy: policy.StaticEvaluator(policy.DecisionAllow),
-		}),
-	})
-
-	event := platformruntime.WorkspaceEvent{
-		Type:      "runtime.task.running",
-		TenantID:  "tenant-e2",
-		SessionID: "sess-e2",
-		TaskID:    "task-e2",
-	}
-
-	if err := svc.emitWorkspaceEvent(event); err == nil {
-		t.Fatal("expected first publish to fail")
-	}
-
-	failed, err := svc.ListDeliveries(context.Background(), ListDeliveriesInput{
-		TenantID: "tenant-e2",
-		Status:   platformruntime.DeliveryStatusFailed,
-		Limit:    10,
-	})
-	if err != nil {
-		t.Fatalf("list failed deliveries: %v", err)
-	}
-	if len(failed.Items) != 1 {
-		t.Fatalf("expected 1 failed delivery, got %d", len(failed.Items))
-	}
-	if failed.Items[0].AttemptCount != 1 {
-		t.Fatalf("expected attempt_count 1, got %d", failed.Items[0].AttemptCount)
-	}
-
-	sink.fail = false
-	if err := svc.emitWorkspaceEvent(event); err != nil {
-		t.Fatalf("retry publish: %v", err)
-	}
-
-	recovered, err := svc.ListDeliveries(context.Background(), ListDeliveriesInput{
-		TenantID: "tenant-e2",
-		Status:   platformruntime.DeliveryStatusRecovered,
-		Limit:    10,
-	})
-	if err != nil {
-		t.Fatalf("list recovered deliveries: %v", err)
-	}
-	if len(recovered.Items) != 1 {
-		t.Fatalf("expected 1 recovered delivery, got %d", len(recovered.Items))
-	}
-	if recovered.Items[0].AttemptCount != 2 {
-		t.Fatalf("expected attempt_count 2 after retry, got %d", recovered.Items[0].AttemptCount)
-	}
-}
-
 func TestGovernanceTaskCommandsRejectWithoutSuccessNoop(t *testing.T) {
 	store := memory.NewControlPlaneStore()
 	sink := &recordingWorkspaceEventSink{}
@@ -303,7 +238,6 @@ func TestGovernanceTaskCommandsRejectWithoutSuccessNoop(t *testing.T) {
 		IAMDirectory:    store.IAMDirectory(),
 		Sessions:        store.SessionRepository(),
 		Tasks:           store.TaskRepository(),
-		Deliveries:      store.DeliveryRepository(),
 		WorkspaceEvents: sink,
 		Pipeline: shared.NewPipeline(shared.PipelineDeps{
 			Policy: policy.StaticEvaluator(policy.DecisionAllow),
@@ -374,13 +308,9 @@ func TestGovernanceTaskCommandsRejectWithoutSuccessNoop(t *testing.T) {
 
 type recordingWorkspaceEventSink struct {
 	events []platformruntime.WorkspaceEvent
-	fail   bool
 }
 
 func (r *recordingWorkspaceEventSink) Broadcast(evt platformruntime.WorkspaceEvent) error {
-	if r.fail {
-		return errors.New("workspace gateway unavailable")
-	}
 	r.events = append(r.events, evt)
 	return nil
 }
