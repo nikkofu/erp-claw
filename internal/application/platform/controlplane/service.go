@@ -682,6 +682,8 @@ func (s *Service) emitWorkspaceEvent(evt platformruntime.WorkspaceEvent) error {
 	if s.deliveries != nil {
 		if record.Status == platformruntime.DeliveryStatusFailed {
 			record.Status = platformruntime.DeliveryStatusRecovered
+		} else {
+			record.Status = platformruntime.DeliveryStatusDelivered
 		}
 		record.LastError = ""
 		record.UpdatedAt = time.Now().UTC()

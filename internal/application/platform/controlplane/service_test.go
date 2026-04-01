@@ -231,7 +231,7 @@ func TestAuditRecordsContainApprovalLifecycleEvidence(t *testing.T) {
 	}
 }
 
-func TestEventPublishSuccessStaysPendingUntilFailureRecovery(t *testing.T) {
+func TestEventPublishFirstSuccessMarksDelivered(t *testing.T) {
 	store := memory.NewControlPlaneStore()
 	sink := &recordingWorkspaceEventSink{}
 	svc := NewService(ServiceDeps{
@@ -257,16 +257,16 @@ func TestEventPublishSuccessStaysPendingUntilFailureRecovery(t *testing.T) {
 		t.Fatalf("first publish: %v", err)
 	}
 
-	recovered, err := svc.ListDeliveries(context.Background(), ListDeliveriesInput{
+	delivered, err := svc.ListDeliveries(context.Background(), ListDeliveriesInput{
 		TenantID: "tenant-e2",
-		Status:   platformruntime.DeliveryStatusRecovered,
+		Status:   platformruntime.DeliveryStatusDelivered,
 		Limit:    10,
 	})
 	if err != nil {
-		t.Fatalf("list recovered deliveries: %v", err)
+		t.Fatalf("list delivered deliveries: %v", err)
 	}
-	if len(recovered.Items) != 0 {
-		t.Fatalf("expected 0 recovered deliveries after first success, got %d", len(recovered.Items))
+	if len(delivered.Items) != 1 {
+		t.Fatalf("expected 1 delivered delivery after first success, got %d", len(delivered.Items))
 	}
 
 	pending, err := svc.ListDeliveries(context.Background(), ListDeliveriesInput{
@@ -277,8 +277,8 @@ func TestEventPublishSuccessStaysPendingUntilFailureRecovery(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list pending deliveries: %v", err)
 	}
-	if len(pending.Items) != 1 {
-		t.Fatalf("expected 1 pending delivery, got %d", len(pending.Items))
+	if len(pending.Items) != 0 {
+		t.Fatalf("expected 0 pending deliveries after first success, got %d", len(pending.Items))
 	}
 }
 

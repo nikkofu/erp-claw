@@ -8,6 +8,7 @@ const (
 	DeliveryStatusPending   DeliveryStatus = "pending"
 	DeliveryStatusFailed    DeliveryStatus = "failed"
 	DeliveryStatusRecovered DeliveryStatus = "recovered"
+	DeliveryStatusDelivered DeliveryStatus = "delivered"
 )
 
 type DeliveryRecord struct {

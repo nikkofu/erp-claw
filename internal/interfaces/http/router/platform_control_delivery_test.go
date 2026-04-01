@@ -50,7 +50,7 @@ func TestDeliveriesQuerySupportsStatusAndFilters(t *testing.T) {
 		"X-Actor-ID":  actorID,
 	})
 
-	pendingPage := doJSONWithHeaders(t, h, http.MethodGet, "/api/platform/v1/agent/deliveries?status=pending&session_id=sess-e2-deliveries&task_id=task-e2-deliveries&limit=20", nil, http.StatusOK, map[string]string{
+	pendingPage := doJSONWithHeaders(t, h, http.MethodGet, "/api/platform/v1/agent/deliveries?status=delivered&session_id=sess-e2-deliveries&task_id=task-e2-deliveries&limit=20", nil, http.StatusOK, map[string]string{
 		"X-Tenant-ID": tenantID,
 		"X-Actor-ID":  actorID,
 	}).Data
@@ -60,15 +60,15 @@ func TestDeliveriesQuerySupportsStatusAndFilters(t *testing.T) {
 		t.Fatalf("expected deliveries items array, got %#v", pendingPage["items"])
 	}
 	if len(items) == 0 {
-		t.Fatal("expected pending deliveries")
+		t.Fatal("expected delivered deliveries")
 	}
 	for _, raw := range items {
 		item, ok := raw.(map[string]any)
 		if !ok {
 			t.Fatalf("expected delivery item object, got %#v", raw)
 		}
-		if stringField(t, item, "status") != "pending" {
-			t.Fatalf("expected pending delivery status, got %s", stringField(t, item, "status"))
+		if stringField(t, item, "status") != "delivered" {
+			t.Fatalf("expected delivered delivery status, got %s", stringField(t, item, "status"))
 		}
 		if stringField(t, item, "session_id") != "sess-e2-deliveries" {
 			t.Fatalf("expected session_id sess-e2-deliveries, got %s", stringField(t, item, "session_id"))

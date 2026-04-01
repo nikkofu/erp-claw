@@ -95,7 +95,7 @@ func TestTimelineEvidenceReadModelFreshness(t *testing.T) {
 		t.Fatalf("expected evidence page2 items, got %#v", evidencePage2.Data["items"])
 	}
 
-	deliveries := doJSONWithHeaders(t, h, http.MethodGet, "/api/platform/v1/agent/deliveries?status=pending&task_id=task-e3-int-001&limit=10", nil, http.StatusOK, map[string]string{
+	deliveries := doJSONWithHeaders(t, h, http.MethodGet, "/api/platform/v1/agent/deliveries?status=delivered&task_id=task-e3-int-001&limit=10", nil, http.StatusOK, map[string]string{
 		"X-Tenant-ID": tenantID,
 		"X-Actor-ID":  actorID,
 	})
@@ -111,8 +111,8 @@ func TestTimelineEvidenceReadModelFreshness(t *testing.T) {
 		if !ok {
 			t.Fatalf("expected delivery item object, got %#v", raw)
 		}
-		if stringField(t, item, "status") != "pending" {
-			t.Fatalf("expected pending delivery status, got %s", stringField(t, item, "status"))
+		if stringField(t, item, "status") != "delivered" {
+			t.Fatalf("expected delivered delivery status, got %s", stringField(t, item, "status"))
 		}
 	}
 }
