@@ -263,26 +263,41 @@ func TestPlatformControlPlaneActorPolicyAndAgentRuntimeFlow(t *testing.T) {
 		t.Fatal("expected audit records")
 	}
 
-	hasPause := false
-	hasResume := false
-	hasHandoff := false
+	required := map[string]bool{
+		"runtime.tasks.pause":   false,
+		"runtime.tasks.resume":  false,
+		"runtime.tasks.handoff": false,
+	}
 	for _, raw := range records {
 		record, ok := raw.(map[string]any)
 		if !ok {
 			continue
 		}
 		command, _ := record["command_name"].(string)
-		switch command {
-		case "runtime.tasks.pause":
-			hasPause = true
-		case "runtime.tasks.resume":
-			hasResume = true
-		case "runtime.tasks.handoff":
-			hasHandoff = true
+		if _, exists := required[command]; !exists {
+			continue
+		}
+		required[command] = true
+		if got := strings.ToLower(stringField(t, record, "decision")); got != "allow" {
+			t.Fatalf("expected decision allow for %s, got %s", command, got)
+		}
+		if got := stringField(t, record, "outcome"); got != "failed" {
+			t.Fatalf("expected outcome failed for %s, got %s", command, got)
+		}
+		if got := stringField(t, record, "correlation_id"); got == "" {
+			t.Fatalf("expected correlation_id for %s", command)
+		}
+		if got := stringField(t, record, "resource_type"); got == "" {
+			t.Fatalf("expected resource_type for %s", command)
+		}
+		if got := stringField(t, record, "resource_id"); got == "" {
+			t.Fatalf("expected resource_id for %s", command)
 		}
 	}
-	if !hasPause || !hasResume || !hasHandoff {
-		t.Fatalf("expected pause/resume/handoff audit records, got pause=%v resume=%v handoff=%v", hasPause, hasResume, hasHandoff)
+	for command, seen := range required {
+		if !seen {
+			t.Fatalf("expected audit record for %s", command)
+		}
 	}
 }
 

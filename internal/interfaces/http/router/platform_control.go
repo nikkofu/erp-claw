@@ -477,13 +477,16 @@ func auditRecordsResponse(records []audit.Record) []gin.H {
 	out := make([]gin.H, 0, len(records))
 	for _, record := range records {
 		out = append(out, gin.H{
-			"command_name": record.CommandName,
-			"tenant_id":    record.TenantID,
-			"actor_id":     record.ActorID,
-			"decision":     string(record.Decision),
-			"outcome":      record.Outcome,
-			"error":        record.Error,
-			"occurred_at":  formatTime(record.OccurredAt),
+			"command_name":   record.CommandName,
+			"tenant_id":      record.TenantID,
+			"actor_id":       record.ActorID,
+			"decision":       string(record.Decision),
+			"outcome":        record.Outcome,
+			"error":          record.Error,
+			"correlation_id": record.CorrelationID,
+			"resource_type":  record.ResourceType,
+			"resource_id":    record.ResourceID,
+			"occurred_at":    formatTime(record.OccurredAt),
 		})
 	}
 	return out
