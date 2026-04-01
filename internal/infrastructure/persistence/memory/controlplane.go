@@ -21,6 +21,9 @@ type ControlPlaneStore struct {
 	sessions    map[string]platformruntime.Session
 	tasks       map[string]platformruntime.Task
 	sessionTask map[string][]string
+	timeline    []platformruntime.TimelineEntry
+	evidence    []platformruntime.EvidenceEntry
+	deliveries  map[string]platformruntime.DeliveryRecord
 }
 
 func NewControlPlaneStore() *ControlPlaneStore {
@@ -30,6 +33,9 @@ func NewControlPlaneStore() *ControlPlaneStore {
 		sessions:    make(map[string]platformruntime.Session),
 		tasks:       make(map[string]platformruntime.Task),
 		sessionTask: make(map[string][]string),
+		timeline:    make([]platformruntime.TimelineEntry, 0),
+		evidence:    make([]platformruntime.EvidenceEntry, 0),
+		deliveries:  make(map[string]platformruntime.DeliveryRecord),
 	}
 }
 
@@ -47,6 +53,10 @@ func (s *ControlPlaneStore) SessionRepository() platformruntime.SessionRepositor
 
 func (s *ControlPlaneStore) TaskRepository() platformruntime.TaskRepository {
 	return taskRepository{s}
+}
+
+func (s *ControlPlaneStore) DeliveryRepository() platformruntime.DeliveryRepository {
+	return deliveryRepository{s}
 }
 
 type tenantCatalogRepository struct {
@@ -171,6 +181,29 @@ func (r taskRepository) Save(_ context.Context, task platformruntime.Task) error
 	if !exists {
 		r.store.sessionTask[sessionKey] = append(ids, task.ID)
 	}
+
+	now := time.Now().UTC()
+	entry := platformruntime.TimelineEntry{
+		TenantID:    task.TenantID,
+		SessionID:   task.SessionID,
+		TaskID:      task.ID,
+		EventType:   "runtime.task." + string(task.Status),
+		Status:      string(task.Status),
+		OccurredAt:  now,
+		RequestID:   "req:" + task.ID + ":" + strconv.FormatInt(now.UnixNano(), 10),
+		ResourceRef: "task:" + task.ID,
+	}
+	r.store.timeline = append(r.store.timeline, entry)
+	r.store.evidence = append(r.store.evidence, platformruntime.EvidenceEntry{
+		TenantID:    entry.TenantID,
+		SessionID:   entry.SessionID,
+		TaskID:      entry.TaskID,
+		EventType:   entry.EventType,
+		RequestID:   entry.RequestID,
+		ResourceRef: entry.ResourceRef,
+		OccurredAt:  entry.OccurredAt,
+	})
+
 	return nil
 }
 
@@ -267,6 +300,150 @@ func (r taskRepository) List(_ context.Context, query platformruntime.TaskListQu
 		NextCursor: nextCursor,
 		AsOf:       time.Now().UTC(),
 	}, nil
+}
+
+func (r taskRepository) ListTimeline(_ context.Context, tenantID, sessionID, taskID string, limit int, cursor string) (platformruntime.ReadSnapshot[platformruntime.TimelineEntry], error) {
+	r.store.mu.RLock()
+	defer r.store.mu.RUnlock()
+
+	if strings.TrimSpace(sessionID) == "" && strings.TrimSpace(taskID) == "" {
+		return platformruntime.ReadSnapshot[platformruntime.TimelineEntry]{}, platformruntime.ErrTimelineQueryRequired
+	}
+
+	filtered := make([]platformruntime.TimelineEntry, 0, len(r.store.timeline))
+	for _, item := range r.store.timeline {
+		if tenantID != "" && item.TenantID != tenantID {
+			continue
+		}
+		if sessionID != "" && item.SessionID != sessionID {
+			continue
+		}
+		if taskID != "" && item.TaskID != taskID {
+			continue
+		}
+		filtered = append(filtered, item)
+	}
+	return paginateReadSnapshot(filtered, limit, cursor), nil
+}
+
+func (r taskRepository) ListEvidence(_ context.Context, tenantID, taskID, requestID string, limit int, cursor string) (platformruntime.ReadSnapshot[platformruntime.EvidenceEntry], error) {
+	r.store.mu.RLock()
+	defer r.store.mu.RUnlock()
+
+	if strings.TrimSpace(taskID) == "" && strings.TrimSpace(requestID) == "" {
+		return platformruntime.ReadSnapshot[platformruntime.EvidenceEntry]{}, platformruntime.ErrEvidenceQueryRequired
+	}
+
+	filtered := make([]platformruntime.EvidenceEntry, 0, len(r.store.evidence))
+	for _, item := range r.store.evidence {
+		if tenantID != "" && item.TenantID != tenantID {
+			continue
+		}
+		if taskID != "" && item.TaskID != taskID {
+			continue
+		}
+		if requestID != "" && item.RequestID != requestID {
+			continue
+		}
+		filtered = append(filtered, item)
+	}
+	return paginateReadSnapshot(filtered, limit, cursor), nil
+}
+
+func paginateReadSnapshot[T any](items []T, limit int, cursor string) platformruntime.ReadSnapshot[T] {
+	start := 0
+	if cursor != "" {
+		parts := strings.Split(cursor, ":")
+		if len(parts) == 2 {
+			if parsed, err := strconv.Atoi(parts[1]); err == nil && parsed > 0 {
+				start = parsed
+			}
+		}
+	}
+	if start > len(items) {
+		start = len(items)
+	}
+
+	if limit <= 0 {
+		limit = 20
+	}
+	end := start + limit
+	if end > len(items) {
+		end = len(items)
+	}
+
+	nextCursor := ""
+	if end < len(items) {
+		nextCursor = "idx:" + strconv.Itoa(end)
+	}
+
+	page := make([]T, end-start)
+	copy(page, items[start:end])
+	return platformruntime.ReadSnapshot[T]{
+		Items:      page,
+		NextCursor: nextCursor,
+		AsOf:       time.Now().UTC(),
+	}
+}
+
+type deliveryRepository struct {
+	store *ControlPlaneStore
+}
+
+func (r deliveryRepository) Save(_ context.Context, record platformruntime.DeliveryRecord) error {
+	r.store.mu.Lock()
+	defer r.store.mu.Unlock()
+	r.store.deliveries[deliveryKey(record.TenantID, record.EventType, record.SessionID, record.TaskID)] = record
+	return nil
+}
+
+func (r deliveryRepository) Get(_ context.Context, tenantID, eventType, sessionID, taskID string) (platformruntime.DeliveryRecord, bool, error) {
+	r.store.mu.RLock()
+	defer r.store.mu.RUnlock()
+	record, ok := r.store.deliveries[deliveryKey(tenantID, eventType, sessionID, taskID)]
+	if !ok {
+		return platformruntime.DeliveryRecord{}, false, nil
+	}
+	return record, true, nil
+}
+
+func (r deliveryRepository) List(_ context.Context, query platformruntime.DeliveryListQuery) (platformruntime.DeliveryListPage, error) {
+	r.store.mu.RLock()
+	defer r.store.mu.RUnlock()
+
+	items := make([]platformruntime.DeliveryRecord, 0, len(r.store.deliveries))
+	for _, record := range r.store.deliveries {
+		if query.TenantID != "" && record.TenantID != query.TenantID {
+			continue
+		}
+		if query.Status != "" && record.Status != query.Status {
+			continue
+		}
+		if query.SessionID != "" && record.SessionID != query.SessionID {
+			continue
+		}
+		if query.TaskID != "" && record.TaskID != query.TaskID {
+			continue
+		}
+		items = append(items, record)
+	}
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].UpdatedAt.Equal(items[j].UpdatedAt) {
+			return deliveryKey(items[i].TenantID, items[i].EventType, items[i].SessionID, items[i].TaskID) <
+				deliveryKey(items[j].TenantID, items[j].EventType, items[j].SessionID, items[j].TaskID)
+		}
+		return items[i].UpdatedAt.Before(items[j].UpdatedAt)
+	})
+
+	limit := query.Limit
+	if limit <= 0 || limit > len(items) {
+		limit = len(items)
+	}
+	return platformruntime.DeliveryListPage{Items: items[:limit], AsOf: time.Now().UTC()}, nil
+}
+
+func deliveryKey(tenantID, eventType, sessionID, taskID string) string {
+	return key(tenantID, eventType+":"+sessionID+":"+taskID)
 }
 
 func cloneActor(actor iam.Actor) iam.Actor {

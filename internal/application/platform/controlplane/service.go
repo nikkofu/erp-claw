@@ -20,6 +20,7 @@ type ServiceDeps struct {
 	IAMDirectory    iam.Directory
 	Sessions        platformruntime.SessionRepository
 	Tasks           platformruntime.TaskRepository
+	Deliveries      platformruntime.DeliveryRepository
 	AuditReader     audit.Reader
 	WorkspaceEvents platformruntime.WorkspaceEventSink
 	Pipeline        *shared.Pipeline
@@ -30,6 +31,7 @@ type Service struct {
 	iamDirectory    iam.Directory
 	sessions        platformruntime.SessionRepository
 	tasks           platformruntime.TaskRepository
+	deliveries      platformruntime.DeliveryRepository
 	auditReader     audit.Reader
 	workspaceEvents platformruntime.WorkspaceEventSink
 	pipeline        *shared.Pipeline
@@ -48,6 +50,7 @@ func NewService(deps ServiceDeps) *Service {
 		iamDirectory:    deps.IAMDirectory,
 		sessions:        deps.Sessions,
 		tasks:           deps.Tasks,
+		deliveries:      deps.Deliveries,
 		auditReader:     deps.AuditReader,
 		workspaceEvents: deps.WorkspaceEvents,
 		pipeline:        deps.Pipeline,
@@ -261,7 +264,7 @@ func (s *Service) PauseTask(ctx context.Context, input AdvanceTaskInput) (platfo
 		Name:     "runtime.tasks.pause",
 		TenantID: input.TenantID,
 		ActorID:  input.ActorID,
-		Payload:  input,
+		Payload:  governanceAuditPayload(ctx, s.tasks, "runtime.tasks.pause", input),
 	}, func(context.Context, shared.Command) error {
 		return ErrGovernanceCommandNotImplemented
 	})
@@ -277,7 +280,7 @@ func (s *Service) ResumeTask(ctx context.Context, input AdvanceTaskInput) (platf
 		Name:     "runtime.tasks.resume",
 		TenantID: input.TenantID,
 		ActorID:  input.ActorID,
-		Payload:  input,
+		Payload:  governanceAuditPayload(ctx, s.tasks, "runtime.tasks.resume", input),
 	}, func(context.Context, shared.Command) error {
 		return ErrGovernanceCommandNotImplemented
 	})
@@ -293,7 +296,7 @@ func (s *Service) HandoffTask(ctx context.Context, input AdvanceTaskInput) (plat
 		Name:     "runtime.tasks.handoff",
 		TenantID: input.TenantID,
 		ActorID:  input.ActorID,
-		Payload:  input,
+		Payload:  governanceAuditPayload(ctx, s.tasks, "runtime.tasks.handoff", input),
 	}, func(context.Context, shared.Command) error {
 		return ErrGovernanceCommandNotImplemented
 	})
@@ -455,6 +458,111 @@ func (s *Service) ListSessions(ctx context.Context, input ListSessionsInput) (pl
 	return page, err
 }
 
+type ListTimelineInput struct {
+	TenantID  string
+	ActorID   string
+	SessionID string
+	TaskID    string
+	Limit     int
+	Cursor    string
+}
+
+func (s *Service) ListTimeline(ctx context.Context, input ListTimelineInput) (platformruntime.ReadSnapshot[platformruntime.TimelineEntry], error) {
+	var page platformruntime.ReadSnapshot[platformruntime.TimelineEntry]
+	err := s.pipeline.Execute(ctx, shared.Command{
+		Name:     "runtime.timeline.list",
+		TenantID: input.TenantID,
+		ActorID:  input.ActorID,
+		Payload:  input,
+	}, func(txCtx context.Context, _ shared.Command) error {
+		listed, err := s.tasks.ListTimeline(
+			txCtx,
+			strings.TrimSpace(input.TenantID),
+			strings.TrimSpace(input.SessionID),
+			strings.TrimSpace(input.TaskID),
+			input.Limit,
+			strings.TrimSpace(input.Cursor),
+		)
+		if err != nil {
+			return err
+		}
+		page = listed
+		return nil
+	})
+	return page, err
+}
+
+type ListEvidenceInput struct {
+	TenantID  string
+	ActorID   string
+	TaskID    string
+	RequestID string
+	Limit     int
+	Cursor    string
+}
+
+func (s *Service) ListEvidence(ctx context.Context, input ListEvidenceInput) (platformruntime.ReadSnapshot[platformruntime.EvidenceEntry], error) {
+	var page platformruntime.ReadSnapshot[platformruntime.EvidenceEntry]
+	err := s.pipeline.Execute(ctx, shared.Command{
+		Name:     "runtime.evidence.list",
+		TenantID: input.TenantID,
+		ActorID:  input.ActorID,
+		Payload:  input,
+	}, func(txCtx context.Context, _ shared.Command) error {
+		listed, err := s.tasks.ListEvidence(
+			txCtx,
+			strings.TrimSpace(input.TenantID),
+			strings.TrimSpace(input.TaskID),
+			strings.TrimSpace(input.RequestID),
+			input.Limit,
+			strings.TrimSpace(input.Cursor),
+		)
+		if err != nil {
+			return err
+		}
+		page = listed
+		return nil
+	})
+	return page, err
+}
+
+type ListDeliveriesInput struct {
+	TenantID  string
+	ActorID   string
+	Status    platformruntime.DeliveryStatus
+	SessionID string
+	TaskID    string
+	Limit     int
+}
+
+func (s *Service) ListDeliveries(ctx context.Context, input ListDeliveriesInput) (platformruntime.DeliveryListPage, error) {
+	var page platformruntime.DeliveryListPage
+	err := s.pipeline.Execute(ctx, shared.Command{
+		Name:     "runtime.deliveries.list",
+		TenantID: input.TenantID,
+		ActorID:  input.ActorID,
+		Payload:  input,
+	}, func(txCtx context.Context, _ shared.Command) error {
+		if s.deliveries == nil {
+			page = platformruntime.DeliveryListPage{Items: []platformruntime.DeliveryRecord{}, AsOf: time.Now().UTC()}
+			return nil
+		}
+		listed, err := s.deliveries.List(txCtx, platformruntime.DeliveryListQuery{
+			TenantID:  strings.TrimSpace(input.TenantID),
+			Status:    input.Status,
+			SessionID: strings.TrimSpace(input.SessionID),
+			TaskID:    strings.TrimSpace(input.TaskID),
+			Limit:     input.Limit,
+		})
+		if err != nil {
+			return err
+		}
+		page = listed
+		return nil
+	})
+	return page, err
+}
+
 type ListAuditInput struct {
 	TenantID    string
 	ActorID     string
@@ -534,7 +642,51 @@ func (s *Service) emitWorkspaceEvent(evt platformruntime.WorkspaceEvent) error {
 	if s.workspaceEvents == nil {
 		return nil
 	}
-	return s.workspaceEvents.Broadcast(evt)
+	now := time.Now().UTC()
+	record := platformruntime.DeliveryRecord{
+		EventType:    strings.TrimSpace(evt.Type),
+		TenantID:     strings.TrimSpace(evt.TenantID),
+		SessionID:    strings.TrimSpace(evt.SessionID),
+		TaskID:       strings.TrimSpace(evt.TaskID),
+		AttemptCount: 1,
+		Status:       platformruntime.DeliveryStatusPending,
+		UpdatedAt:    now,
+	}
+	if s.deliveries != nil {
+		if existing, ok, err := s.deliveries.Get(context.Background(), record.TenantID, record.EventType, record.SessionID, record.TaskID); err != nil {
+			return err
+		} else if ok {
+			record = existing
+			record.AttemptCount++
+			record.UpdatedAt = now
+		}
+		if err := s.deliveries.Save(context.Background(), record); err != nil {
+			return err
+		}
+	}
+
+	err := s.workspaceEvents.Broadcast(evt)
+	if err != nil {
+		if s.deliveries != nil {
+			record.Status = platformruntime.DeliveryStatusFailed
+			record.LastError = err.Error()
+			record.UpdatedAt = time.Now().UTC()
+			if saveErr := s.deliveries.Save(context.Background(), record); saveErr != nil {
+				return saveErr
+			}
+		}
+		return err
+	}
+
+	if s.deliveries != nil {
+		record.Status = platformruntime.DeliveryStatusRecovered
+		record.LastError = ""
+		record.UpdatedAt = time.Now().UTC()
+		if err := s.deliveries.Save(context.Background(), record); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func normalizeAdvanceTaskInput(ctx context.Context, input AdvanceTaskInput) (AdvanceTaskInput, bool) {
@@ -554,6 +706,28 @@ func normalizeAdvanceTaskInput(ctx context.Context, input AdvanceTaskInput) (Adv
 		actorProvided = rc.ActorProvided
 	}
 	return input, actorProvided
+}
+
+func governanceAuditPayload(
+	ctx context.Context,
+	tasks platformruntime.TaskRepository,
+	commandName string,
+	input AdvanceTaskInput,
+) map[string]any {
+	sessionID := ""
+	if tasks != nil && input.TenantID != "" && input.TaskID != "" {
+		if task, err := tasks.Get(ctx, input.TenantID, input.TaskID); err == nil {
+			sessionID = task.SessionID
+		}
+	}
+	return map[string]any{
+		"action":         strings.TrimPrefix(commandName, "runtime.tasks."),
+		"task_id":        input.TaskID,
+		"session_id":     sessionID,
+		"correlation_id": commandName + ":" + input.TenantID + ":" + input.TaskID,
+		"resource_type":  "task",
+		"resource_id":    input.TaskID,
+	}
 }
 
 func normalizeRoles(roles []string) []string {

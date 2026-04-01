@@ -284,6 +284,70 @@ func registerControlPlaneRoutes(rg *gin.RouterGroup, container *bootstrap.Contai
 		presenter.OK(c, taskResponse(task))
 	})
 
+	agentGroup.GET("/timeline", func(c *gin.Context) {
+		limit, err := parseLimit(c.Query("limit"), 20)
+		if err != nil {
+			presenter.Error(c, http.StatusBadRequest, err.Error())
+			return
+		}
+		page, err := container.ControlPlane.ListTimeline(c.Request.Context(), controlplane.ListTimelineInput{
+			TenantID:  tenantIDFromContext(c),
+			ActorID:   actorIDFromContext(c),
+			SessionID: strings.TrimSpace(c.Query("session_id")),
+			TaskID:    strings.TrimSpace(c.Query("task_id")),
+			Limit:     limit,
+			Cursor:    c.Query("cursor"),
+		})
+		if err != nil {
+			renderControlPlaneError(c, err)
+			return
+		}
+		presenter.OK(c, timelinePageResponse(page))
+	})
+
+	agentGroup.GET("/evidence", func(c *gin.Context) {
+		limit, err := parseLimit(c.Query("limit"), 20)
+		if err != nil {
+			presenter.Error(c, http.StatusBadRequest, err.Error())
+			return
+		}
+		page, err := container.ControlPlane.ListEvidence(c.Request.Context(), controlplane.ListEvidenceInput{
+			TenantID:  tenantIDFromContext(c),
+			ActorID:   actorIDFromContext(c),
+			TaskID:    strings.TrimSpace(c.Query("task_id")),
+			RequestID: strings.TrimSpace(c.Query("request_id")),
+			Limit:     limit,
+			Cursor:    c.Query("cursor"),
+		})
+		if err != nil {
+			renderControlPlaneError(c, err)
+			return
+		}
+		presenter.OK(c, evidencePageResponse(page))
+	})
+
+	agentGroup.GET("/deliveries", func(c *gin.Context) {
+		limit, err := parseLimit(c.Query("limit"), 20)
+		if err != nil {
+			presenter.Error(c, http.StatusBadRequest, err.Error())
+			return
+		}
+		status := platformruntime.DeliveryStatus(strings.TrimSpace(c.Query("status")))
+		page, err := container.ControlPlane.ListDeliveries(c.Request.Context(), controlplane.ListDeliveriesInput{
+			TenantID:  tenantIDFromContext(c),
+			ActorID:   actorIDFromContext(c),
+			Status:    status,
+			SessionID: strings.TrimSpace(c.Query("session_id")),
+			TaskID:    strings.TrimSpace(c.Query("task_id")),
+			Limit:     limit,
+		})
+		if err != nil {
+			renderControlPlaneError(c, err)
+			return
+		}
+		presenter.OK(c, deliveryListPageResponse(page))
+	})
+
 	auditGroup := rg.Group("/audit")
 	auditGroup.GET("/records", func(c *gin.Context) {
 		limit, err := parseLimit(c.Query("limit"), 20)
@@ -354,7 +418,9 @@ func renderControlPlaneError(c *gin.Context, err error) {
 		errors.Is(err, platformruntime.ErrInvalidSession),
 		errors.Is(err, platformruntime.ErrInvalidTask),
 		errors.Is(err, platformruntime.ErrInvalidSessionTransition),
-		errors.Is(err, platformruntime.ErrInvalidTaskTransition):
+		errors.Is(err, platformruntime.ErrInvalidTaskTransition),
+		errors.Is(err, platformruntime.ErrTimelineQueryRequired),
+		errors.Is(err, platformruntime.ErrEvidenceQueryRequired):
 		presenter.Error(c, http.StatusBadRequest, err.Error())
 	default:
 		presenter.Error(c, http.StatusInternalServerError, err.Error())
@@ -450,6 +516,79 @@ func sessionListResponse(sessions []platformruntime.Session) []gin.H {
 func sessionListPageResponse(page platformruntime.SessionListPage) gin.H {
 	return gin.H{
 		"items": sessionListResponse(page.Items),
+		"as_of": formatTime(page.AsOf),
+	}
+}
+
+func timelineEntryResponse(value platformruntime.TimelineEntry) gin.H {
+	return gin.H{
+		"tenant_id":    value.TenantID,
+		"session_id":   value.SessionID,
+		"task_id":      value.TaskID,
+		"event_type":   value.EventType,
+		"status":       value.Status,
+		"occurred_at":  formatTime(value.OccurredAt),
+		"request_id":   value.RequestID,
+		"resource_ref": value.ResourceRef,
+	}
+}
+
+func evidenceEntryResponse(value platformruntime.EvidenceEntry) gin.H {
+	return gin.H{
+		"tenant_id":    value.TenantID,
+		"session_id":   value.SessionID,
+		"task_id":      value.TaskID,
+		"event_type":   value.EventType,
+		"occurred_at":  formatTime(value.OccurredAt),
+		"request_id":   value.RequestID,
+		"resource_ref": value.ResourceRef,
+	}
+}
+
+func timelinePageResponse(page platformruntime.ReadSnapshot[platformruntime.TimelineEntry]) gin.H {
+	items := make([]gin.H, 0, len(page.Items))
+	for _, item := range page.Items {
+		items = append(items, timelineEntryResponse(item))
+	}
+	return gin.H{
+		"items":       items,
+		"next_cursor": page.NextCursor,
+		"as_of":       formatTime(page.AsOf),
+	}
+}
+
+func evidencePageResponse(page platformruntime.ReadSnapshot[platformruntime.EvidenceEntry]) gin.H {
+	items := make([]gin.H, 0, len(page.Items))
+	for _, item := range page.Items {
+		items = append(items, evidenceEntryResponse(item))
+	}
+	return gin.H{
+		"items":       items,
+		"next_cursor": page.NextCursor,
+		"as_of":       formatTime(page.AsOf),
+	}
+}
+
+func deliveryListResponse(records []platformruntime.DeliveryRecord) []gin.H {
+	out := make([]gin.H, 0, len(records))
+	for _, record := range records {
+		out = append(out, gin.H{
+			"event_type":    record.EventType,
+			"tenant_id":     record.TenantID,
+			"session_id":    record.SessionID,
+			"task_id":       record.TaskID,
+			"attempt_count": record.AttemptCount,
+			"last_error":    record.LastError,
+			"status":        string(record.Status),
+			"updated_at":    formatTime(record.UpdatedAt),
+		})
+	}
+	return out
+}
+
+func deliveryListPageResponse(page platformruntime.DeliveryListPage) gin.H {
+	return gin.H{
+		"items": deliveryListResponse(page.Items),
 		"as_of": formatTime(page.AsOf),
 	}
 }
