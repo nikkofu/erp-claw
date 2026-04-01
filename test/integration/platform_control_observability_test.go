@@ -94,4 +94,25 @@ func TestTimelineEvidenceReadModelFreshness(t *testing.T) {
 	if !ok || len(page2Items) == 0 {
 		t.Fatalf("expected evidence page2 items, got %#v", evidencePage2.Data["items"])
 	}
+
+	deliveries := doJSONWithHeaders(t, h, http.MethodGet, "/api/platform/v1/agent/deliveries?status=recovered&task_id=task-e3-int-001&limit=10", nil, http.StatusOK, map[string]string{
+		"X-Tenant-ID": tenantID,
+		"X-Actor-ID":  actorID,
+	})
+	if stringField(t, deliveries.Data, "as_of") == "" {
+		t.Fatal("expected deliveries as_of")
+	}
+	deliveryItems, ok := deliveries.Data["items"].([]any)
+	if !ok || len(deliveryItems) == 0 {
+		t.Fatalf("expected delivery items, got %#v", deliveries.Data["items"])
+	}
+	for _, raw := range deliveryItems {
+		item, ok := raw.(map[string]any)
+		if !ok {
+			t.Fatalf("expected delivery item object, got %#v", raw)
+		}
+		if stringField(t, item, "status") != "recovered" {
+			t.Fatalf("expected recovered delivery status, got %s", stringField(t, item, "status"))
+		}
+	}
 }

@@ -81,6 +81,7 @@ func NewContainer(cfg Config) *Container {
 			IAMDirectory:    controlPlaneStore.IAMDirectory(),
 			Sessions:        controlPlaneStore.SessionRepository(),
 			Tasks:           controlPlaneStore.TaskRepository(),
+			Deliveries:      controlPlaneStore.DeliveryRepository(),
 			AuditReader:     auditRecorder,
 			WorkspaceEvents: workspaceGateway,
 			Pipeline:        pipeline,
