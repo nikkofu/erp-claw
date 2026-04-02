@@ -8,11 +8,14 @@ import (
 
 // Record captures command pipeline audit metadata.
 type Record struct {
-	CommandName string
-	TenantID    string
-	ActorID     string
-	Decision    policy.Decision
-	Outcome     string
-	Error       string
-	OccurredAt  time.Time
+	CommandName   string
+	TenantID      string
+	ActorID       string
+	Decision      policy.Decision
+	Outcome       string
+	Error         string
+	CorrelationID string
+	ResourceType  string
+	ResourceID    string
+	OccurredAt    time.Time
 }

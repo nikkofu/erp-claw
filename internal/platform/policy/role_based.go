@@ -107,7 +107,7 @@ func matchRule(rules []Rule, commandName string) (Rule, bool) {
 		if prefix == "" {
 			continue
 		}
-		if strings.HasPrefix(commandName, prefix) && len(prefix) > bestPrefixLen {
+		if matchesCommand(prefix, commandName) && len(prefix) > bestPrefixLen {
 			bestPrefixLen = len(prefix)
 			best = rule
 		}
@@ -116,6 +116,13 @@ func matchRule(rules []Rule, commandName string) (Rule, bool) {
 		return Rule{}, false
 	}
 	return best, true
+}
+
+func matchesCommand(prefix, commandName string) bool {
+	if strings.HasSuffix(prefix, ".") {
+		return strings.HasPrefix(commandName, prefix)
+	}
+	return commandName == prefix
 }
 
 func hasAnyRole(assigned []string, required []string) bool {

@@ -26,5 +26,6 @@ func requestContext(c *gin.Context) *runtime.RequestContext {
 	}
 	rc := &runtime.RequestContext{}
 	c.Set(runtime.RequestContextKey, rc)
+	c.Request = c.Request.WithContext(runtime.WithRequestContext(c.Request.Context(), rc))
 	return rc
 }
