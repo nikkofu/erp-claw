@@ -1,6 +1,6 @@
 # Phase 1 覆盖领域、模块、功能清单、优先级与实现情况
 
-更新时间：2026-03-25
+更新时间：2026-03-27
 
 ## 1. 文档目的
 
@@ -28,7 +28,7 @@
 - 平台底座已经具备可运行骨架
 - 控制面核心能力已经有基础缝合点
 - Agent 执行与工作台入口已经有运行时占位
-- 供应链交易闭环仍处于设计完成、代码未开始阶段
+- 供应链交易闭环已在 Phase 2 形成最小可运行回路（主数据/采购/库存/应收应付/销售与相关 admin API），但不等于 Phase 1 主线目标已完成
 
 因此，本文对“实现情况”的判断分为两层：
 
@@ -67,13 +67,13 @@
 
 ### 3.2 尚未完成的 Phase 1 主线
 
-以下能力虽然在设计范围内，但当前仍未达到可交付状态：
+以下能力虽然在设计范围内，但当前仍未达到 Phase 1 目标口径下的可交付状态：
 
 - 真正的 Tenant / IAM / Policy 控制面模型
 - 插件、工具、模型目录与租户级能力治理
 - Agent session / task 的存储、状态机与流式协议
 - Approval / Workflow 的真实业务流程
-- 供应链闭环所需的主数据、销售、采购、库存、应收应付上下文
+- 面向 Agent 原生执行面的审批/流程编排、会话状态机、能力治理等主线
 
 ### 3.3 当前阶段判断
 
@@ -81,7 +81,7 @@
 
 - 平台底座：已完成第一批可运行基线
 - Phase 1 控制面：完成约束骨架，尚未完成业务化实现
-- 供应链交易闭环：尚未进入实际开发
+- 供应链交易闭环：已由 Phase 2 波次落地最小运行闭环，但与 Phase 1 控制面主线目标并行
 
 ## 4. Phase 1 领域覆盖矩阵
 
@@ -90,12 +90,12 @@
 | 有界上下文 | 功能范围 | 优先级 | 当前实现情况 | 说明 |
 | --- | --- | --- | --- | --- |
 | Tenant and IAM | 租户元数据、组织结构、用户、角色、部门范围、策略引用 | P1 | 部分实现 | 已有 `internal/platform/tenant/*` 与 `internal/platform/iam/actor.go`，但目前只有基于请求头的租户解析和占位 `system` actor，没有真实租户目录、组织结构、用户和角色模型。 |
-| Master Data | 客户、供应商、商品、仓库、库位、税码、币种、计量单位、价目表 | P1 | 仅设计 | 设计已定义，但仓库中没有 `internal/domain/masterdata` 或对应应用层实现。 |
-| Sales | 报价、销售订单、发运计划、订单生命周期 | P1 | 仅设计 | 设计已定义，当前没有销售领域模型、命令处理器或 API。 |
-| Procurement | 请购、采购订单、供应商事务状态、收货计划 | P1 | 仅设计 | 设计已定义，当前没有采购上下文代码。 |
-| Inventory | 入库、出库、预留、调拨、库存台账、可用/预留库存状态 | P1 | 仅设计 | 设计已定义，当前没有库存聚合、库存流水或库存查询模型。 |
-| Receivable and Payable | 应收单、应付单、开票申请、付款计划 | P2 | 仅设计 | 设计已定义，当前没有应收应付上下文实现。 |
-| Approval and Workflow | 审批定义、审批实例、人工任务、流程推进 | P1 | 仅设计 | 设计已定义，但当前只有命令管道中的策略/审计基础，没有审批模型或工作流引擎。 |
+| Master Data | 客户、供应商、商品、仓库、库位、税码、币种、计量单位、价目表 | P1 | 部分实现 | 已有 `internal/domain/masterdata/*` 与 admin 接口落地（来自 Phase 2 业务波次），但仍缺少更完整主数据治理能力。 |
+| Sales | 报价、销售订单、发运计划、订单生命周期 | P1 | 部分实现 | 已有最小销售订单与发运路径（来自 Phase 2），尚未覆盖完整生命周期与策略约束。 |
+| Procurement | 请购、采购订单、供应商事务状态、收货计划 | P1 | 部分实现 | 已有采购订单创建/提交流程与收货路径（来自 Phase 2），仍缺少更完整流程编排。 |
+| Inventory | 入库、出库、预留、调拨、库存台账、可用/预留库存状态 | P1 | 部分实现 | 已有库存流水/余额/预留/出库/调拨与 transfer order 最小能力（来自 Phase 2），仍缺少更深层库存治理。 |
+| Receivable and Payable | 应收单、应付单、开票申请、付款计划 | P2 | 部分实现 | 已有最小应收应付与支付计划路径（来自 Phase 2），尚未覆盖完整财务流程。 |
+| Approval and Workflow | 审批定义、审批实例、人工任务、流程推进 | P1 | 部分实现 | 已有审批实例通过/拒绝最小闭环（来自 Phase 2），但通用 workflow 编排与人工任务引擎未落地。 |
 | Agent Task and Automation | Agent profile、session、task、execution plan、tool record、policy decision record | P1 | 部分实现 | 已有 `agent_session`、`agent_task` 表占位，`internal/interfaces/ws/workspace_gateway.go` 与 `internal/platform/runtime/workspace_event.go` 提供运行时骨架，但没有真实会话仓储、任务状态机、流式协议和工具执行记录。 |
 
 ## 5. Phase 1 模块覆盖矩阵
@@ -131,7 +131,7 @@
 | --- | --- | --- | --- | --- | --- |
 | Execution Plane | Command Pipeline | 命令进入应用处理器、策略前置、事务边界、审计记录 | P0 | 部分实现 | `internal/application/shared/pipeline.go`、`command.go`、`transaction.go`；当前只完成基础执行链路 |
 | Execution Plane | Event Bus | 内存总线、NATS JetStream 总线 | P0 | 已实现 | `internal/platform/eventbus/*` |
-| Execution Plane | Worker Runtime | 装配依赖、轮询 outbox 的后台进程骨架 | P0 | 部分实现 | `cmd/worker/main.go`；轮询逻辑仍是占位函数 |
+| Execution Plane | Worker Runtime | 装配依赖、轮询 outbox 的后台进程骨架 | P0 | 部分实现 | `cmd/worker/main.go` 已实现 claim/publish/标记 published、失败回退 pending+delay、attempts 计数与阈值后 failed 终态、`processing` 租约写入 `available_at` 的超时回收、终态失败后的 dead-letter 发布，以及稳定 `MessageID`（`outbox:<id>`）的出站去重键；`internal/application/shared/inbox_processor.go` 已提供消费侧幂等处理器流程（claim/handle/processed/failed），运行时订阅接入仍待补齐。 |
 | Execution Plane | Scheduler Runtime | 定时 tick 产生时间驱动事件 | P0 | 部分实现 | `cmd/scheduler/main.go`；当前只发送 `platform.scheduler.tick` 骨架事件 |
 | Execution Plane | Agent Gateway Runtime | 工作台事件入口、会话 channel 注册、进程生命周期 | P1 | 部分实现 | `cmd/agent-gateway/main.go`、`internal/interfaces/ws/workspace_gateway.go` |
 | Execution Plane | Session Context Assembler | tenant/actor/business/policy/knowledge/execution context 组装 | P1 | 部分实现 | `internal/platform/runtime/request_context.go` 只覆盖 request 级元数据，没有完整 session context assembler |
@@ -147,7 +147,7 @@
 | Data Plane | Redis seam | 客户端配置校验与构建 | P0 | 已实现 | `internal/infrastructure/cache/redis/client.go` |
 | Data Plane | NATS seam | 连接配置校验与构建 | P0 | 已实现 | `internal/infrastructure/messaging/nats/client.go` |
 | Data Plane | MinIO seam | 对象存储客户端配置校验与构建 | P0 | 已实现 | `internal/infrastructure/storage/minio/client.go` |
-| Data Plane | Outbox Pattern 基础 | 表结构、worker 轮询骨架、总线发布路径 | P1 | 部分实现 | `outbox` 表已创建，`cmd/worker/main.go` 预留轮询路径，但未完成可靠发布与状态推进 |
+| Data Plane | Outbox Pattern 基础 | 表结构、worker 轮询骨架、总线发布路径 | P1 | 部分实现 | `outbox` 表与 worker 发布路径已落地（pending -> processing -> published，失败回退 pending+available_at，attempts 计数与 failed 终态，`processing` 租约到期回收再处理，终态失败 dead-letter 发布，以及 NATS `MessageID` 去重键）；`inbox` 幂等表、持久化 helper 与应用层处理器已补齐，运行时消费链路接入仍待实现。 |
 | Data Plane | CQRS Read Models | Backoffice、Workspace、Monitoring、Analytics 读模型 | P1 | 仅设计 | 当前没有 projection、read service 或读模型表 |
 | Data Plane | Search / Vector Retrieval | PostgreSQL FTS、trigram、`pgvector` | P2 | 仅设计 | 设计已定义，当前迁移中没有相关扩展与索引结构 |
 | Integration Plane | 外部系统连接器 | webhook、ERP 外部系统、插件式连接器 | P2 | 仅设计 | 只有 `Integration API` 路由分组占位，没有 connector/runtime 实现 |
@@ -161,7 +161,7 @@
 | Foundation | Compose 开发合同 | PostgreSQL、Redis、NATS、MinIO、OTEL、Prometheus、Grafana | P0 | 已实现 | `docker-compose.yml`、`configs/local/docker.env` |
 | Foundation | 本地开发命令 | `infra-up`、`infra-down`、`test`、`smoke`、`migrate-up`、`migrate-down` | P0 | 已实现 | `Makefile` |
 | Foundation | Live Smoke Workflow | 本地健康检查脚本与集成测试 | P0 | 已实现 | `scripts/smoke_local.sh`、`test/integration/api_health_test.go` |
-| Foundation | Observability 基础合同 | OTEL endpoint、Prometheus、Grafana | P1 | 部分实现 | Compose 与 config 已准备，但没有 `internal/infrastructure/observability/otel/setup.go` 或真实 tracing 初始化 |
+| Foundation | Observability 基础合同 | OTEL endpoint、Prometheus、Grafana | P1 | 部分实现 | Compose 与 config 已准备，现已新增 `internal/infrastructure/observability/otel/setup.go` 与 runtime 入口初始化 seam；真实 exporter/provider 仍待后续补齐。 |
 
 ## 6. 按优先级整理的功能清单
 
@@ -186,9 +186,9 @@
 - 审计记录持久化、查询与审计治理
 - Agent session/task 仓储、状态机、执行记录、证据模型
 - Workspace 真正的流式协议与事件订阅
-- Outbox 发布、消费确认、失败重试与幂等处理
+- Outbox/Inbox 完整治理能力（已具备 DLQ、inbox 幂等存储、应用层消费处理器与出站 MessageID 去重键，仍缺运行时消费接入与可观测告警）
 - 插件注册、工具目录、模型目录、租户能力治理
-- Approval / Workflow 基线
+- Approval 基线（已部分落地），Workflow Orchestrator 仍未完成
 
 ### 6.3 P2：Phase 1 边界内但可顺延的能力
 
@@ -200,24 +200,18 @@
 
 ## 7. 供应链交易闭环的实现情况
 
-这是当前文档最重要的结论之一。
+“供应链交易闭环”已经不再是“仅设计”状态。
 
-“供应链交易闭环”虽然是项目确认过的第一业务闭环，但在当前仓库中的实现状态仍然是：
+当前仓库已有可运行的最小业务路径（主要由 Phase 2 波次落地）：
 
-- 设计已完成
-- 执行架构已经为它预留了运行时与数据缝合点
-- 实际业务领域代码仍未开始
+- 主数据：供应商/商品/仓库最小能力
+- 采购：采购订单创建/提交/收货
+- 库存：流水、余额、预留、出库、调拨、transfer order
+- 审批：审批实例通过/拒绝最小闭环
+- 应收应付：最小查询与计划能力
+- 销售：最小销售订单与发运路径
 
-具体来看：
-
-- 主数据：未开始
-- 销售：未开始
-- 采购：未开始
-- 库存：未开始
-- 审批：未开始
-- 应收应付基础：未开始
-
-也就是说，当前代码库还不能被视为“已进入供应链 ERP 功能开发阶段”，而应被视为“已经完成供应链 ERP 开发前置的平台底座阶段”。
+但这并不代表 Phase 1 已完成，因为 Phase 1 的主线目标仍聚焦在控制面、执行面和治理能力（session/task state machine、workflow orchestration、tool/model governance）。
 
 ## 8. 对 Phase 1 完成度的定性判断
 
@@ -233,7 +227,8 @@
 
 - 平台底座已具备
 - 控制面主线只完成了基础骨架
-- 供应链业务闭环尚未落地
+- 控制面与执行面主线只完成了基础骨架，尚未完成目标化交付
+- 供应链最小闭环已落地，但属于跨阶段并行推进成果
 
 ## 9. 推荐的下一步实现顺序
 
@@ -268,7 +263,7 @@
 最准确的表述应该是：
 
 - 已完成：Phase 0/1 平台底座
-- 部分完成：Phase 1 控制面骨架
-- 尚未开始：Phase 1 供应链交易闭环业务实现
+- 部分完成：Phase 1 控制面骨架 + observability 初始化 seam +审批最小基线
+- 尚未完成：Phase 1 控制面/执行面的目标能力闭环（workflow orchestration、task runtime、capability governance 等）
 
 因此，后续所有业务域开发都应该以本文中的 `P1` 模块为第一优先级，而不是继续扩展更多技术骨架。

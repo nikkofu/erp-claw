@@ -25,6 +25,15 @@ func main() {
 	}
 
 	bootstrap.StartRuntime(bootstrap.SchedulerRole)
+	shutdownTelemetry, err := bootstrap.SetupRuntimeTelemetry(cfg, bootstrap.SchedulerRole)
+	if err != nil {
+		log.Fatalf("failed to setup telemetry: %v", err)
+	}
+	defer func() {
+		if shutdownErr := shutdownTelemetry(context.Background()); shutdownErr != nil {
+			log.Printf("failed to shutdown telemetry: %v", shutdownErr)
+		}
+	}()
 
 	nc, err := messagingnats.New(messagingnats.Config{
 		Servers: cfg.NATS.Servers,

@@ -1,0 +1,82 @@
+name: Handoff Quality Gate
+
+on:
+  pull_request:
+    paths:
+      - "docs/phase-handoff-playbook/*.md"
+      - "scripts/phase_handoff_check.sh"
+      - ".github/workflows/handoff-quality-gate.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "docs/phase-handoff-playbook/*.md"
+      - "scripts/phase_handoff_check.sh"
+      - ".github/workflows/handoff-quality-gate.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  validate-handoff-docs:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect changed handoff docs
+        id: changed
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ "${GITHUB_EVENT_NAME}" == "pull_request" ]]; then
+            base_ref="${{ github.base_ref }}"
+            git fetch --no-tags --prune --depth=1 origin "${base_ref}"
+            diff_range="origin/${base_ref}...HEAD"
+          else
+            before_sha="${{ github.event.before }}"
+            if [[ "${before_sha}" == "0000000000000000000000000000000000000000" ]]; then
+              diff_range="HEAD~1...HEAD"
+            else
+              diff_range="${before_sha}...HEAD"
+            fi
+          fi
+
+          mapfile -t candidates < <(git diff --name-only "${diff_range}" -- "docs/phase-handoff-playbook/*.md")
+
+          docs=()
+          for file in "${candidates[@]}"; do
+            if [[ "$(basename "${file}")" == "README.md" ]]; then
+              continue
+            fi
+            docs+=("${file}")
+          done
+
+          if [[ ${#docs[@]} -eq 0 ]]; then
+            echo "has_docs=false" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+
+          {
+            echo "has_docs=true"
+            echo "docs<<EOF"
+            printf '%s\n' "${docs[@]}"
+            echo "EOF"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Run handoff quality gate
+        if: steps.changed.outputs.has_docs == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          while IFS= read -r doc; do
+            [[ -z "${doc}" ]] && continue
+            ./scripts/phase_handoff_check.sh "${doc}"
+          done <<< "${{ steps.changed.outputs.docs }}"
+
+      - name: Skip message
+        if: steps.changed.outputs.has_docs != 'true'
+        run: echo "No handoff documents changed; quality gate skipped."

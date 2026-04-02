@@ -30,6 +30,7 @@ func NewContainer(cfg Config) *Container {
 	controlPlaneStore := memory.NewControlPlaneStore()
 	auditRecorder := audit.NewInMemoryRecorder()
 	workspaceGateway := ws.NewWorkspaceGateway()
+	policyRules := policy.NewInMemoryRuleStore()
 
 	lookupRoles := func(ctx context.Context, tenantID, actorID string) ([]string, error) {
 		if actorID == iam.SystemActor.ID {
@@ -45,24 +46,27 @@ func NewContainer(cfg Config) *Container {
 		return append([]string(nil), actor.Roles...), nil
 	}
 
-	evaluator := policy.NewRoleEvaluator(
+	defaultPolicyRules := []policy.Rule{
+		{CommandPrefix: "masterdata.", AnyOfRoles: []string{"platform_admin", "supplychain_operator"}},
+		{CommandPrefix: "procurement.", AnyOfRoles: []string{"platform_admin", "supplychain_operator"}},
+		{CommandPrefix: "inventory.", AnyOfRoles: []string{"platform_admin", "supplychain_operator"}},
+		{CommandPrefix: "sales.", AnyOfRoles: []string{"platform_admin", "supplychain_operator"}},
+		{CommandPrefix: "approval.", AnyOfRoles: []string{"platform_admin", "supplychain_operator", "approver"}},
+		{CommandPrefix: "controlplane.", AnyOfRoles: []string{"platform_admin"}},
+		{CommandPrefix: "runtime.", AnyOfRoles: []string{"platform_admin", "workspace_operator"}},
+		{CommandPrefix: "platform.audit.", AnyOfRoles: []string{"platform_admin"}},
+	}
+
+	evaluator := policy.NewRoleEvaluatorWithTenantRules(
 		lookupRoles,
-		[]policy.Rule{
-			{CommandPrefix: "masterdata.", AnyOfRoles: []string{"platform_admin", "supplychain_operator"}},
-			{CommandPrefix: "procurement.", AnyOfRoles: []string{"platform_admin", "supplychain_operator"}},
-			{CommandPrefix: "approval.", AnyOfRoles: []string{"platform_admin", "supplychain_operator", "approver"}},
-			{CommandPrefix: "controlplane.", AnyOfRoles: []string{"platform_admin"}},
-			{CommandPrefix: "runtime.tasks.pause", AnyOfRoles: []string{"platform_admin", "workspace_operator"}},
-			{CommandPrefix: "runtime.tasks.resume", AnyOfRoles: []string{"platform_admin", "workspace_operator"}},
-			{CommandPrefix: "runtime.tasks.handoff", AnyOfRoles: []string{"platform_admin", "workspace_operator"}},
-			{CommandPrefix: "runtime.", AnyOfRoles: []string{"platform_admin", "workspace_operator"}},
-			{CommandPrefix: "platform.audit.", AnyOfRoles: []string{"platform_admin"}},
-		},
+		defaultPolicyRules,
+		policyRules.List,
 	)
 
 	pipeline := shared.NewPipeline(shared.PipelineDeps{
-		Policy: evaluator,
-		Audit:  auditRecorder,
+		Policy:       evaluator,
+		Transactions: memory.NewAtomicTransactionManager(supplyChainStore, controlPlaneStore),
+		Audit:        auditRecorder,
 	})
 
 	tenantCatalog := controlPlaneStore.TenantCatalog()
@@ -74,6 +78,9 @@ func NewContainer(cfg Config) *Container {
 			PurchaseOrders: supplyChainStore.PurchaseOrderRepository(),
 			Approvals:      supplyChainStore.ApprovalRepository(),
 			Inventory:      supplyChainStore.InventoryRepository(),
+			Payables:       supplyChainStore.PayableRepository(),
+			Receivables:    supplyChainStore.ReceivableRepository(),
+			SalesOrders:    supplyChainStore.SalesOrderRepository(),
 			Pipeline:       pipeline,
 		}),
 		ControlPlane: controlplane.NewService(controlplane.ServiceDeps{
@@ -81,8 +88,8 @@ func NewContainer(cfg Config) *Container {
 			IAMDirectory:    controlPlaneStore.IAMDirectory(),
 			Sessions:        controlPlaneStore.SessionRepository(),
 			Tasks:           controlPlaneStore.TaskRepository(),
-			Deliveries:      controlPlaneStore.DeliveryRepository(),
 			AuditReader:     auditRecorder,
+			PolicyRules:     policyRules,
 			WorkspaceEvents: workspaceGateway,
 			Pipeline:        pipeline,
 		}),

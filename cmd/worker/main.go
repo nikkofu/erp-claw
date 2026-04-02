@@ -3,9 +3,11 @@ package main
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"log"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -14,6 +16,118 @@ import (
 	"github.com/nikkofu/erp-claw/internal/infrastructure/persistence/postgres"
 	"github.com/nikkofu/erp-claw/internal/platform/eventbus"
 )
+
+const (
+	defaultOutboxBatchSize  = 100
+	defaultOutboxRetryDelay = 5 * time.Second
+	defaultOutboxMaxAttempt = 3
+	defaultOutboxLease      = 30 * time.Second
+	defaultOutboxDLQTopic   = "platform.outbox.dead_letter"
+)
+
+const claimReadyOutboxSQL = `
+with picked as (
+	select id
+	from outbox
+	where status in ('pending', 'processing')
+	  and available_at <= $2
+	order by id
+	for update skip locked
+	limit $1
+)
+update outbox o
+set status = 'processing'
+  , available_at = $3
+from picked
+where o.id = picked.id
+returning o.id, o.tenant_id, o.topic, o.event_type, o.payload, o.attempts;
+`
+
+type outboxRecord struct {
+	ID        int64
+	TenantID  int64
+	Topic     string
+	EventType string
+	Payload   []byte
+	Attempts  int
+}
+
+type outboxDeadLetterPayload struct {
+	OutboxID   int64     `json:"outbox_id"`
+	TenantID   int64     `json:"tenant_id"`
+	Topic      string    `json:"topic"`
+	EventType  string    `json:"event_type"`
+	Payload    []byte    `json:"payload"`
+	Attempts   int       `json:"attempts"`
+	LastError  string    `json:"last_error"`
+	FailedAt   time.Time `json:"failed_at"`
+	OccurredAt time.Time `json:"occurred_at"`
+}
+
+type outboxStore interface {
+	ClaimReady(ctx context.Context, limit int, readyBefore time.Time, leaseUntil time.Time) ([]outboxRecord, error)
+	MarkPublished(ctx context.Context, id int64) error
+	MarkPendingRetry(ctx context.Context, id int64, nextAvailableAt time.Time, attempts int, lastError string) error
+	MarkFailed(ctx context.Context, id int64, attempts int, failedAt time.Time, lastError string) error
+}
+
+type postgresOutboxStore struct {
+	db *sql.DB
+}
+
+func (s *postgresOutboxStore) ClaimReady(ctx context.Context, limit int, readyBefore time.Time, leaseUntil time.Time) ([]outboxRecord, error) {
+	rows, err := s.db.QueryContext(ctx, claimReadyOutboxSQL, limit, readyBefore.UTC(), leaseUntil.UTC())
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	records := make([]outboxRecord, 0, limit)
+	for rows.Next() {
+		var rec outboxRecord
+		if err := rows.Scan(&rec.ID, &rec.TenantID, &rec.Topic, &rec.EventType, &rec.Payload, &rec.Attempts); err != nil {
+			return nil, err
+		}
+		records = append(records, rec)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return records, nil
+}
+
+func (s *postgresOutboxStore) MarkPublished(ctx context.Context, id int64) error {
+	_, err := s.db.ExecContext(
+		ctx,
+		`update outbox set status = 'published', published_at = now(), last_error = null where id = $1`,
+		id,
+	)
+	return err
+}
+
+func (s *postgresOutboxStore) MarkPendingRetry(ctx context.Context, id int64, nextAvailableAt time.Time, attempts int, lastError string) error {
+	_, err := s.db.ExecContext(
+		ctx,
+		`update outbox set status = 'pending', available_at = $2, published_at = null, attempts = $3, last_error = $4 where id = $1`,
+		id,
+		nextAvailableAt.UTC(),
+		attempts,
+		lastError,
+	)
+	return err
+}
+
+func (s *postgresOutboxStore) MarkFailed(ctx context.Context, id int64, attempts int, failedAt time.Time, lastError string) error {
+	_, err := s.db.ExecContext(
+		ctx,
+		`update outbox set status = 'failed', attempts = $2, failed_at = $3, last_error = $4 where id = $1`,
+		id,
+		attempts,
+		failedAt.UTC(),
+		lastError,
+	)
+	return err
+}
 
 func main() {
 	configPath := os.Getenv("ERP_CONFIG_PATH")
@@ -27,6 +141,15 @@ func main() {
 	}
 
 	bootstrap.StartRuntime(bootstrap.WorkerRole)
+	shutdownTelemetry, err := bootstrap.SetupRuntimeTelemetry(cfg, bootstrap.WorkerRole)
+	if err != nil {
+		log.Fatalf("failed to setup telemetry: %v", err)
+	}
+	defer func() {
+		if shutdownErr := shutdownTelemetry(context.Background()); shutdownErr != nil {
+			log.Printf("failed to shutdown telemetry: %v", shutdownErr)
+		}
+	}()
 
 	db, err := postgres.New(postgres.Config{
 		DSN:          cfg.Database.DSN,
@@ -83,6 +206,145 @@ func runOutboxPoller(ctx context.Context, db *sql.DB, bus eventbus.Bus, interval
 	}
 }
 
-func pollOutboxBatch(_ context.Context, _ *sql.DB, _ eventbus.Bus) error {
+func pollOutboxBatch(ctx context.Context, db *sql.DB, bus eventbus.Bus) error {
+	if db == nil {
+		return fmt.Errorf("outbox db is required")
+	}
+	if bus == nil {
+		return fmt.Errorf("event bus is required")
+	}
+	store := &postgresOutboxStore{db: db}
+	return pollOutboxBatchWithStore(
+		ctx,
+		store,
+		bus,
+		time.Now(),
+		defaultOutboxBatchSize,
+		defaultOutboxRetryDelay,
+		defaultOutboxMaxAttempt,
+		defaultOutboxLease,
+	)
+}
+
+func pollOutboxBatchWithStore(
+	ctx context.Context,
+	store outboxStore,
+	bus eventbus.Bus,
+	now time.Time,
+	batchSize int,
+	retryDelay time.Duration,
+	maxAttempts int,
+	leaseDuration time.Duration,
+) error {
+	if store == nil {
+		return fmt.Errorf("outbox store is required")
+	}
+	if bus == nil {
+		return fmt.Errorf("event bus is required")
+	}
+	if batchSize <= 0 {
+		batchSize = defaultOutboxBatchSize
+	}
+	if retryDelay <= 0 {
+		retryDelay = defaultOutboxRetryDelay
+	}
+	if maxAttempts <= 0 {
+		maxAttempts = defaultOutboxMaxAttempt
+	}
+	if leaseDuration <= 0 {
+		leaseDuration = defaultOutboxLease
+	}
+
+	readyBefore := now.UTC()
+	leaseUntil := readyBefore.Add(leaseDuration)
+	records, err := store.ClaimReady(ctx, batchSize, readyBefore, leaseUntil)
+	if err != nil {
+		return fmt.Errorf("claim ready outbox: %w", err)
+	}
+	if len(records) == 0 {
+		return nil
+	}
+
+	var firstErr error
+	nextAvailableAt := now.UTC().Add(retryDelay)
+
+	for _, rec := range records {
+		evt := eventbus.Event{
+			Topic:       rec.Topic,
+			TenantID:    strconv.FormatInt(rec.TenantID, 10),
+			Correlation: fmt.Sprintf("outbox:%d", rec.ID),
+			MessageID:   fmt.Sprintf("outbox:%d", rec.ID),
+			Payload:     rec.Payload,
+		}
+		if err := bus.Publish(ctx, evt); err != nil {
+			nextAttempts := rec.Attempts + 1
+			log.Printf(
+				"outbox publish failed (id=%d topic=%s event_type=%s attempts=%d): %v",
+				rec.ID,
+				rec.Topic,
+				rec.EventType,
+				nextAttempts,
+				err,
+			)
+			lastError := err.Error()
+			if nextAttempts >= maxAttempts {
+				failedAt := now.UTC()
+				if failErr := store.MarkFailed(ctx, rec.ID, nextAttempts, failedAt, lastError); failErr != nil {
+					err = fmt.Errorf("publish failed: %v; mark failed failed: %w", err, failErr)
+				} else if dlqErr := publishOutboxDeadLetter(ctx, bus, rec, nextAttempts, failedAt, lastError); dlqErr != nil {
+					err = fmt.Errorf("publish failed: %v; publish dead-letter failed: %w", err, dlqErr)
+				}
+				if firstErr == nil {
+					firstErr = fmt.Errorf("publish outbox id=%d permanently failed: %w", rec.ID, err)
+				}
+				continue
+			}
+			if retryErr := store.MarkPendingRetry(ctx, rec.ID, nextAvailableAt, nextAttempts, lastError); retryErr != nil {
+				err = fmt.Errorf("publish failed: %v; mark retry failed: %w", err, retryErr)
+			}
+			if firstErr == nil {
+				firstErr = fmt.Errorf("publish outbox id=%d: %w", rec.ID, err)
+			}
+			continue
+		}
+		if err := store.MarkPublished(ctx, rec.ID); err != nil {
+			if firstErr == nil {
+				firstErr = fmt.Errorf("mark published outbox id=%d: %w", rec.ID, err)
+			}
+			continue
+		}
+	}
+
+	if firstErr != nil {
+		return firstErr
+	}
 	return nil
+}
+
+func publishOutboxDeadLetter(
+	ctx context.Context,
+	bus eventbus.Bus,
+	rec outboxRecord,
+	attempts int,
+	failedAt time.Time,
+	lastError string,
+) error {
+	evt := eventbus.Event{
+		Topic:       defaultOutboxDLQTopic,
+		TenantID:    strconv.FormatInt(rec.TenantID, 10),
+		Correlation: fmt.Sprintf("outbox:%d:dead-letter", rec.ID),
+		MessageID:   fmt.Sprintf("outbox:%d:dead-letter", rec.ID),
+		Payload: outboxDeadLetterPayload{
+			OutboxID:   rec.ID,
+			TenantID:   rec.TenantID,
+			Topic:      rec.Topic,
+			EventType:  rec.EventType,
+			Payload:    rec.Payload,
+			Attempts:   attempts,
+			LastError:  lastError,
+			FailedAt:   failedAt.UTC(),
+			OccurredAt: time.Now().UTC(),
+		},
+	}
+	return bus.Publish(ctx, evt)
 }

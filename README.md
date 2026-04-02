@@ -53,6 +53,28 @@ The intended local verification loop for the platform foundation is:
 4. `make test`
 5. `make smoke`
 
+## Phase Handoff Playbook
+
+Use the playbook whenever a delivery wave is paused and another session (or agent) needs to continue safely.
+
+1. Create a dated handoff document:
+   - `./scripts/new_phase_handoff.sh <topic-slug>`
+   - compatibility alias: `./scripts/phase_handoff_new.sh <topic-slug>`
+   - or `make handoff-new HANDOFF_TOPIC=<topic-slug>`
+2. Fill the generated markdown under `docs/phase-handoff-playbook/`.
+3. Run the quality gate before you stop:
+   - `./scripts/phase_handoff_check.sh <handoff-doc-path>`
+   - or `make handoff-check HANDOFF_DOC=<handoff-doc-path>`
+4. Optional resume helper for next morning:
+   - `./scripts/phase_resume_from_latest.sh`
+5. Optional local pre-push gate:
+   - `./scripts/phase_handoff_pre_push.sh`
+   - or `make handoff-prepush`
+
+PR/main now enforces changed handoff docs via `.github/workflows/handoff-quality-gate.yml`.
+
+Reusable templates/checklists live in `skills/phase-handoff-playbook/`; project-specific outputs live in `docs/phase-handoff-playbook/`.
+
 ## Async Runtime Notes
 
 The worker and scheduler are wired as separate runtime roles because they serve different responsibilities in the platform execution plane.
@@ -69,7 +91,7 @@ Application commands flow through a shared pipeline before any domain mutation h
 - Audit recording wraps command execution so later observability and compliance hooks share one contract.
 - Later ERP domain modules will plug into this same pipeline instead of bypassing it.
 
-## Phase 2 Wave 1 Admin Flow
+## Phase 2 Admin Flow (Wave 1-6 Baseline)
 
 The first executable Phase 2 slice is now available through the admin surface. It currently uses in-memory repositories at runtime and forward-looking SQL migrations for the future PostgreSQL-backed implementation.
 
@@ -77,29 +99,64 @@ The first executable Phase 2 slice is now available through the admin surface. I
 - `POST /api/admin/v1/master-data/products`
 - `POST /api/admin/v1/master-data/warehouses`
 - `POST /api/admin/v1/procurement/purchase-orders`
+- `GET /api/admin/v1/procurement/purchase-orders` (supports `status=draft|pending_approval|approved|rejected|received`, `sort=id_asc|id_desc`, `page`, `page_size`)
 - `POST /api/admin/v1/procurement/purchase-orders/:id/submit`
 - `POST /api/admin/v1/procurement/purchase-orders/:id/receive`
+- `POST /api/admin/v1/procurement/purchase-orders/:id/payable-bills`
 - `GET /api/admin/v1/procurement/purchase-orders/:id`
-- `GET /api/admin/v1/inventory/balances?product_id=<id>&warehouse_id=<id>`
+- `GET /api/admin/v1/approvals` (supports `status=pending|approved|rejected`, `sort=id_asc|id_desc`, `page`, `page_size`)
+- `GET /api/admin/v1/inventory/ledger` (requires `product_id`, `warehouse_id`; supports `sort=id_asc|id_desc`, `page`, `page_size`)
+- `GET /api/admin/v1/inventory/balances?product_id=<id>&warehouse_id=<id>` (returns `on_hand` / `reserved` / `available`)
+- `POST /api/admin/v1/inventory/reservations`
+- `POST /api/admin/v1/inventory/outbounds`
+- `POST /api/admin/v1/inventory/transfers`
+- `POST /api/admin/v1/inventory/transfer-orders`
+- `GET /api/admin/v1/inventory/transfer-orders` (supports `status`, `sort=id_asc|id_desc`, `page`, `page_size`)
+- `GET /api/admin/v1/inventory/transfer-orders/:id`
+- `POST /api/admin/v1/inventory/transfer-orders/:id/execute`
+- `POST /api/admin/v1/inventory/transfer-orders/:id/cancel`
+- `POST /api/admin/v1/receivables`
+- `GET /api/admin/v1/receivables` (supports `status=open`, `sort=id_asc|id_desc`, `page`, `page_size`)
+- `GET /api/admin/v1/receivables/:id`
+- `GET /api/admin/v1/payables` (supports `status=open`, `sort=id_asc|id_desc`, `page`, `page_size`)
+- `GET /api/admin/v1/payables/:id`
+- `POST /api/admin/v1/payables/:id/payment-plans`
+- `POST /api/admin/v1/sales-orders`
+- `GET /api/admin/v1/sales-orders` (supports `status=draft|shipped`, `sort=id_asc|id_desc`, `page`, `page_size`)
+- `GET /api/admin/v1/sales-orders/:id`
+- `POST /api/admin/v1/sales-orders/:id/ship`
+- `GET /api/admin/v1/read-models/overview`
 - `POST /api/admin/v1/approvals/:id/approve`
 - `POST /api/admin/v1/approvals/:id/reject`
 
-Run `go test ./test/integration -run 'TestAdminSupplyChainFlow|TestAdminInventoryReceiptFlow' -v` to verify the end-to-end Phase 2 admin flow locally.
+Run `go test ./test/integration -run 'TestAdminSupplyChainFlow|TestAdminApprovalListSupportsStatusFilter|TestAdminApprovalListSupportsSortAndPagination|TestAdminPurchaseOrderListSupportsStatusSortAndPagination|TestAdminInventoryReceiptFlow|TestAdminInventoryReservationFlow|TestAdminInventoryReservationRejectsExcessQuantity|TestAdminInventoryOutboundFlow|TestAdminInventoryOutboundRejectsExcessQuantity|TestAdminInventoryTransferFlow|TestAdminInventoryTransferRejectsExcessQuantity|TestAdminInventoryTransferOrderWorkflow|TestAdminInventoryTransferOrderListSupportsStatusSortAndPagination|TestAdminInventoryTransferOrderCancelFlow|TestAdminInventoryLedgerListFlow|TestAdminInventoryLedgerListSupportsSortAndPagination|TestAdminInventoryLedgerListRejectsInvalidQuery|TestAdminPayableFlow|TestAdminPayableListSupportsStatusSortAndPagination|TestAdminPayableListRejectsInvalidQuery|TestAdminReceivableFlow|TestAdminReceivableListSupportsStatusSortAndPagination|TestAdminReceivableListRejectsInvalidQuery|TestAdminSalesOrderShipFlow|TestAdminSalesOrderShipRejectsInsufficientInventory|TestAdminSalesOrderListSupportsStatusSortAndPagination|TestAdminSalesOrderListRejectsInvalidQuery|TestAdminBackofficeOverviewReadModel' -v` to verify the end-to-end Phase 2 admin flow locally, including approval/purchase-order/payable/receivable/sales-order list queries (status/sort/pagination), inventory reservation/outbound/transfer, transfer-order execution/query/cancel (status/sort/pagination), ledger query (sort/pagination), payable/receivable basics, minimal sales shipment loop, and the backoffice overview read model.
 
-### Phase 2 Strict Verification (test evidence only; not final sign-off)
+## Workspace API (Phase 2 Minimal Query Slice)
 
-These strict commands are additive to the existing local verification flow (for example `make test` and `make test-integration`); they do not replace that baseline workflow.
+- `GET /api/workspace/v1/inventory/balances?product_id=<id>&warehouse_id=<id>`
+- `GET /api/workspace/v1/inventory/ledger` (requires `product_id`, `warehouse_id`; supports `sort=id_asc|id_desc`, `page`, `page_size`)
+- `GET /api/workspace/v1/sales-orders` (supports `status=draft|shipped`, `sort=id_asc|id_desc`, `page`, `page_size`)
+- `GET /api/workspace/v1/sales-orders/:id`
+- `GET /api/workspace/v1/payables` (supports `status=open`, `sort=id_asc|id_desc`, `page`, `page_size`)
+- `GET /api/workspace/v1/payables/:id`
+- `GET /api/workspace/v1/receivables` (supports `status=open`, `sort=id_asc|id_desc`, `page`, `page_size`)
+- `GET /api/workspace/v1/receivables/:id`
 
-```bash
-go test ./internal/application/admin/supplychain ./internal/infrastructure/persistence/memory -v
-go test ./test/integration -run 'TestAdminSupplyChainFlow|TestAdminInventoryReceiptFlow|TestAdminInventoryReceiptRequiresApprovedOrder|TestPhase2Wave2MigrationContract' -v
-go test ./...
-```
+Run `go test ./test/integration -run 'TestWorkspaceInventoryQueriesReturnBalanceAndLedger|TestWorkspaceInventoryLedgerListSupportsSortAndPagination|TestWorkspaceInventoryLedgerListRejectsInvalidQuery|TestWorkspaceSalesOrderQueriesReturnListAndDetail|TestWorkspaceSalesOrderListSupportsStatusSortAndPagination|TestWorkspaceSalesOrderListRejectsInvalidQuery|TestWorkspaceFinanceQueriesReturnPayableAndReceivableReadModels|TestWorkspaceFinanceListSupportsStatusSortAndPagination|TestWorkspaceFinanceListRejectsInvalidQuery' -v` to verify workspace inventory/sales/finance query routing and response shape.
 
-- Local baseline evidence (2026-03-29): strict command set executed in local scope as gate-matrix evidence only, not final sign-off.
-- Wave 2 baseline for strict gate evidence is solely: `docs/superpowers/plans/2026-03-26-phase-2-wave-2-inbound-inventory-implementation-plan.md`.
-- Final strict sign-off requires evidence that the baseline plan task list is fully completed.
-- After strict negative-path inventory validations are implemented in this plan, the strict integration gate expands to include additional negative-path tests.
+## Integration API (Phase 2 Minimal Query Slice)
+
+- `GET /api/integration/v1/inventory/balances?product_id=<id>&warehouse_id=<id>`
+- `GET /api/integration/v1/inventory/ledger` (requires `product_id`, `warehouse_id`; supports `sort=id_asc|id_desc`, `page`, `page_size`)
+- `GET /api/integration/v1/read-models/overview`
+- `GET /api/integration/v1/sales-orders` (supports `status=draft|shipped`, `sort=id_asc|id_desc`, `page`, `page_size`)
+- `GET /api/integration/v1/sales-orders/:id`
+- `GET /api/integration/v1/payables` (supports `status=open`, `sort=id_asc|id_desc`, `page`, `page_size`)
+- `GET /api/integration/v1/payables/:id`
+- `GET /api/integration/v1/receivables` (supports `status=open`, `sort=id_asc|id_desc`, `page`, `page_size`)
+- `GET /api/integration/v1/receivables/:id`
+
+Run `go test ./test/integration -run 'TestIntegrationInventoryQueriesReturnBalanceAndLedger|TestIntegrationInventoryLedgerListSupportsSortAndPagination|TestIntegrationInventoryQueriesRejectInvalidQuery|TestIntegrationReadModelAndSalesQueries|TestIntegrationSalesOrderListSupportsStatusSortAndPagination|TestIntegrationSalesOrderListRejectsInvalidQuery|TestIntegrationFinanceQueriesReturnPayableAndReceivableReadModels|TestIntegrationFinanceListSupportsStatusSortAndPagination|TestIntegrationFinanceListRejectsInvalidQuery' -v` to verify integration inventory/overview/sales/finance query routing.
 
 ## Smoke Run
 

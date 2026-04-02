@@ -2,14 +2,20 @@ package supplychain
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"sort"
+	"strings"
 	"sync/atomic"
 
 	"github.com/nikkofu/erp-claw/internal/application/shared"
 	"github.com/nikkofu/erp-claw/internal/domain/approval"
 	"github.com/nikkofu/erp-claw/internal/domain/inventory"
 	"github.com/nikkofu/erp-claw/internal/domain/masterdata"
+	"github.com/nikkofu/erp-claw/internal/domain/payable"
 	"github.com/nikkofu/erp-claw/internal/domain/procurement"
+	"github.com/nikkofu/erp-claw/internal/domain/receivable"
+	"github.com/nikkofu/erp-claw/internal/domain/sales"
 )
 
 type ServiceDeps struct {
@@ -17,6 +23,9 @@ type ServiceDeps struct {
 	PurchaseOrders procurement.Repository
 	Approvals      approval.Repository
 	Inventory      inventory.Repository
+	Payables       payable.Repository
+	Receivables    receivable.Repository
+	SalesOrders    sales.Repository
 	Pipeline       *shared.Pipeline
 }
 
@@ -25,6 +34,9 @@ type Service struct {
 	purchaseOrders procurement.Repository
 	approvals      approval.Repository
 	inventory      inventory.Repository
+	payables       payable.Repository
+	receivables    receivable.Repository
+	salesOrders    sales.Repository
 	pipeline       *shared.Pipeline
 }
 
@@ -39,6 +51,9 @@ func NewService(deps ServiceDeps) *Service {
 		purchaseOrders: deps.PurchaseOrders,
 		approvals:      deps.Approvals,
 		inventory:      deps.Inventory,
+		payables:       deps.Payables,
+		receivables:    deps.Receivables,
+		salesOrders:    deps.SalesOrders,
 		pipeline:       deps.Pipeline,
 	}
 }
@@ -215,6 +230,156 @@ func (s *Service) GetPurchaseOrder(ctx context.Context, tenantID, orderID string
 	return order, request, nil
 }
 
+func (s *Service) ListPurchaseOrders(ctx context.Context, input ListPurchaseOrdersInput) ([]procurement.PurchaseOrder, error) {
+	tenantID := strings.TrimSpace(input.TenantID)
+	if tenantID == "" {
+		return nil, procurement.ErrInvalidPurchaseOrderQuery
+	}
+
+	statusFilter := strings.TrimSpace(input.Status)
+	if statusFilter != "" {
+		status := procurement.PurchaseOrderStatus(statusFilter)
+		switch status {
+		case procurement.PurchaseOrderStatusDraft,
+			procurement.PurchaseOrderStatusPendingApproval,
+			procurement.PurchaseOrderStatusApproved,
+			procurement.PurchaseOrderStatusRejected,
+			procurement.PurchaseOrderStatusReceived:
+		default:
+			return nil, procurement.ErrInvalidPurchaseOrderQuery
+		}
+	}
+
+	orders, err := s.purchaseOrders.ListByTenant(ctx, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	if statusFilter != "" {
+		filtered := make([]procurement.PurchaseOrder, 0, len(orders))
+		for _, order := range orders {
+			if string(order.Status) == statusFilter {
+				filtered = append(filtered, order)
+			}
+		}
+		orders = filtered
+	}
+
+	sortMode := strings.TrimSpace(input.Sort)
+	if sortMode == "" {
+		sortMode = "id_desc"
+	}
+	switch sortMode {
+	case "id_asc":
+		sort.Slice(orders, func(i, j int) bool {
+			return orders[i].ID < orders[j].ID
+		})
+	case "id_desc":
+		sort.Slice(orders, func(i, j int) bool {
+			return orders[i].ID > orders[j].ID
+		})
+	default:
+		return nil, procurement.ErrInvalidPurchaseOrderQuery
+	}
+
+	page := input.Page
+	if page == 0 {
+		page = 1
+	}
+	pageSize := input.PageSize
+	if pageSize == 0 {
+		pageSize = 20
+	}
+	if page < 1 || pageSize < 1 {
+		return nil, procurement.ErrInvalidPurchaseOrderQuery
+	}
+
+	start := (page - 1) * pageSize
+	if start >= len(orders) {
+		return []procurement.PurchaseOrder{}, nil
+	}
+	end := start + pageSize
+	if end > len(orders) {
+		end = len(orders)
+	}
+
+	out := make([]procurement.PurchaseOrder, 0, end-start)
+	out = append(out, orders[start:end]...)
+	return out, nil
+}
+
+func (s *Service) ListApprovalRequests(ctx context.Context, input ListApprovalRequestsInput) ([]approval.Request, error) {
+	tenantID := strings.TrimSpace(input.TenantID)
+	if tenantID == "" {
+		return nil, approval.ErrInvalidRequestQuery
+	}
+
+	statusFilter := strings.TrimSpace(input.Status)
+	if statusFilter != "" {
+		status := approval.Status(statusFilter)
+		switch status {
+		case approval.StatusPending, approval.StatusApproved, approval.StatusRejected:
+		default:
+			return nil, approval.ErrInvalidRequestQuery
+		}
+	}
+
+	requests, err := s.approvals.ListByTenant(ctx, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	if statusFilter != "" {
+		filtered := make([]approval.Request, 0, len(requests))
+		for _, request := range requests {
+			if string(request.Status) == statusFilter {
+				filtered = append(filtered, request)
+			}
+		}
+		requests = filtered
+	}
+
+	sortMode := strings.TrimSpace(input.Sort)
+	if sortMode == "" {
+		sortMode = "id_desc"
+	}
+	switch sortMode {
+	case "id_asc":
+		sort.Slice(requests, func(i, j int) bool {
+			return requests[i].ID < requests[j].ID
+		})
+	case "id_desc":
+		sort.Slice(requests, func(i, j int) bool {
+			return requests[i].ID > requests[j].ID
+		})
+	default:
+		return nil, approval.ErrInvalidRequestQuery
+	}
+
+	page := input.Page
+	if page == 0 {
+		page = 1
+	}
+	pageSize := input.PageSize
+	if pageSize == 0 {
+		pageSize = 20
+	}
+	if page < 1 || pageSize < 1 {
+		return nil, approval.ErrInvalidRequestQuery
+	}
+
+	start := (page - 1) * pageSize
+	if start >= len(requests) {
+		return []approval.Request{}, nil
+	}
+	end := start + pageSize
+	if end > len(requests) {
+		end = len(requests)
+	}
+
+	out := make([]approval.Request, 0, end-start)
+	out = append(out, requests[start:end]...)
+	return out, nil
+}
+
 func (s *Service) ReceivePurchaseOrder(ctx context.Context, input ReceivePurchaseOrderInput) (inventory.Receipt, []inventory.LedgerEntry, procurement.PurchaseOrder, error) {
 	var (
 		receipt       inventory.Receipt
@@ -260,13 +425,13 @@ func (s *Service) ReceivePurchaseOrder(ctx context.Context, input ReceivePurchas
 		if err := currentOrder.MarkReceived(); err != nil {
 			return err
 		}
-		if err := s.purchaseOrders.Save(txCtx, currentOrder); err != nil {
-			return err
-		}
 		if err := s.inventory.SaveReceipt(txCtx, createdReceipt); err != nil {
 			return err
 		}
 		if err := s.inventory.AppendLedgerEntries(txCtx, createdEntries); err != nil {
+			return err
+		}
+		if err := s.purchaseOrders.Save(txCtx, currentOrder); err != nil {
 			return err
 		}
 
@@ -279,7 +444,14 @@ func (s *Service) ReceivePurchaseOrder(ctx context.Context, input ReceivePurchas
 }
 
 func (s *Service) GetInventoryBalance(ctx context.Context, input GetInventoryBalanceInput) (inventory.Balance, error) {
+	if err := validateInventoryQuery(input.TenantID, input.ProductID, input.WarehouseID); err != nil {
+		return inventory.Balance{}, err
+	}
 	entries, err := s.inventory.ListLedgerEntries(ctx, input.TenantID, input.ProductID, input.WarehouseID)
+	if err != nil {
+		return inventory.Balance{}, err
+	}
+	reservations, err := s.inventory.ListReservations(ctx, input.TenantID, input.ProductID, input.WarehouseID)
 	if err != nil {
 		return inventory.Balance{}, err
 	}
@@ -291,7 +463,890 @@ func (s *Service) GetInventoryBalance(ctx context.Context, input GetInventoryBal
 	for _, entry := range entries {
 		balance.OnHand += entry.QuantityDelta
 	}
+	for _, reservation := range reservations {
+		if reservation.Status != inventory.ReservationStatusActive {
+			continue
+		}
+		balance.Reserved += reservation.Quantity
+	}
+	balance.Available = balance.OnHand - balance.Reserved
 	return balance, nil
+}
+
+func (s *Service) ListInventoryLedger(ctx context.Context, input ListInventoryLedgerInput) ([]inventory.LedgerEntry, error) {
+	if err := validateInventoryQuery(input.TenantID, input.ProductID, input.WarehouseID); err != nil {
+		return nil, err
+	}
+	entries, err := s.inventory.ListLedgerEntries(ctx, input.TenantID, input.ProductID, input.WarehouseID)
+	if err != nil {
+		return nil, err
+	}
+
+	sortMode := strings.TrimSpace(input.Sort)
+	if sortMode == "" {
+		sortMode = "id_asc"
+	}
+	switch sortMode {
+	case "id_asc":
+		sort.Slice(entries, func(i, j int) bool {
+			return entries[i].ID < entries[j].ID
+		})
+	case "id_desc":
+		sort.Slice(entries, func(i, j int) bool {
+			return entries[i].ID > entries[j].ID
+		})
+	default:
+		return nil, inventory.ErrInvalidInventoryQuery
+	}
+
+	page := input.Page
+	if page == 0 {
+		page = 1
+	}
+	pageSize := input.PageSize
+	if pageSize == 0 {
+		pageSize = 20
+	}
+	if page < 1 || pageSize < 1 {
+		return nil, inventory.ErrInvalidInventoryQuery
+	}
+
+	start := (page - 1) * pageSize
+	if start >= len(entries) {
+		return []inventory.LedgerEntry{}, nil
+	}
+	end := start + pageSize
+	if end > len(entries) {
+		end = len(entries)
+	}
+
+	out := make([]inventory.LedgerEntry, 0, end-start)
+	out = append(out, entries[start:end]...)
+	return out, nil
+}
+
+func (s *Service) ReserveInventory(ctx context.Context, input ReserveInventoryInput) (inventory.Reservation, error) {
+	var reservation inventory.Reservation
+	err := s.pipeline.Execute(ctx, shared.Command{
+		Name:     "inventory.reservations.create",
+		TenantID: input.TenantID,
+		ActorID:  input.ActorID,
+		Payload:  input,
+	}, func(txCtx context.Context, _ shared.Command) error {
+		if _, err := s.masterData.GetProduct(txCtx, input.TenantID, input.ProductID); err != nil {
+			return err
+		}
+		if _, err := s.masterData.GetWarehouse(txCtx, input.TenantID, input.WarehouseID); err != nil {
+			return err
+		}
+
+		balance, err := s.GetInventoryBalance(txCtx, GetInventoryBalanceInput{
+			TenantID:    input.TenantID,
+			ProductID:   input.ProductID,
+			WarehouseID: input.WarehouseID,
+		})
+		if err != nil {
+			return err
+		}
+		if input.Quantity > balance.Available {
+			return inventory.ErrInsufficientAvailableInventory
+		}
+
+		created, err := inventory.NewReservation(
+			nextID("rsv"),
+			input.TenantID,
+			input.ProductID,
+			input.WarehouseID,
+			input.ReferenceType,
+			input.ReferenceID,
+			input.ActorID,
+			input.Quantity,
+		)
+		if err != nil {
+			return err
+		}
+		if err := s.inventory.SaveReservation(txCtx, created); err != nil {
+			return err
+		}
+		reservation = created
+		return nil
+	})
+	return reservation, err
+}
+
+func (s *Service) IssueInventory(ctx context.Context, input IssueInventoryInput) (inventory.LedgerEntry, error) {
+	var outbound inventory.LedgerEntry
+	err := s.pipeline.Execute(ctx, shared.Command{
+		Name:     "inventory.outbounds.create",
+		TenantID: input.TenantID,
+		ActorID:  input.ActorID,
+		Payload:  input,
+	}, func(txCtx context.Context, _ shared.Command) error {
+		if _, err := s.masterData.GetProduct(txCtx, input.TenantID, input.ProductID); err != nil {
+			return err
+		}
+		if _, err := s.masterData.GetWarehouse(txCtx, input.TenantID, input.WarehouseID); err != nil {
+			return err
+		}
+
+		balance, err := s.GetInventoryBalance(txCtx, GetInventoryBalanceInput{
+			TenantID:    input.TenantID,
+			ProductID:   input.ProductID,
+			WarehouseID: input.WarehouseID,
+		})
+		if err != nil {
+			return err
+		}
+		if input.Quantity > balance.Available {
+			return inventory.ErrInsufficientAvailableInventory
+		}
+
+		entry, err := inventory.NewOutboundLedgerEntry(
+			nextID("led"),
+			input.TenantID,
+			input.ProductID,
+			input.WarehouseID,
+			input.ReferenceType,
+			input.ReferenceID,
+			input.Quantity,
+		)
+		if err != nil {
+			return err
+		}
+		if err := s.inventory.AppendLedgerEntries(txCtx, []inventory.LedgerEntry{entry}); err != nil {
+			return err
+		}
+		outbound = entry
+		return nil
+	})
+	return outbound, err
+}
+
+func (s *Service) CreateTransferOrder(ctx context.Context, input CreateTransferOrderInput) (inventory.TransferOrder, error) {
+	var order inventory.TransferOrder
+	err := s.pipeline.Execute(ctx, shared.Command{
+		Name:     "inventory.transfer_orders.create",
+		TenantID: input.TenantID,
+		ActorID:  input.ActorID,
+		Payload:  input,
+	}, func(txCtx context.Context, _ shared.Command) error {
+		if _, err := s.masterData.GetProduct(txCtx, input.TenantID, input.ProductID); err != nil {
+			return err
+		}
+		if _, err := s.masterData.GetWarehouse(txCtx, input.TenantID, input.FromWarehouseID); err != nil {
+			return err
+		}
+		if _, err := s.masterData.GetWarehouse(txCtx, input.TenantID, input.ToWarehouseID); err != nil {
+			return err
+		}
+
+		created, err := inventory.NewTransferOrder(
+			nextID("tro"),
+			input.TenantID,
+			input.ProductID,
+			input.FromWarehouseID,
+			input.ToWarehouseID,
+			input.ActorID,
+			input.Quantity,
+		)
+		if err != nil {
+			return err
+		}
+		if err := s.inventory.SaveTransferOrder(txCtx, created); err != nil {
+			return err
+		}
+		order = created
+		return nil
+	})
+	return order, err
+}
+
+func (s *Service) GetTransferOrder(ctx context.Context, input GetTransferOrderInput) (inventory.TransferOrder, error) {
+	return s.inventory.GetTransferOrder(ctx, input.TenantID, input.TransferOrderID)
+}
+
+func (s *Service) ListTransferOrders(ctx context.Context, input ListTransferOrdersInput) ([]inventory.TransferOrder, error) {
+	orders, err := s.inventory.ListTransferOrdersByTenant(ctx, input.TenantID)
+	if err != nil {
+		return nil, err
+	}
+
+	statusFilter := strings.TrimSpace(input.Status)
+	if statusFilter != "" {
+		status := inventory.TransferOrderStatus(statusFilter)
+		switch status {
+		case inventory.TransferOrderStatusPlanned, inventory.TransferOrderStatusExecuted, inventory.TransferOrderStatusCancelled:
+		default:
+			return nil, inventory.ErrInvalidTransferOrderQuery
+		}
+
+		filtered := make([]inventory.TransferOrder, 0, len(orders))
+		for _, order := range orders {
+			if order.Status == status {
+				filtered = append(filtered, order)
+			}
+		}
+		orders = filtered
+	}
+
+	sortMode := strings.TrimSpace(input.Sort)
+	if sortMode == "" {
+		sortMode = "id_desc"
+	}
+	switch sortMode {
+	case "id_asc":
+		sort.Slice(orders, func(i, j int) bool {
+			return orders[i].ID < orders[j].ID
+		})
+	case "id_desc":
+		sort.Slice(orders, func(i, j int) bool {
+			return orders[i].ID > orders[j].ID
+		})
+	default:
+		return nil, inventory.ErrInvalidTransferOrderQuery
+	}
+
+	page := input.Page
+	if page == 0 {
+		page = 1
+	}
+	pageSize := input.PageSize
+	if pageSize == 0 {
+		pageSize = 20
+	}
+	if page < 1 || pageSize < 1 {
+		return nil, inventory.ErrInvalidTransferOrderQuery
+	}
+
+	start := (page - 1) * pageSize
+	if start >= len(orders) {
+		return []inventory.TransferOrder{}, nil
+	}
+	end := start + pageSize
+	if end > len(orders) {
+		end = len(orders)
+	}
+
+	out := make([]inventory.TransferOrder, 0, end-start)
+	out = append(out, orders[start:end]...)
+	return out, nil
+}
+
+func (s *Service) ExecuteTransferOrder(ctx context.Context, input ExecuteTransferOrderInput) (inventory.TransferOrder, []inventory.LedgerEntry, error) {
+	var (
+		order   inventory.TransferOrder
+		entries []inventory.LedgerEntry
+	)
+	err := s.pipeline.Execute(ctx, shared.Command{
+		Name:     "inventory.transfer_orders.execute",
+		TenantID: input.TenantID,
+		ActorID:  input.ActorID,
+		Payload:  input,
+	}, func(txCtx context.Context, _ shared.Command) error {
+		current, err := s.inventory.GetTransferOrder(txCtx, input.TenantID, input.TransferOrderID)
+		if err != nil {
+			return err
+		}
+		if current.Status != inventory.TransferOrderStatusPlanned {
+			return inventory.ErrTransferOrderNotExecutable
+		}
+
+		sourceBalance, err := s.GetInventoryBalance(txCtx, GetInventoryBalanceInput{
+			TenantID:    input.TenantID,
+			ProductID:   current.ProductID,
+			WarehouseID: current.FromWarehouseID,
+		})
+		if err != nil {
+			return err
+		}
+		if current.Quantity > sourceBalance.Available {
+			return inventory.ErrInsufficientAvailableInventory
+		}
+		if err := current.MarkExecuted(input.ActorID); err != nil {
+			return err
+		}
+
+		outbound, err := inventory.NewOutboundLedgerEntry(
+			nextID("led"),
+			input.TenantID,
+			current.ProductID,
+			current.FromWarehouseID,
+			"transfer_order",
+			current.ID,
+			current.Quantity,
+		)
+		if err != nil {
+			return err
+		}
+		inbound, err := inventory.NewInboundLedgerEntry(
+			nextID("led"),
+			input.TenantID,
+			current.ProductID,
+			current.ToWarehouseID,
+			"transfer_order",
+			current.ID,
+			current.Quantity,
+		)
+		if err != nil {
+			return err
+		}
+		created := []inventory.LedgerEntry{outbound, inbound}
+		if err := s.inventory.AppendLedgerEntries(txCtx, created); err != nil {
+			return err
+		}
+		if err := s.inventory.SaveTransferOrder(txCtx, current); err != nil {
+			return err
+		}
+
+		order = current
+		entries = created
+		return nil
+	})
+	return order, entries, err
+}
+
+func (s *Service) CancelTransferOrder(ctx context.Context, input CancelTransferOrderInput) (inventory.TransferOrder, error) {
+	var order inventory.TransferOrder
+	err := s.pipeline.Execute(ctx, shared.Command{
+		Name:     "inventory.transfer_orders.cancel",
+		TenantID: input.TenantID,
+		ActorID:  input.ActorID,
+		Payload:  input,
+	}, func(txCtx context.Context, _ shared.Command) error {
+		current, err := s.inventory.GetTransferOrder(txCtx, input.TenantID, input.TransferOrderID)
+		if err != nil {
+			return err
+		}
+		if err := current.MarkCanceled(input.ActorID); err != nil {
+			return err
+		}
+		if err := s.inventory.SaveTransferOrder(txCtx, current); err != nil {
+			return err
+		}
+		order = current
+		return nil
+	})
+	return order, err
+}
+
+func (s *Service) TransferInventory(ctx context.Context, input TransferInventoryInput) ([]inventory.LedgerEntry, error) {
+	var entries []inventory.LedgerEntry
+	err := s.pipeline.Execute(ctx, shared.Command{
+		Name:     "inventory.transfers.create",
+		TenantID: input.TenantID,
+		ActorID:  input.ActorID,
+		Payload:  input,
+	}, func(txCtx context.Context, _ shared.Command) error {
+		if _, err := s.masterData.GetProduct(txCtx, input.TenantID, input.ProductID); err != nil {
+			return err
+		}
+		if _, err := s.masterData.GetWarehouse(txCtx, input.TenantID, input.FromWarehouseID); err != nil {
+			return err
+		}
+		if _, err := s.masterData.GetWarehouse(txCtx, input.TenantID, input.ToWarehouseID); err != nil {
+			return err
+		}
+
+		sourceBalance, err := s.GetInventoryBalance(txCtx, GetInventoryBalanceInput{
+			TenantID:    input.TenantID,
+			ProductID:   input.ProductID,
+			WarehouseID: input.FromWarehouseID,
+		})
+		if err != nil {
+			return err
+		}
+		if input.Quantity > sourceBalance.Available {
+			return inventory.ErrInsufficientAvailableInventory
+		}
+
+		outbound, err := inventory.NewOutboundLedgerEntry(
+			nextID("led"),
+			input.TenantID,
+			input.ProductID,
+			input.FromWarehouseID,
+			input.ReferenceType,
+			input.ReferenceID,
+			input.Quantity,
+		)
+		if err != nil {
+			return err
+		}
+		inbound, err := inventory.NewInboundLedgerEntry(
+			nextID("led"),
+			input.TenantID,
+			input.ProductID,
+			input.ToWarehouseID,
+			input.ReferenceType,
+			input.ReferenceID,
+			input.Quantity,
+		)
+		if err != nil {
+			return err
+		}
+		created := []inventory.LedgerEntry{outbound, inbound}
+		if err := s.inventory.AppendLedgerEntries(txCtx, created); err != nil {
+			return err
+		}
+		entries = created
+		return nil
+	})
+	return entries, err
+}
+
+func (s *Service) CreatePayableBill(ctx context.Context, input CreatePayableBillInput) (payable.Bill, error) {
+	var bill payable.Bill
+	err := s.pipeline.Execute(ctx, shared.Command{
+		Name:     "payable.bills.create",
+		TenantID: input.TenantID,
+		ActorID:  input.ActorID,
+		Payload:  input,
+	}, func(txCtx context.Context, _ shared.Command) error {
+		order, err := s.purchaseOrders.Get(txCtx, input.TenantID, input.PurchaseOrderID)
+		if err != nil {
+			return err
+		}
+		if order.Status != procurement.PurchaseOrderStatusReceived {
+			return payable.ErrOrderNotBillable
+		}
+		if _, err := s.payables.GetByPurchaseOrder(txCtx, input.TenantID, order.ID); err == nil {
+			return payable.ErrBillAlreadyExists
+		} else if !errors.Is(err, payable.ErrBillNotFound) {
+			return err
+		}
+
+		created, err := payable.NewBill(nextID("pab"), input.TenantID, order.ID, input.ActorID)
+		if err != nil {
+			return err
+		}
+		if err := s.payables.Save(txCtx, created); err != nil {
+			return err
+		}
+
+		bill = created
+		return nil
+	})
+	return bill, err
+}
+
+func (s *Service) GetPayableBill(ctx context.Context, input GetPayableBillInput) (payable.Bill, error) {
+	return s.payables.Get(ctx, input.TenantID, input.BillID)
+}
+
+func (s *Service) ListPayableBills(ctx context.Context, input ListPayableBillsInput) ([]payable.Bill, error) {
+	tenantID := strings.TrimSpace(input.TenantID)
+	if tenantID == "" {
+		return nil, payable.ErrInvalidBillQuery
+	}
+
+	statusFilter := strings.TrimSpace(input.Status)
+	if statusFilter != "" {
+		status := payable.BillStatus(statusFilter)
+		switch status {
+		case payable.BillStatusOpen:
+		default:
+			return nil, payable.ErrInvalidBillQuery
+		}
+	}
+
+	bills, err := s.payables.ListByTenant(ctx, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	if statusFilter != "" {
+		filtered := make([]payable.Bill, 0, len(bills))
+		for _, bill := range bills {
+			if string(bill.Status) == statusFilter {
+				filtered = append(filtered, bill)
+			}
+		}
+		bills = filtered
+	}
+
+	sortMode := strings.TrimSpace(input.Sort)
+	if sortMode == "" {
+		sortMode = "id_desc"
+	}
+	switch sortMode {
+	case "id_asc":
+		sort.Slice(bills, func(i, j int) bool {
+			return bills[i].ID < bills[j].ID
+		})
+	case "id_desc":
+		sort.Slice(bills, func(i, j int) bool {
+			return bills[i].ID > bills[j].ID
+		})
+	default:
+		return nil, payable.ErrInvalidBillQuery
+	}
+
+	page := input.Page
+	if page == 0 {
+		page = 1
+	}
+	pageSize := input.PageSize
+	if pageSize == 0 {
+		pageSize = 20
+	}
+	if page < 1 || pageSize < 1 {
+		return nil, payable.ErrInvalidBillQuery
+	}
+
+	start := (page - 1) * pageSize
+	if start >= len(bills) {
+		return []payable.Bill{}, nil
+	}
+	end := start + pageSize
+	if end > len(bills) {
+		end = len(bills)
+	}
+
+	out := make([]payable.Bill, 0, end-start)
+	out = append(out, bills[start:end]...)
+	return out, nil
+}
+
+func (s *Service) CreatePayablePaymentPlan(ctx context.Context, input CreatePayablePaymentPlanInput) (payable.PaymentPlan, error) {
+	var plan payable.PaymentPlan
+	err := s.pipeline.Execute(ctx, shared.Command{
+		Name:     "payable.payment_plans.create",
+		TenantID: input.TenantID,
+		ActorID:  input.ActorID,
+		Payload:  input,
+	}, func(txCtx context.Context, _ shared.Command) error {
+		if _, err := s.payables.Get(txCtx, input.TenantID, input.PayableBillID); err != nil {
+			return err
+		}
+		created, err := payable.NewPaymentPlan(nextID("ppm"), input.TenantID, input.PayableBillID, input.ActorID, input.DueDateISO8601)
+		if err != nil {
+			return err
+		}
+		if err := s.payables.SavePaymentPlan(txCtx, created); err != nil {
+			return err
+		}
+		plan = created
+		return nil
+	})
+	return plan, err
+}
+
+func (s *Service) ListPayablePaymentPlans(ctx context.Context, input ListPayablePaymentPlansInput) ([]payable.PaymentPlan, error) {
+	return s.payables.ListPaymentPlansByBill(ctx, input.TenantID, input.PayableBillID)
+}
+
+func (s *Service) CreateReceivableBill(ctx context.Context, input CreateReceivableBillInput) (receivable.Bill, error) {
+	var bill receivable.Bill
+	err := s.pipeline.Execute(ctx, shared.Command{
+		Name:     "receivable.bills.create",
+		TenantID: input.TenantID,
+		ActorID:  input.ActorID,
+		Payload:  input,
+	}, func(txCtx context.Context, _ shared.Command) error {
+		created, err := receivable.NewBill(nextID("reb"), input.TenantID, input.ExternalRef, input.ActorID)
+		if err != nil {
+			return err
+		}
+		if err := s.receivables.Save(txCtx, created); err != nil {
+			return err
+		}
+		bill = created
+		return nil
+	})
+	return bill, err
+}
+
+func (s *Service) GetReceivableBill(ctx context.Context, input GetReceivableBillInput) (receivable.Bill, error) {
+	return s.receivables.Get(ctx, input.TenantID, input.BillID)
+}
+
+func (s *Service) ListReceivableBills(ctx context.Context, input ListReceivableBillsInput) ([]receivable.Bill, error) {
+	tenantID := strings.TrimSpace(input.TenantID)
+	if tenantID == "" {
+		return nil, receivable.ErrInvalidBillQuery
+	}
+
+	statusFilter := strings.TrimSpace(input.Status)
+	if statusFilter != "" {
+		status := receivable.BillStatus(statusFilter)
+		switch status {
+		case receivable.BillStatusOpen:
+		default:
+			return nil, receivable.ErrInvalidBillQuery
+		}
+	}
+
+	bills, err := s.receivables.ListByTenant(ctx, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	if statusFilter != "" {
+		filtered := make([]receivable.Bill, 0, len(bills))
+		for _, bill := range bills {
+			if string(bill.Status) == statusFilter {
+				filtered = append(filtered, bill)
+			}
+		}
+		bills = filtered
+	}
+
+	sortMode := strings.TrimSpace(input.Sort)
+	if sortMode == "" {
+		sortMode = "id_desc"
+	}
+	switch sortMode {
+	case "id_asc":
+		sort.Slice(bills, func(i, j int) bool {
+			return bills[i].ID < bills[j].ID
+		})
+	case "id_desc":
+		sort.Slice(bills, func(i, j int) bool {
+			return bills[i].ID > bills[j].ID
+		})
+	default:
+		return nil, receivable.ErrInvalidBillQuery
+	}
+
+	page := input.Page
+	if page == 0 {
+		page = 1
+	}
+	pageSize := input.PageSize
+	if pageSize == 0 {
+		pageSize = 20
+	}
+	if page < 1 || pageSize < 1 {
+		return nil, receivable.ErrInvalidBillQuery
+	}
+
+	start := (page - 1) * pageSize
+	if start >= len(bills) {
+		return []receivable.Bill{}, nil
+	}
+	end := start + pageSize
+	if end > len(bills) {
+		end = len(bills)
+	}
+
+	out := make([]receivable.Bill, 0, end-start)
+	out = append(out, bills[start:end]...)
+	return out, nil
+}
+
+func (s *Service) CreateSalesOrder(ctx context.Context, input CreateSalesOrderInput) (sales.Order, error) {
+	var order sales.Order
+	err := s.pipeline.Execute(ctx, shared.Command{
+		Name:     "sales.orders.create",
+		TenantID: input.TenantID,
+		ActorID:  input.ActorID,
+		Payload:  input,
+	}, func(txCtx context.Context, _ shared.Command) error {
+		if _, err := s.masterData.GetWarehouse(txCtx, input.TenantID, input.WarehouseID); err != nil {
+			return err
+		}
+
+		lines := make([]sales.Line, 0, len(input.Lines))
+		for _, line := range input.Lines {
+			if _, err := s.masterData.GetProduct(txCtx, input.TenantID, line.ProductID); err != nil {
+				return err
+			}
+			lines = append(lines, sales.Line{
+				ProductID: line.ProductID,
+				Quantity:  line.Quantity,
+			})
+		}
+
+		created, err := sales.NewOrder(nextID("sor"), input.TenantID, input.WarehouseID, input.ExternalRef, input.ActorID, lines)
+		if err != nil {
+			return err
+		}
+		if err := s.salesOrders.Save(txCtx, created); err != nil {
+			return err
+		}
+		order = created
+		return nil
+	})
+	return order, err
+}
+
+func (s *Service) GetSalesOrder(ctx context.Context, input GetSalesOrderInput) (sales.Order, error) {
+	return s.salesOrders.Get(ctx, input.TenantID, input.SalesOrderID)
+}
+
+func (s *Service) ListSalesOrders(ctx context.Context, input ListSalesOrdersInput) ([]sales.Order, error) {
+	tenantID := strings.TrimSpace(input.TenantID)
+	if tenantID == "" {
+		return nil, sales.ErrInvalidOrderQuery
+	}
+
+	statusFilter := strings.TrimSpace(input.Status)
+	if statusFilter != "" {
+		status := sales.OrderStatus(statusFilter)
+		switch status {
+		case sales.OrderStatusDraft, sales.OrderStatusShipped:
+		default:
+			return nil, sales.ErrInvalidOrderQuery
+		}
+	}
+
+	orders, err := s.salesOrders.ListByTenant(ctx, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	if statusFilter != "" {
+		filtered := make([]sales.Order, 0, len(orders))
+		for _, order := range orders {
+			if string(order.Status) == statusFilter {
+				filtered = append(filtered, order)
+			}
+		}
+		orders = filtered
+	}
+
+	sortMode := strings.TrimSpace(input.Sort)
+	if sortMode == "" {
+		sortMode = "id_desc"
+	}
+	switch sortMode {
+	case "id_asc":
+		sort.Slice(orders, func(i, j int) bool {
+			return orders[i].ID < orders[j].ID
+		})
+	case "id_desc":
+		sort.Slice(orders, func(i, j int) bool {
+			return orders[i].ID > orders[j].ID
+		})
+	default:
+		return nil, sales.ErrInvalidOrderQuery
+	}
+
+	page := input.Page
+	if page == 0 {
+		page = 1
+	}
+	pageSize := input.PageSize
+	if pageSize == 0 {
+		pageSize = 20
+	}
+	if page < 1 || pageSize < 1 {
+		return nil, sales.ErrInvalidOrderQuery
+	}
+
+	start := (page - 1) * pageSize
+	if start >= len(orders) {
+		return []sales.Order{}, nil
+	}
+	end := start + pageSize
+	if end > len(orders) {
+		end = len(orders)
+	}
+
+	out := make([]sales.Order, 0, end-start)
+	out = append(out, orders[start:end]...)
+	return out, nil
+}
+
+func (s *Service) ShipSalesOrder(ctx context.Context, input ShipSalesOrderInput) (sales.Order, []inventory.LedgerEntry, error) {
+	var (
+		order   sales.Order
+		entries []inventory.LedgerEntry
+	)
+	err := s.pipeline.Execute(ctx, shared.Command{
+		Name:     "sales.orders.ship",
+		TenantID: input.TenantID,
+		ActorID:  input.ActorID,
+		Payload:  input,
+	}, func(txCtx context.Context, _ shared.Command) error {
+		current, err := s.salesOrders.Get(txCtx, input.TenantID, input.SalesOrderID)
+		if err != nil {
+			return err
+		}
+
+		requiredByProduct := make(map[string]int, len(current.Lines))
+		for _, line := range current.Lines {
+			requiredByProduct[line.ProductID] += line.Quantity
+		}
+		for productID, requiredQty := range requiredByProduct {
+			balance, err := s.GetInventoryBalance(txCtx, GetInventoryBalanceInput{
+				TenantID:    input.TenantID,
+				ProductID:   productID,
+				WarehouseID: current.WarehouseID,
+			})
+			if err != nil {
+				return err
+			}
+			if requiredQty > balance.Available {
+				return inventory.ErrInsufficientAvailableInventory
+			}
+		}
+
+		created := make([]inventory.LedgerEntry, 0, len(current.Lines))
+		for _, line := range current.Lines {
+			entry, err := inventory.NewOutboundLedgerEntry(
+				nextID("led"),
+				input.TenantID,
+				line.ProductID,
+				current.WarehouseID,
+				"sales_order",
+				current.ID,
+				line.Quantity,
+			)
+			if err != nil {
+				return err
+			}
+			created = append(created, entry)
+		}
+
+		if err := current.MarkShipped(); err != nil {
+			return err
+		}
+		if err := s.inventory.AppendLedgerEntries(txCtx, created); err != nil {
+			return err
+		}
+		if err := s.salesOrders.Save(txCtx, current); err != nil {
+			return err
+		}
+
+		order = current
+		entries = created
+		return nil
+	})
+	return order, entries, err
+}
+
+func (s *Service) GetBackofficeOverview(ctx context.Context, input GetBackofficeOverviewInput) (BackofficeOverview, error) {
+	payableBills, err := s.payables.ListByTenant(ctx, input.TenantID)
+	if err != nil {
+		return BackofficeOverview{}, err
+	}
+	receivableBills, err := s.receivables.ListByTenant(ctx, input.TenantID)
+	if err != nil {
+		return BackofficeOverview{}, err
+	}
+	salesOrders, err := s.salesOrders.ListByTenant(ctx, input.TenantID)
+	if err != nil {
+		return BackofficeOverview{}, err
+	}
+
+	overview := BackofficeOverview{
+		TenantID: input.TenantID,
+		Payable: PayableOverview{
+			OpenCount: len(payableBills),
+		},
+		Receivable: ReceivableOverview{
+			OpenCount: len(receivableBills),
+		},
+		Sales: SalesOverview{
+			TotalCount: len(salesOrders),
+		},
+	}
+	for _, order := range salesOrders {
+		switch order.Status {
+		case sales.OrderStatusDraft:
+			overview.Sales.DraftCount++
+		case sales.OrderStatusShipped:
+			overview.Sales.ShippedCount++
+		}
+	}
+	return overview, nil
 }
 
 func (s *Service) resolveRequest(
@@ -347,22 +1402,32 @@ func validateReceiptLinesAgainstOrder(receiptLines []inventory.ReceiptLine, orde
 	if _, err := inventory.NewReceipt("receipt-validation", "tenant-validation", "po-validation", "warehouse-validation", "actor-validation", receiptLines); err != nil {
 		return err
 	}
-	if len(receiptLines) != len(orderLines) {
-		return inventory.ErrInvalidReceipt
-	}
-
 	expected := make(map[string]int, len(orderLines))
 	for _, line := range orderLines {
-		expected[line.ProductID] += line.Quantity
+		expected[strings.TrimSpace(line.ProductID)] += line.Quantity
 	}
+
+	received := make(map[string]int, len(receiptLines))
 	for _, line := range receiptLines {
-		if expected[line.ProductID] != line.Quantity {
+		received[strings.TrimSpace(line.ProductID)] += line.Quantity
+	}
+
+	for productID, quantity := range expected {
+		if received[productID] != quantity {
 			return inventory.ErrInvalidReceipt
 		}
-		delete(expected, line.ProductID)
 	}
-	if len(expected) > 0 {
-		return inventory.ErrInvalidReceipt
+	for productID := range received {
+		if _, ok := expected[productID]; !ok {
+			return inventory.ErrInvalidReceipt
+		}
+	}
+	return nil
+}
+
+func validateInventoryQuery(tenantID, productID, warehouseID string) error {
+	if strings.TrimSpace(tenantID) == "" || strings.TrimSpace(productID) == "" || strings.TrimSpace(warehouseID) == "" {
+		return inventory.ErrInvalidInventoryQuery
 	}
 	return nil
 }

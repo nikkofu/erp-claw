@@ -1,8 +1,10 @@
 GOCACHE_DIR := $(CURDIR)/.cache/go-build
 DOCKER_ENV_FILE := configs/local/docker.env
 DOCKER_COMPOSE := docker compose --env-file $(DOCKER_ENV_FILE)
+HANDOFF_TOPIC ?=
+HANDOFF_DOC ?=
 
-.PHONY: infra-up infra-down infra-reset api gateway worker scheduler test test-integration smoke migrate-up migrate-down
+.PHONY: infra-up infra-down infra-reset api gateway worker scheduler test test-integration smoke migrate-up migrate-down handoff-new handoff-check handoff-prepush
 
 infra-up:
 	$(DOCKER_COMPOSE) up -d --build
@@ -35,6 +37,23 @@ test-integration:
 
 smoke:
 	./scripts/smoke_local.sh
+
+handoff-new:
+	@if [ -z "$(HANDOFF_TOPIC)" ]; then \
+		echo "Usage: make handoff-new HANDOFF_TOPIC=<topic-slug>"; \
+		exit 1; \
+	fi
+	./scripts/new_phase_handoff.sh "$(HANDOFF_TOPIC)"
+
+handoff-check:
+	@if [ -z "$(HANDOFF_DOC)" ]; then \
+		echo "Usage: make handoff-check HANDOFF_DOC=docs/phase-handoff-playbook/<date>-<topic>-handoff.md"; \
+		exit 1; \
+	fi
+	./scripts/phase_handoff_check.sh "$(HANDOFF_DOC)"
+
+handoff-prepush:
+	./scripts/phase_handoff_pre_push.sh
 
 migrate-up:
 	go run ./cmd/migrate

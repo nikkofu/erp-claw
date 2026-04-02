@@ -3,6 +3,8 @@ package router
 import (
 	"errors"
 	"net/http"
+	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/nikkofu/erp-claw/internal/application/admin/supplychain"
@@ -11,7 +13,10 @@ import (
 	"github.com/nikkofu/erp-claw/internal/domain/approval"
 	"github.com/nikkofu/erp-claw/internal/domain/inventory"
 	"github.com/nikkofu/erp-claw/internal/domain/masterdata"
+	"github.com/nikkofu/erp-claw/internal/domain/payable"
 	"github.com/nikkofu/erp-claw/internal/domain/procurement"
+	"github.com/nikkofu/erp-claw/internal/domain/receivable"
+	"github.com/nikkofu/erp-claw/internal/domain/sales"
 	"github.com/nikkofu/erp-claw/internal/interfaces/http/presenter"
 )
 
@@ -83,6 +88,31 @@ func registerAdminRoutes(rg *gin.RouterGroup, container *bootstrap.Container) {
 	})
 
 	procurementGroup := rg.Group("/procurement/purchase-orders")
+	procurementGroup.GET("", func(c *gin.Context) {
+		page, err := parsePositivePurchaseOrderQueryInt(c.Query("page"), 1)
+		if err != nil {
+			renderSupplyChainError(c, err)
+			return
+		}
+		pageSize, err := parsePositivePurchaseOrderQueryInt(c.Query("page_size"), 20)
+		if err != nil {
+			renderSupplyChainError(c, err)
+			return
+		}
+
+		orders, err := container.SupplyChain.ListPurchaseOrders(c.Request.Context(), supplychain.ListPurchaseOrdersInput{
+			TenantID: tenantIDFromContext(c),
+			Status:   c.Query("status"),
+			Sort:     c.DefaultQuery("sort", "id_desc"),
+			Page:     page,
+			PageSize: pageSize,
+		})
+		if err != nil {
+			renderSupplyChainError(c, err)
+			return
+		}
+		presenter.OK(c, purchaseOrdersResponse(orders))
+	})
 	procurementGroup.POST("", func(c *gin.Context) {
 		var req createPurchaseOrderRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
@@ -162,7 +192,45 @@ func registerAdminRoutes(rg *gin.RouterGroup, container *bootstrap.Container) {
 		presenter.OK(c, purchaseOrderReceiptResponse(receipt, ledgerEntries, order))
 	})
 
+	procurementGroup.POST("/:id/payable-bills", func(c *gin.Context) {
+		bill, err := container.SupplyChain.CreatePayableBill(c.Request.Context(), supplychain.CreatePayableBillInput{
+			TenantID:        tenantIDFromContext(c),
+			ActorID:         actorIDFromContext(c),
+			PurchaseOrderID: c.Param("id"),
+		})
+		if err != nil {
+			renderSupplyChainError(c, err)
+			return
+		}
+		presenter.OK(c, payableBillResponse(bill))
+	})
+
 	approvalGroup := rg.Group("/approvals")
+	approvalGroup.GET("", func(c *gin.Context) {
+		page, err := parsePositiveApprovalQueryInt(c.Query("page"), 1)
+		if err != nil {
+			renderSupplyChainError(c, err)
+			return
+		}
+		pageSize, err := parsePositiveApprovalQueryInt(c.Query("page_size"), 20)
+		if err != nil {
+			renderSupplyChainError(c, err)
+			return
+		}
+
+		requests, err := container.SupplyChain.ListApprovalRequests(c.Request.Context(), supplychain.ListApprovalRequestsInput{
+			TenantID: tenantIDFromContext(c),
+			Status:   c.Query("status"),
+			Sort:     c.DefaultQuery("sort", "id_desc"),
+			Page:     page,
+			PageSize: pageSize,
+		})
+		if err != nil {
+			renderSupplyChainError(c, err)
+			return
+		}
+		presenter.OK(c, approvalRequestsResponse(requests))
+	})
 	approvalGroup.POST("/:id/approve", func(c *gin.Context) {
 		order, request, err := container.SupplyChain.ApproveRequest(c.Request.Context(), supplychain.ResolveApprovalInput{
 			TenantID:   tenantIDFromContext(c),
@@ -190,6 +258,32 @@ func registerAdminRoutes(rg *gin.RouterGroup, container *bootstrap.Container) {
 	})
 
 	inventoryGroup := rg.Group("/inventory")
+	inventoryGroup.GET("/ledger", func(c *gin.Context) {
+		page, err := parsePositiveInventoryQueryInt(c.Query("page"), 1)
+		if err != nil {
+			renderSupplyChainError(c, err)
+			return
+		}
+		pageSize, err := parsePositiveInventoryQueryInt(c.Query("page_size"), 20)
+		if err != nil {
+			renderSupplyChainError(c, err)
+			return
+		}
+
+		entries, err := container.SupplyChain.ListInventoryLedger(c.Request.Context(), supplychain.ListInventoryLedgerInput{
+			TenantID:    tenantIDFromContext(c),
+			ProductID:   c.Query("product_id"),
+			WarehouseID: c.Query("warehouse_id"),
+			Sort:        c.DefaultQuery("sort", "id_asc"),
+			Page:        page,
+			PageSize:    pageSize,
+		})
+		if err != nil {
+			renderSupplyChainError(c, err)
+			return
+		}
+		presenter.OK(c, ledgerEntriesResponse(entries))
+	})
 	inventoryGroup.GET("/balances", func(c *gin.Context) {
 		balance, err := container.SupplyChain.GetInventoryBalance(c.Request.Context(), supplychain.GetInventoryBalanceInput{
 			TenantID:    tenantIDFromContext(c),
@@ -201,6 +295,366 @@ func registerAdminRoutes(rg *gin.RouterGroup, container *bootstrap.Container) {
 			return
 		}
 		presenter.OK(c, inventoryBalanceResponse(balance))
+	})
+	inventoryGroup.POST("/reservations", func(c *gin.Context) {
+		var req createInventoryReservationRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			presenter.Error(c, http.StatusBadRequest, err.Error())
+			return
+		}
+
+		reservation, err := container.SupplyChain.ReserveInventory(c.Request.Context(), supplychain.ReserveInventoryInput{
+			TenantID:      tenantIDFromContext(c),
+			ActorID:       actorIDFromContext(c),
+			ProductID:     req.ProductID,
+			WarehouseID:   req.WarehouseID,
+			Quantity:      req.Quantity,
+			ReferenceType: req.ReferenceType,
+			ReferenceID:   req.ReferenceID,
+		})
+		if err != nil {
+			renderSupplyChainError(c, err)
+			return
+		}
+		presenter.OK(c, inventoryReservationResponse(reservation))
+	})
+	inventoryGroup.POST("/outbounds", func(c *gin.Context) {
+		var req createInventoryOutboundRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			presenter.Error(c, http.StatusBadRequest, err.Error())
+			return
+		}
+
+		outbound, err := container.SupplyChain.IssueInventory(c.Request.Context(), supplychain.IssueInventoryInput{
+			TenantID:      tenantIDFromContext(c),
+			ActorID:       actorIDFromContext(c),
+			ProductID:     req.ProductID,
+			WarehouseID:   req.WarehouseID,
+			Quantity:      req.Quantity,
+			ReferenceType: req.ReferenceType,
+			ReferenceID:   req.ReferenceID,
+		})
+		if err != nil {
+			renderSupplyChainError(c, err)
+			return
+		}
+		presenter.OK(c, inventoryOutboundResponse(outbound))
+	})
+	inventoryGroup.POST("/transfers", func(c *gin.Context) {
+		var req createInventoryTransferRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			presenter.Error(c, http.StatusBadRequest, err.Error())
+			return
+		}
+
+		entries, err := container.SupplyChain.TransferInventory(c.Request.Context(), supplychain.TransferInventoryInput{
+			TenantID:        tenantIDFromContext(c),
+			ActorID:         actorIDFromContext(c),
+			ProductID:       req.ProductID,
+			FromWarehouseID: req.FromWarehouseID,
+			ToWarehouseID:   req.ToWarehouseID,
+			Quantity:        req.Quantity,
+			ReferenceType:   req.ReferenceType,
+			ReferenceID:     req.ReferenceID,
+		})
+		if err != nil {
+			renderSupplyChainError(c, err)
+			return
+		}
+		presenter.OK(c, inventoryTransferResponse(entries))
+	})
+	inventoryGroup.POST("/transfer-orders", func(c *gin.Context) {
+		var req createInventoryTransferOrderRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			presenter.Error(c, http.StatusBadRequest, err.Error())
+			return
+		}
+
+		order, err := container.SupplyChain.CreateTransferOrder(c.Request.Context(), supplychain.CreateTransferOrderInput{
+			TenantID:        tenantIDFromContext(c),
+			ActorID:         actorIDFromContext(c),
+			ProductID:       req.ProductID,
+			FromWarehouseID: req.FromWarehouseID,
+			ToWarehouseID:   req.ToWarehouseID,
+			Quantity:        req.Quantity,
+		})
+		if err != nil {
+			renderSupplyChainError(c, err)
+			return
+		}
+		presenter.OK(c, transferOrderResponse(order))
+	})
+	inventoryGroup.GET("/transfer-orders", func(c *gin.Context) {
+		page, err := parsePositiveQueryInt(c.Query("page"), 1)
+		if err != nil {
+			renderSupplyChainError(c, err)
+			return
+		}
+		pageSize, err := parsePositiveQueryInt(c.Query("page_size"), 20)
+		if err != nil {
+			renderSupplyChainError(c, err)
+			return
+		}
+
+		orders, err := container.SupplyChain.ListTransferOrders(c.Request.Context(), supplychain.ListTransferOrdersInput{
+			TenantID: tenantIDFromContext(c),
+			Status:   c.Query("status"),
+			Sort:     c.DefaultQuery("sort", "id_desc"),
+			Page:     page,
+			PageSize: pageSize,
+		})
+		if err != nil {
+			renderSupplyChainError(c, err)
+			return
+		}
+		presenter.OK(c, transferOrdersResponse(orders))
+	})
+	inventoryGroup.GET("/transfer-orders/:id", func(c *gin.Context) {
+		order, err := container.SupplyChain.GetTransferOrder(c.Request.Context(), supplychain.GetTransferOrderInput{
+			TenantID:        tenantIDFromContext(c),
+			TransferOrderID: c.Param("id"),
+		})
+		if err != nil {
+			renderSupplyChainError(c, err)
+			return
+		}
+		presenter.OK(c, transferOrderResponse(order))
+	})
+	inventoryGroup.POST("/transfer-orders/:id/execute", func(c *gin.Context) {
+		order, entries, err := container.SupplyChain.ExecuteTransferOrder(c.Request.Context(), supplychain.ExecuteTransferOrderInput{
+			TenantID:        tenantIDFromContext(c),
+			ActorID:         actorIDFromContext(c),
+			TransferOrderID: c.Param("id"),
+		})
+		if err != nil {
+			renderSupplyChainError(c, err)
+			return
+		}
+		presenter.OK(c, transferOrderExecuteResponse(order, entries))
+	})
+	inventoryGroup.POST("/transfer-orders/:id/cancel", func(c *gin.Context) {
+		order, err := container.SupplyChain.CancelTransferOrder(c.Request.Context(), supplychain.CancelTransferOrderInput{
+			TenantID:        tenantIDFromContext(c),
+			ActorID:         actorIDFromContext(c),
+			TransferOrderID: c.Param("id"),
+		})
+		if err != nil {
+			renderSupplyChainError(c, err)
+			return
+		}
+		presenter.OK(c, transferOrderResponse(order))
+	})
+
+	readModelGroup := rg.Group("/read-models")
+	readModelGroup.GET("/overview", func(c *gin.Context) {
+		overview, err := container.SupplyChain.GetBackofficeOverview(c.Request.Context(), supplychain.GetBackofficeOverviewInput{
+			TenantID: tenantIDFromContext(c),
+		})
+		if err != nil {
+			renderSupplyChainError(c, err)
+			return
+		}
+		presenter.OK(c, backofficeOverviewResponse(overview))
+	})
+
+	receivableGroup := rg.Group("/receivables")
+	receivableGroup.POST("", func(c *gin.Context) {
+		var req createReceivableBillRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			presenter.Error(c, http.StatusBadRequest, err.Error())
+			return
+		}
+
+		bill, err := container.SupplyChain.CreateReceivableBill(c.Request.Context(), supplychain.CreateReceivableBillInput{
+			TenantID:    tenantIDFromContext(c),
+			ActorID:     actorIDFromContext(c),
+			ExternalRef: req.ExternalRef,
+		})
+		if err != nil {
+			renderSupplyChainError(c, err)
+			return
+		}
+		presenter.OK(c, receivableBillResponse(bill))
+	})
+	receivableGroup.GET("", func(c *gin.Context) {
+		page, err := parsePositiveReceivableQueryInt(c.Query("page"), 1)
+		if err != nil {
+			renderSupplyChainError(c, err)
+			return
+		}
+		pageSize, err := parsePositiveReceivableQueryInt(c.Query("page_size"), 20)
+		if err != nil {
+			renderSupplyChainError(c, err)
+			return
+		}
+
+		bills, err := container.SupplyChain.ListReceivableBills(c.Request.Context(), supplychain.ListReceivableBillsInput{
+			TenantID: tenantIDFromContext(c),
+			Status:   c.Query("status"),
+			Sort:     c.DefaultQuery("sort", "id_desc"),
+			Page:     page,
+			PageSize: pageSize,
+		})
+		if err != nil {
+			renderSupplyChainError(c, err)
+			return
+		}
+		presenter.OK(c, receivableBillsResponse(bills))
+	})
+	receivableGroup.GET("/:id", func(c *gin.Context) {
+		bill, err := container.SupplyChain.GetReceivableBill(c.Request.Context(), supplychain.GetReceivableBillInput{
+			TenantID: tenantIDFromContext(c),
+			BillID:   c.Param("id"),
+		})
+		if err != nil {
+			renderSupplyChainError(c, err)
+			return
+		}
+		presenter.OK(c, receivableBillResponse(bill))
+	})
+
+	payableGroup := rg.Group("/payables")
+	payableGroup.GET("", func(c *gin.Context) {
+		page, err := parsePositivePayableQueryInt(c.Query("page"), 1)
+		if err != nil {
+			renderSupplyChainError(c, err)
+			return
+		}
+		pageSize, err := parsePositivePayableQueryInt(c.Query("page_size"), 20)
+		if err != nil {
+			renderSupplyChainError(c, err)
+			return
+		}
+
+		bills, err := container.SupplyChain.ListPayableBills(c.Request.Context(), supplychain.ListPayableBillsInput{
+			TenantID: tenantIDFromContext(c),
+			Status:   c.Query("status"),
+			Sort:     c.DefaultQuery("sort", "id_desc"),
+			Page:     page,
+			PageSize: pageSize,
+		})
+		if err != nil {
+			renderSupplyChainError(c, err)
+			return
+		}
+		presenter.OK(c, payableBillsResponse(bills))
+	})
+	payableGroup.GET("/:id", func(c *gin.Context) {
+		bill, err := container.SupplyChain.GetPayableBill(c.Request.Context(), supplychain.GetPayableBillInput{
+			TenantID: tenantIDFromContext(c),
+			BillID:   c.Param("id"),
+		})
+		if err != nil {
+			renderSupplyChainError(c, err)
+			return
+		}
+
+		plans, err := container.SupplyChain.ListPayablePaymentPlans(c.Request.Context(), supplychain.ListPayablePaymentPlansInput{
+			TenantID:      tenantIDFromContext(c),
+			PayableBillID: bill.ID,
+		})
+		if err != nil {
+			renderSupplyChainError(c, err)
+			return
+		}
+		presenter.OK(c, payableBillDetailResponse(bill, plans))
+	})
+	payableGroup.POST("/:id/payment-plans", func(c *gin.Context) {
+		var req createPayablePaymentPlanRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			presenter.Error(c, http.StatusBadRequest, err.Error())
+			return
+		}
+
+		plan, err := container.SupplyChain.CreatePayablePaymentPlan(c.Request.Context(), supplychain.CreatePayablePaymentPlanInput{
+			TenantID:       tenantIDFromContext(c),
+			ActorID:        actorIDFromContext(c),
+			PayableBillID:  c.Param("id"),
+			DueDateISO8601: req.DueDate,
+		})
+		if err != nil {
+			renderSupplyChainError(c, err)
+			return
+		}
+		presenter.OK(c, payablePaymentPlanResponse(plan))
+	})
+
+	salesGroup := rg.Group("/sales-orders")
+	salesGroup.POST("", func(c *gin.Context) {
+		var req createSalesOrderRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			presenter.Error(c, http.StatusBadRequest, err.Error())
+			return
+		}
+
+		lines := make([]supplychain.CreateSalesOrderLine, 0, len(req.Lines))
+		for _, line := range req.Lines {
+			lines = append(lines, supplychain.CreateSalesOrderLine{
+				ProductID: line.ProductID,
+				Quantity:  line.Quantity,
+			})
+		}
+
+		order, err := container.SupplyChain.CreateSalesOrder(c.Request.Context(), supplychain.CreateSalesOrderInput{
+			TenantID:    tenantIDFromContext(c),
+			ActorID:     actorIDFromContext(c),
+			WarehouseID: req.WarehouseID,
+			ExternalRef: req.ExternalRef,
+			Lines:       lines,
+		})
+		if err != nil {
+			renderSupplyChainError(c, err)
+			return
+		}
+		presenter.OK(c, salesOrderResponse(order))
+	})
+	salesGroup.GET("", func(c *gin.Context) {
+		page, err := parsePositiveSalesOrderQueryInt(c.Query("page"), 1)
+		if err != nil {
+			renderSupplyChainError(c, err)
+			return
+		}
+		pageSize, err := parsePositiveSalesOrderQueryInt(c.Query("page_size"), 20)
+		if err != nil {
+			renderSupplyChainError(c, err)
+			return
+		}
+
+		orders, err := container.SupplyChain.ListSalesOrders(c.Request.Context(), supplychain.ListSalesOrdersInput{
+			TenantID: tenantIDFromContext(c),
+			Status:   c.Query("status"),
+			Sort:     c.DefaultQuery("sort", "id_desc"),
+			Page:     page,
+			PageSize: pageSize,
+		})
+		if err != nil {
+			renderSupplyChainError(c, err)
+			return
+		}
+		presenter.OK(c, salesOrdersResponse(orders))
+	})
+	salesGroup.GET("/:id", func(c *gin.Context) {
+		order, err := container.SupplyChain.GetSalesOrder(c.Request.Context(), supplychain.GetSalesOrderInput{
+			TenantID:     tenantIDFromContext(c),
+			SalesOrderID: c.Param("id"),
+		})
+		if err != nil {
+			renderSupplyChainError(c, err)
+			return
+		}
+		presenter.OK(c, salesOrderResponse(order))
+	})
+	salesGroup.POST("/:id/ship", func(c *gin.Context) {
+		order, entries, err := container.SupplyChain.ShipSalesOrder(c.Request.Context(), supplychain.ShipSalesOrderInput{
+			TenantID:     tenantIDFromContext(c),
+			ActorID:      actorIDFromContext(c),
+			SalesOrderID: c.Param("id"),
+		})
+		if err != nil {
+			renderSupplyChainError(c, err)
+			return
+		}
+		presenter.OK(c, salesOrderShipResponse(order, entries))
 	})
 }
 
@@ -240,6 +694,57 @@ type receivePurchaseOrderLineRequest struct {
 	Quantity  int    `json:"quantity"`
 }
 
+type createInventoryReservationRequest struct {
+	ProductID     string `json:"product_id"`
+	WarehouseID   string `json:"warehouse_id"`
+	Quantity      int    `json:"quantity"`
+	ReferenceType string `json:"reference_type"`
+	ReferenceID   string `json:"reference_id"`
+}
+
+type createInventoryOutboundRequest struct {
+	ProductID     string `json:"product_id"`
+	WarehouseID   string `json:"warehouse_id"`
+	Quantity      int    `json:"quantity"`
+	ReferenceType string `json:"reference_type"`
+	ReferenceID   string `json:"reference_id"`
+}
+
+type createInventoryTransferRequest struct {
+	ProductID       string `json:"product_id"`
+	FromWarehouseID string `json:"from_warehouse_id"`
+	ToWarehouseID   string `json:"to_warehouse_id"`
+	Quantity        int    `json:"quantity"`
+	ReferenceType   string `json:"reference_type"`
+	ReferenceID     string `json:"reference_id"`
+}
+
+type createInventoryTransferOrderRequest struct {
+	ProductID       string `json:"product_id"`
+	FromWarehouseID string `json:"from_warehouse_id"`
+	ToWarehouseID   string `json:"to_warehouse_id"`
+	Quantity        int    `json:"quantity"`
+}
+
+type createPayablePaymentPlanRequest struct {
+	DueDate string `json:"due_date"`
+}
+
+type createReceivableBillRequest struct {
+	ExternalRef string `json:"external_ref"`
+}
+
+type createSalesOrderRequest struct {
+	WarehouseID string                        `json:"warehouse_id"`
+	ExternalRef string                        `json:"external_ref"`
+	Lines       []createSalesOrderLineRequest `json:"lines"`
+}
+
+type createSalesOrderLineRequest struct {
+	ProductID string `json:"product_id"`
+	Quantity  int    `json:"quantity"`
+}
+
 func tenantIDFromContext(c *gin.Context) string {
 	return c.GetString("tenant_id")
 }
@@ -248,27 +753,90 @@ func actorIDFromContext(c *gin.Context) string {
 	return c.GetString("actor_id")
 }
 
+func parsePositiveQueryInt(raw string, defaultValue int) (int, error) {
+	return parsePositiveQueryIntWithErr(raw, defaultValue, inventory.ErrInvalidTransferOrderQuery)
+}
+
+func parsePositiveApprovalQueryInt(raw string, defaultValue int) (int, error) {
+	return parsePositiveQueryIntWithErr(raw, defaultValue, approval.ErrInvalidRequestQuery)
+}
+
+func parsePositivePurchaseOrderQueryInt(raw string, defaultValue int) (int, error) {
+	return parsePositiveQueryIntWithErr(raw, defaultValue, procurement.ErrInvalidPurchaseOrderQuery)
+}
+
+func parsePositiveSalesOrderQueryInt(raw string, defaultValue int) (int, error) {
+	return parsePositiveQueryIntWithErr(raw, defaultValue, sales.ErrInvalidOrderQuery)
+}
+
+func parsePositivePayableQueryInt(raw string, defaultValue int) (int, error) {
+	return parsePositiveQueryIntWithErr(raw, defaultValue, payable.ErrInvalidBillQuery)
+}
+
+func parsePositiveReceivableQueryInt(raw string, defaultValue int) (int, error) {
+	return parsePositiveQueryIntWithErr(raw, defaultValue, receivable.ErrInvalidBillQuery)
+}
+
+func parsePositiveInventoryQueryInt(raw string, defaultValue int) (int, error) {
+	return parsePositiveQueryIntWithErr(raw, defaultValue, inventory.ErrInvalidInventoryQuery)
+}
+
+func parsePositiveQueryIntWithErr(raw string, defaultValue int, errValue error) (int, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return defaultValue, nil
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil || value < 1 {
+		return 0, errValue
+	}
+	return value, nil
+}
+
 func renderSupplyChainError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, masterdata.ErrSupplierNotFound),
 		errors.Is(err, masterdata.ErrProductNotFound),
 		errors.Is(err, masterdata.ErrWarehouseNotFound),
 		errors.Is(err, procurement.ErrPurchaseOrderNotFound),
-		errors.Is(err, approval.ErrRequestNotFound):
+		errors.Is(err, approval.ErrRequestNotFound),
+		errors.Is(err, inventory.ErrTransferOrderNotFound),
+		errors.Is(err, payable.ErrBillNotFound),
+		errors.Is(err, receivable.ErrBillNotFound),
+		errors.Is(err, sales.ErrOrderNotFound):
 		presenter.Error(c, http.StatusNotFound, err.Error())
 	case errors.Is(err, masterdata.ErrInvalidSupplier),
 		errors.Is(err, masterdata.ErrInvalidProduct),
 		errors.Is(err, masterdata.ErrInvalidWarehouse),
+		errors.Is(err, approval.ErrInvalidRequestQuery),
+		errors.Is(err, procurement.ErrInvalidPurchaseOrderQuery),
+		errors.Is(err, inventory.ErrInvalidInventoryQuery),
 		errors.Is(err, inventory.ErrInvalidReceipt),
+		errors.Is(err, inventory.ErrInvalidReservation),
+		errors.Is(err, inventory.ErrInvalidTransferOrder),
+		errors.Is(err, inventory.ErrInvalidTransferOrderQuery),
+		errors.Is(err, inventory.ErrInsufficientAvailableInventory),
 		errors.Is(err, procurement.ErrInvalidPurchaseOrder),
 		errors.Is(err, procurement.ErrPurchaseOrderAlreadySubmitted),
-		errors.Is(err, procurement.ErrPurchaseOrderNotReceivable),
+		errors.Is(err, payable.ErrInvalidBill),
+		errors.Is(err, payable.ErrInvalidBillQuery),
+		errors.Is(err, payable.ErrBillAlreadyExists),
+		errors.Is(err, payable.ErrInvalidPaymentPlan),
+		errors.Is(err, receivable.ErrInvalidBill),
+		errors.Is(err, receivable.ErrInvalidBillQuery),
+		errors.Is(err, sales.ErrInvalidOrder),
+		errors.Is(err, sales.ErrInvalidOrderQuery),
 		errors.Is(err, approval.ErrInvalidRequest),
 		errors.Is(err, approval.ErrApprovalNotPending):
 		presenter.Error(c, http.StatusBadRequest, err.Error())
 	case errors.Is(err, shared.ErrPolicyDenied):
 		presenter.Error(c, http.StatusForbidden, err.Error())
-	case errors.Is(err, shared.ErrApprovalRequired):
+	case errors.Is(err, shared.ErrApprovalRequired),
+		errors.Is(err, procurement.ErrPurchaseOrderNotReceivable),
+		errors.Is(err, payable.ErrOrderNotBillable),
+		errors.Is(err, inventory.ErrTransferOrderNotExecutable),
+		errors.Is(err, inventory.ErrTransferOrderNotCancelable),
+		errors.Is(err, sales.ErrOrderNotShippable):
 		presenter.Error(c, http.StatusConflict, err.Error())
 	default:
 		presenter.Error(c, http.StatusInternalServerError, err.Error())
@@ -322,6 +890,14 @@ func purchaseOrderResponse(order procurement.PurchaseOrder) gin.H {
 	}
 }
 
+func purchaseOrdersResponse(orders []procurement.PurchaseOrder) []gin.H {
+	out := make([]gin.H, 0, len(orders))
+	for _, order := range orders {
+		out = append(out, purchaseOrderResponse(order))
+	}
+	return out
+}
+
 func approvalResponse(request approval.Request) any {
 	if request.ID == "" {
 		return nil
@@ -335,6 +911,22 @@ func approvalResponse(request approval.Request) any {
 		"requested_by":  request.RequestedBy,
 		"decided_by":    request.DecidedBy,
 	}
+}
+
+func approvalRequestsResponse(requests []approval.Request) []gin.H {
+	out := make([]gin.H, 0, len(requests))
+	for _, request := range requests {
+		out = append(out, gin.H{
+			"id":            request.ID,
+			"tenant_id":     request.TenantID,
+			"resource_type": request.ResourceType,
+			"resource_id":   request.ResourceID,
+			"status":        request.Status,
+			"requested_by":  request.RequestedBy,
+			"decided_by":    request.DecidedBy,
+		})
+	}
+	return out
 }
 
 func purchaseOrderDetailResponse(order procurement.PurchaseOrder, request approval.Request) gin.H {
@@ -394,5 +986,182 @@ func inventoryBalanceResponse(balance inventory.Balance) gin.H {
 		"product_id":   balance.ProductID,
 		"warehouse_id": balance.WarehouseID,
 		"on_hand":      balance.OnHand,
+		"reserved":     balance.Reserved,
+		"available":    balance.Available,
+	}
+}
+
+func inventoryReservationResponse(reservation inventory.Reservation) gin.H {
+	return gin.H{
+		"id":             reservation.ID,
+		"tenant_id":      reservation.TenantID,
+		"product_id":     reservation.ProductID,
+		"warehouse_id":   reservation.WarehouseID,
+		"reference_type": reservation.ReferenceType,
+		"reference_id":   reservation.ReferenceID,
+		"status":         reservation.Status,
+		"created_by":     reservation.CreatedBy,
+		"quantity":       reservation.Quantity,
+	}
+}
+
+func inventoryOutboundResponse(entry inventory.LedgerEntry) gin.H {
+	return gin.H{
+		"id":             entry.ID,
+		"tenant_id":      entry.TenantID,
+		"product_id":     entry.ProductID,
+		"warehouse_id":   entry.WarehouseID,
+		"movement_type":  entry.MovementType,
+		"quantity_delta": entry.QuantityDelta,
+		"reference_type": entry.ReferenceType,
+		"reference_id":   entry.ReferenceID,
+	}
+}
+
+func inventoryTransferResponse(entries []inventory.LedgerEntry) gin.H {
+	return gin.H{
+		"ledger_entries": ledgerEntriesResponse(entries),
+	}
+}
+
+func transferOrderResponse(order inventory.TransferOrder) gin.H {
+	return gin.H{
+		"id":                order.ID,
+		"tenant_id":         order.TenantID,
+		"product_id":        order.ProductID,
+		"from_warehouse_id": order.FromWarehouseID,
+		"to_warehouse_id":   order.ToWarehouseID,
+		"quantity":          order.Quantity,
+		"status":            order.Status,
+		"created_by":        order.CreatedBy,
+		"executed_by":       order.ExecutedBy,
+		"canceled_by":       order.CanceledBy,
+	}
+}
+
+func transferOrdersResponse(orders []inventory.TransferOrder) []gin.H {
+	out := make([]gin.H, 0, len(orders))
+	for _, order := range orders {
+		out = append(out, transferOrderResponse(order))
+	}
+	return out
+}
+
+func transferOrderExecuteResponse(order inventory.TransferOrder, entries []inventory.LedgerEntry) gin.H {
+	return gin.H{
+		"order":          transferOrderResponse(order),
+		"ledger_entries": ledgerEntriesResponse(entries),
+	}
+}
+
+func payableBillResponse(bill payable.Bill) gin.H {
+	return gin.H{
+		"id":                bill.ID,
+		"tenant_id":         bill.TenantID,
+		"purchase_order_id": bill.PurchaseOrderID,
+		"status":            bill.Status,
+		"created_by":        bill.CreatedBy,
+	}
+}
+
+func payablePaymentPlanResponse(plan payable.PaymentPlan) gin.H {
+	return gin.H{
+		"id":              plan.ID,
+		"tenant_id":       plan.TenantID,
+		"payable_bill_id": plan.PayableBillID,
+		"status":          plan.Status,
+		"due_date":        plan.DueDateISO8601,
+		"created_by":      plan.CreatedBy,
+	}
+}
+
+func payablePaymentPlansResponse(plans []payable.PaymentPlan) []gin.H {
+	out := make([]gin.H, 0, len(plans))
+	for _, plan := range plans {
+		out = append(out, payablePaymentPlanResponse(plan))
+	}
+	return out
+}
+
+func payableBillDetailResponse(bill payable.Bill, plans []payable.PaymentPlan) gin.H {
+	resp := payableBillResponse(bill)
+	resp["payment_plans"] = payablePaymentPlansResponse(plans)
+	return resp
+}
+
+func payableBillsResponse(bills []payable.Bill) []gin.H {
+	out := make([]gin.H, 0, len(bills))
+	for _, bill := range bills {
+		out = append(out, payableBillResponse(bill))
+	}
+	return out
+}
+
+func receivableBillResponse(bill receivable.Bill) gin.H {
+	return gin.H{
+		"id":           bill.ID,
+		"tenant_id":    bill.TenantID,
+		"external_ref": bill.ExternalRef,
+		"status":       bill.Status,
+		"created_by":   bill.CreatedBy,
+	}
+}
+
+func receivableBillsResponse(bills []receivable.Bill) []gin.H {
+	out := make([]gin.H, 0, len(bills))
+	for _, bill := range bills {
+		out = append(out, receivableBillResponse(bill))
+	}
+	return out
+}
+
+func salesOrderResponse(order sales.Order) gin.H {
+	lines := make([]gin.H, 0, len(order.Lines))
+	for _, line := range order.Lines {
+		lines = append(lines, gin.H{
+			"product_id": line.ProductID,
+			"quantity":   line.Quantity,
+		})
+	}
+	return gin.H{
+		"id":           order.ID,
+		"tenant_id":    order.TenantID,
+		"warehouse_id": order.WarehouseID,
+		"external_ref": order.ExternalRef,
+		"status":       order.Status,
+		"created_by":   order.CreatedBy,
+		"lines":        lines,
+	}
+}
+
+func salesOrdersResponse(orders []sales.Order) []gin.H {
+	out := make([]gin.H, 0, len(orders))
+	for _, order := range orders {
+		out = append(out, salesOrderResponse(order))
+	}
+	return out
+}
+
+func salesOrderShipResponse(order sales.Order, entries []inventory.LedgerEntry) gin.H {
+	return gin.H{
+		"order":          salesOrderResponse(order),
+		"ledger_entries": ledgerEntriesResponse(entries),
+	}
+}
+
+func backofficeOverviewResponse(overview supplychain.BackofficeOverview) gin.H {
+	return gin.H{
+		"tenant_id": overview.TenantID,
+		"payable": gin.H{
+			"open_count": overview.Payable.OpenCount,
+		},
+		"receivable": gin.H{
+			"open_count": overview.Receivable.OpenCount,
+		},
+		"sales": gin.H{
+			"draft_count":   overview.Sales.DraftCount,
+			"shipped_count": overview.Sales.ShippedCount,
+			"total_count":   overview.Sales.TotalCount,
+		},
 	}
 }

@@ -3,10 +3,8 @@ package memory
 import (
 	"context"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/nikkofu/erp-claw/internal/platform/iam"
 	platformruntime "github.com/nikkofu/erp-claw/internal/platform/runtime"
@@ -21,9 +19,6 @@ type ControlPlaneStore struct {
 	sessions    map[string]platformruntime.Session
 	tasks       map[string]platformruntime.Task
 	sessionTask map[string][]string
-	timeline    []platformruntime.TimelineEntry
-	evidence    []platformruntime.EvidenceEntry
-	deliveries  map[string]platformruntime.DeliveryRecord
 }
 
 func NewControlPlaneStore() *ControlPlaneStore {
@@ -33,9 +28,6 @@ func NewControlPlaneStore() *ControlPlaneStore {
 		sessions:    make(map[string]platformruntime.Session),
 		tasks:       make(map[string]platformruntime.Task),
 		sessionTask: make(map[string][]string),
-		timeline:    make([]platformruntime.TimelineEntry, 0),
-		evidence:    make([]platformruntime.EvidenceEntry, 0),
-		deliveries:  make(map[string]platformruntime.DeliveryRecord),
 	}
 }
 
@@ -53,10 +45,6 @@ func (s *ControlPlaneStore) SessionRepository() platformruntime.SessionRepositor
 
 func (s *ControlPlaneStore) TaskRepository() platformruntime.TaskRepository {
 	return taskRepository{s}
-}
-
-func (s *ControlPlaneStore) DeliveryRepository() platformruntime.DeliveryRepository {
-	return deliveryRepository{s}
 }
 
 type tenantCatalogRepository struct {
@@ -83,6 +71,32 @@ func (r tenantCatalogRepository) Get(_ context.Context, code string) (tenant.Ten
 	return value, nil
 }
 
+func (r tenantCatalogRepository) List(_ context.Context) ([]tenant.Tenant, error) {
+	r.store.mu.RLock()
+	defer r.store.mu.RUnlock()
+
+	out := make([]tenant.Tenant, 0, len(r.store.tenants))
+	for _, value := range r.store.tenants {
+		out = append(out, value)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].Code < out[j].Code
+	})
+	return out, nil
+}
+
+func (r tenantCatalogRepository) Delete(_ context.Context, code string) error {
+	code = strings.TrimSpace(code)
+	r.store.mu.Lock()
+	defer r.store.mu.Unlock()
+
+	if _, ok := r.store.tenants[code]; !ok {
+		return tenant.ErrTenantNotFound
+	}
+	delete(r.store.tenants, code)
+	return nil
+}
+
 type iamDirectoryRepository struct {
 	store *ControlPlaneStore
 }
@@ -102,6 +116,36 @@ func (r iamDirectoryRepository) Get(_ context.Context, tenantID, actorID string)
 		return iam.Actor{}, iam.ErrActorNotFound
 	}
 	return cloneActor(actor), nil
+}
+
+func (r iamDirectoryRepository) List(_ context.Context, tenantID string) ([]iam.Actor, error) {
+	r.store.mu.RLock()
+	defer r.store.mu.RUnlock()
+
+	prefix := tenantID + "/"
+	out := make([]iam.Actor, 0)
+	for key, actor := range r.store.actors {
+		if !strings.HasPrefix(key, prefix) {
+			continue
+		}
+		out = append(out, cloneActor(actor))
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].ID < out[j].ID
+	})
+	return out, nil
+}
+
+func (r iamDirectoryRepository) Delete(_ context.Context, tenantID, actorID string) error {
+	r.store.mu.Lock()
+	defer r.store.mu.Unlock()
+
+	actorKey := key(tenantID, actorID)
+	if _, ok := r.store.actors[actorKey]; !ok {
+		return iam.ErrActorNotFound
+	}
+	delete(r.store.actors, actorKey)
+	return nil
 }
 
 type sessionRepository struct {
@@ -125,39 +169,22 @@ func (r sessionRepository) Get(_ context.Context, tenantID, sessionID string) (p
 	return cloneSession(session), nil
 }
 
-func (r sessionRepository) List(_ context.Context, query platformruntime.SessionListQuery) (platformruntime.SessionListPage, error) {
+func (r sessionRepository) ListByTenant(_ context.Context, tenantID string) ([]platformruntime.Session, error) {
 	r.store.mu.RLock()
 	defer r.store.mu.RUnlock()
 
-	items := make([]platformruntime.Session, 0)
-	for _, session := range r.store.sessions {
-		if query.TenantID != "" && session.TenantID != query.TenantID {
+	prefix := tenantID + "/"
+	out := make([]platformruntime.Session, 0)
+	for sessionKey, session := range r.store.sessions {
+		if !strings.HasPrefix(sessionKey, prefix) {
 			continue
 		}
-		if query.ActorID != "" && session.ActorID != query.ActorID {
-			continue
-		}
-		if query.Status != "" && session.Status != query.Status {
-			continue
-		}
-		items = append(items, cloneSession(session))
+		out = append(out, cloneSession(session))
 	}
-
-	sort.Slice(items, func(i, j int) bool {
-		if items[i].StartedAt.Equal(items[j].StartedAt) {
-			return items[i].ID < items[j].ID
-		}
-		return items[i].StartedAt.Before(items[j].StartedAt)
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].ID < out[j].ID
 	})
-
-	limit := query.Limit
-	if limit <= 0 || limit > len(items) {
-		limit = len(items)
-	}
-	return platformruntime.SessionListPage{
-		Items: items[:limit],
-		AsOf:  time.Now().UTC(),
-	}, nil
+	return out, nil
 }
 
 type taskRepository struct {
@@ -181,30 +208,6 @@ func (r taskRepository) Save(_ context.Context, task platformruntime.Task) error
 	if !exists {
 		r.store.sessionTask[sessionKey] = append(ids, task.ID)
 	}
-
-	now := time.Now().UTC()
-	entry := platformruntime.TimelineEntry{
-		TenantID:    task.TenantID,
-		SessionID:   task.SessionID,
-		TaskID:      task.ID,
-		EventType:   "runtime.task." + string(task.Status),
-		Status:      string(task.Status),
-		OccurredAt:  now,
-		RequestID:   "req:" + task.ID + ":" + strconv.FormatInt(now.UnixNano(), 10),
-		ResourceRef: "task:" + task.ID,
-	}
-	r.store.timeline = append(r.store.timeline, entry)
-	r.store.evidence = append(r.store.evidence, platformruntime.EvidenceEntry{
-		TenantID:    entry.TenantID,
-		SessionID:   entry.SessionID,
-		TaskID:      entry.TaskID,
-		EventType:   entry.EventType,
-		Action:      entry.Status,
-		RequestID:   entry.RequestID,
-		ResourceRef: entry.ResourceRef,
-		OccurredAt:  entry.OccurredAt,
-	})
-
 	return nil
 }
 
@@ -235,225 +238,22 @@ func (r taskRepository) ListBySession(_ context.Context, tenantID, sessionID str
 	return out, nil
 }
 
-func (r taskRepository) List(_ context.Context, query platformruntime.TaskListQuery) (platformruntime.TaskListPage, error) {
+func (r taskRepository) ListByTenant(_ context.Context, tenantID string) ([]platformruntime.Task, error) {
 	r.store.mu.RLock()
 	defer r.store.mu.RUnlock()
 
-	items := make([]platformruntime.Task, 0)
-	for _, task := range r.store.tasks {
-		if query.TenantID != "" && task.TenantID != query.TenantID {
+	prefix := tenantID + "/"
+	out := make([]platformruntime.Task, 0)
+	for taskKey, task := range r.store.tasks {
+		if !strings.HasPrefix(taskKey, prefix) {
 			continue
 		}
-		if query.SessionID != "" && task.SessionID != query.SessionID {
-			continue
-		}
-		if query.Status != "" && task.Status != query.Status {
-			continue
-		}
-		if query.ActorID != "" {
-			session, ok := r.store.sessions[key(task.TenantID, task.SessionID)]
-			if !ok {
-				continue
-			}
-			if session.ActorID != query.ActorID {
-				continue
-			}
-		}
-		items = append(items, cloneTask(task))
+		out = append(out, cloneTask(task))
 	}
-
-	sort.Slice(items, func(i, j int) bool {
-		if items[i].QueuedAt.Equal(items[j].QueuedAt) {
-			return items[i].ID < items[j].ID
-		}
-		return items[i].QueuedAt.Before(items[j].QueuedAt)
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].ID < out[j].ID
 	})
-
-	start := 0
-	if query.Cursor != "" {
-		parts := strings.Split(query.Cursor, ":")
-		if len(parts) == 2 {
-			if parsed, err := strconv.Atoi(parts[1]); err == nil && parsed > 0 {
-				start = parsed
-			}
-		}
-	}
-	if start > len(items) {
-		start = len(items)
-	}
-
-	limit := query.Limit
-	if limit <= 0 {
-		limit = 20
-	}
-	end := start + limit
-	if end > len(items) {
-		end = len(items)
-	}
-
-	nextCursor := ""
-	if end < len(items) {
-		nextCursor = "idx:" + strconv.Itoa(end)
-	}
-
-	return platformruntime.TaskListPage{
-		Items:      items[start:end],
-		NextCursor: nextCursor,
-		AsOf:       time.Now().UTC(),
-	}, nil
-}
-
-func (r taskRepository) ListTimeline(_ context.Context, tenantID, sessionID, taskID string, limit int, cursor string) (platformruntime.ReadSnapshot[platformruntime.TimelineEntry], error) {
-	r.store.mu.RLock()
-	defer r.store.mu.RUnlock()
-
-	if strings.TrimSpace(sessionID) == "" && strings.TrimSpace(taskID) == "" {
-		return platformruntime.ReadSnapshot[platformruntime.TimelineEntry]{}, platformruntime.ErrTimelineQueryRequired
-	}
-
-	filtered := make([]platformruntime.TimelineEntry, 0, len(r.store.timeline))
-	for _, item := range r.store.timeline {
-		if tenantID != "" && item.TenantID != tenantID {
-			continue
-		}
-		if sessionID != "" && item.SessionID != sessionID {
-			continue
-		}
-		if taskID != "" && item.TaskID != taskID {
-			continue
-		}
-		filtered = append(filtered, item)
-	}
-	return paginateReadSnapshot(filtered, limit, cursor), nil
-}
-
-func (r taskRepository) ListEvidence(_ context.Context, tenantID, action, requestID string, limit int, cursor string) (platformruntime.ReadSnapshot[platformruntime.EvidenceEntry], error) {
-	r.store.mu.RLock()
-	defer r.store.mu.RUnlock()
-
-	if strings.TrimSpace(action) == "" && strings.TrimSpace(requestID) == "" {
-		return platformruntime.ReadSnapshot[platformruntime.EvidenceEntry]{}, platformruntime.ErrEvidenceQueryRequired
-	}
-
-	filtered := make([]platformruntime.EvidenceEntry, 0, len(r.store.evidence))
-	for _, item := range r.store.evidence {
-		if tenantID != "" && item.TenantID != tenantID {
-			continue
-		}
-		if action != "" && item.Action != action {
-			continue
-		}
-		if requestID != "" && item.RequestID != requestID {
-			continue
-		}
-		filtered = append(filtered, item)
-	}
-	return paginateReadSnapshot(filtered, limit, cursor), nil
-}
-
-func paginateReadSnapshot[T any](items []T, limit int, cursor string) platformruntime.ReadSnapshot[T] {
-	start := 0
-	if cursor != "" {
-		parts := strings.Split(cursor, ":")
-		if len(parts) == 2 {
-			if parsed, err := strconv.Atoi(parts[1]); err == nil && parsed > 0 {
-				start = parsed
-			}
-		}
-	}
-	if start > len(items) {
-		start = len(items)
-	}
-
-	if limit <= 0 {
-		limit = 20
-	}
-	end := start + limit
-	if end > len(items) {
-		end = len(items)
-	}
-
-	nextCursor := ""
-	if end < len(items) {
-		nextCursor = "idx:" + strconv.Itoa(end)
-	}
-
-	page := make([]T, end-start)
-	copy(page, items[start:end])
-	return platformruntime.ReadSnapshot[T]{
-		Items:      page,
-		NextCursor: nextCursor,
-		AsOf:       time.Now().UTC(),
-	}
-}
-
-type deliveryRepository struct {
-	store *ControlPlaneStore
-}
-
-func (r deliveryRepository) Save(_ context.Context, record platformruntime.DeliveryRecord) error {
-	r.store.mu.Lock()
-	defer r.store.mu.Unlock()
-	r.store.deliveries[deliveryKey(record.TenantID, record.EventType, record.SessionID, record.TaskID)] = record
-	return nil
-}
-
-func (r deliveryRepository) Get(_ context.Context, tenantID, eventType, sessionID, taskID string) (platformruntime.DeliveryRecord, bool, error) {
-	r.store.mu.RLock()
-	defer r.store.mu.RUnlock()
-	record, ok := r.store.deliveries[deliveryKey(tenantID, eventType, sessionID, taskID)]
-	if !ok {
-		return platformruntime.DeliveryRecord{}, false, nil
-	}
-	return record, true, nil
-}
-
-func (r deliveryRepository) List(_ context.Context, query platformruntime.DeliveryListQuery) (platformruntime.DeliveryListPage, error) {
-	r.store.mu.RLock()
-	defer r.store.mu.RUnlock()
-
-	items := make([]platformruntime.DeliveryRecord, 0, len(r.store.deliveries))
-	for _, record := range r.store.deliveries {
-		if query.TenantID != "" && record.TenantID != query.TenantID {
-			continue
-		}
-		if query.ActorID != "" {
-			session, ok := r.store.sessions[key(record.TenantID, record.SessionID)]
-			if !ok {
-				continue
-			}
-			if session.ActorID != query.ActorID {
-				continue
-			}
-		}
-		if query.Status != "" && record.Status != query.Status {
-			continue
-		}
-		if query.SessionID != "" && record.SessionID != query.SessionID {
-			continue
-		}
-		if query.TaskID != "" && record.TaskID != query.TaskID {
-			continue
-		}
-		items = append(items, record)
-	}
-	sort.Slice(items, func(i, j int) bool {
-		if items[i].UpdatedAt.Equal(items[j].UpdatedAt) {
-			return deliveryKey(items[i].TenantID, items[i].EventType, items[i].SessionID, items[i].TaskID) <
-				deliveryKey(items[j].TenantID, items[j].EventType, items[j].SessionID, items[j].TaskID)
-		}
-		return items[i].UpdatedAt.Before(items[j].UpdatedAt)
-	})
-
-	limit := query.Limit
-	if limit <= 0 || limit > len(items) {
-		limit = len(items)
-	}
-	return platformruntime.DeliveryListPage{Items: items[:limit], AsOf: time.Now().UTC()}, nil
-}
-
-func deliveryKey(tenantID, eventType, sessionID, taskID string) string {
-	return key(tenantID, eventType+":"+sessionID+":"+taskID)
+	return out, nil
 }
 
 func cloneActor(actor iam.Actor) iam.Actor {
@@ -479,6 +279,70 @@ func cloneMap(source map[string]any) map[string]any {
 	out := make(map[string]any, len(source))
 	for key, value := range source {
 		out[key] = value
+	}
+	return out
+}
+
+type controlPlaneSnapshot struct {
+	tenants     map[string]tenant.Tenant
+	actors      map[string]iam.Actor
+	sessions    map[string]platformruntime.Session
+	tasks       map[string]platformruntime.Task
+	sessionTask map[string][]string
+}
+
+func (s *ControlPlaneStore) snapshot() controlPlaneSnapshot {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	return controlPlaneSnapshot{
+		tenants:     cloneTenantMap(s.tenants),
+		actors:      cloneActorMap(s.actors),
+		sessions:    cloneSessionMap(s.sessions),
+		tasks:       cloneTaskMap(s.tasks),
+		sessionTask: cloneStringSliceMap(s.sessionTask),
+	}
+}
+
+func (s *ControlPlaneStore) restore(snapshot controlPlaneSnapshot) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.tenants = snapshot.tenants
+	s.actors = snapshot.actors
+	s.sessions = snapshot.sessions
+	s.tasks = snapshot.tasks
+	s.sessionTask = snapshot.sessionTask
+}
+
+func cloneTenantMap(source map[string]tenant.Tenant) map[string]tenant.Tenant {
+	out := make(map[string]tenant.Tenant, len(source))
+	for k, v := range source {
+		out[k] = v
+	}
+	return out
+}
+
+func cloneActorMap(source map[string]iam.Actor) map[string]iam.Actor {
+	out := make(map[string]iam.Actor, len(source))
+	for k, v := range source {
+		out[k] = cloneActor(v)
+	}
+	return out
+}
+
+func cloneSessionMap(source map[string]platformruntime.Session) map[string]platformruntime.Session {
+	out := make(map[string]platformruntime.Session, len(source))
+	for k, v := range source {
+		out[k] = cloneSession(v)
+	}
+	return out
+}
+
+func cloneTaskMap(source map[string]platformruntime.Task) map[string]platformruntime.Task {
+	out := make(map[string]platformruntime.Task, len(source))
+	for k, v := range source {
+		out[k] = cloneTask(v)
 	}
 	return out
 }

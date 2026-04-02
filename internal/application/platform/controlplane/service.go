@@ -11,17 +11,20 @@ import (
 	"github.com/nikkofu/erp-claw/internal/application/shared"
 	"github.com/nikkofu/erp-claw/internal/platform/audit"
 	"github.com/nikkofu/erp-claw/internal/platform/iam"
+	"github.com/nikkofu/erp-claw/internal/platform/policy"
 	platformruntime "github.com/nikkofu/erp-claw/internal/platform/runtime"
 	"github.com/nikkofu/erp-claw/internal/platform/tenant"
 )
+
+var ErrPolicyRuleStoreUnavailable = errors.New("policy rule store is unavailable")
 
 type ServiceDeps struct {
 	TenantCatalog   tenant.Catalog
 	IAMDirectory    iam.Directory
 	Sessions        platformruntime.SessionRepository
 	Tasks           platformruntime.TaskRepository
-	Deliveries      platformruntime.DeliveryRepository
 	AuditReader     audit.Reader
+	PolicyRules     policy.RuleStore
 	WorkspaceEvents platformruntime.WorkspaceEventSink
 	Pipeline        *shared.Pipeline
 }
@@ -31,15 +34,13 @@ type Service struct {
 	iamDirectory    iam.Directory
 	sessions        platformruntime.SessionRepository
 	tasks           platformruntime.TaskRepository
-	deliveries      platformruntime.DeliveryRepository
 	auditReader     audit.Reader
+	policyRules     policy.RuleStore
 	workspaceEvents platformruntime.WorkspaceEventSink
 	pipeline        *shared.Pipeline
 }
 
 var ids atomic.Uint64
-
-var ErrGovernanceCommandNotImplemented = errors.New("governance command not implemented")
 
 func NewService(deps ServiceDeps) *Service {
 	if deps.Pipeline == nil {
@@ -50,8 +51,8 @@ func NewService(deps ServiceDeps) *Service {
 		iamDirectory:    deps.IAMDirectory,
 		sessions:        deps.Sessions,
 		tasks:           deps.Tasks,
-		deliveries:      deps.Deliveries,
 		auditReader:     deps.AuditReader,
+		policyRules:     deps.PolicyRules,
 		workspaceEvents: deps.WorkspaceEvents,
 		pipeline:        deps.Pipeline,
 	}
@@ -83,6 +84,70 @@ func (s *Service) RegisterTenant(ctx context.Context, input RegisterTenantInput)
 		return nil
 	})
 	return created, err
+}
+
+type GetTenantInput struct {
+	OperatorTenantID string
+	OperatorActorID  string
+	Code             string
+}
+
+func (s *Service) GetTenant(ctx context.Context, input GetTenantInput) (tenant.Tenant, error) {
+	var value tenant.Tenant
+	err := s.pipeline.Execute(ctx, shared.Command{
+		Name:     "controlplane.tenants.get",
+		TenantID: input.OperatorTenantID,
+		ActorID:  input.OperatorActorID,
+		Payload:  input,
+	}, func(txCtx context.Context, _ shared.Command) error {
+		current, err := s.tenantCatalog.Get(txCtx, strings.TrimSpace(input.Code))
+		if err != nil {
+			return err
+		}
+		value = current
+		return nil
+	})
+	return value, err
+}
+
+type ListTenantsInput struct {
+	OperatorTenantID string
+	OperatorActorID  string
+}
+
+func (s *Service) ListTenants(ctx context.Context, input ListTenantsInput) ([]tenant.Tenant, error) {
+	var values []tenant.Tenant
+	err := s.pipeline.Execute(ctx, shared.Command{
+		Name:     "controlplane.tenants.list",
+		TenantID: input.OperatorTenantID,
+		ActorID:  input.OperatorActorID,
+		Payload:  input,
+	}, func(txCtx context.Context, _ shared.Command) error {
+		listed, err := s.tenantCatalog.List(txCtx)
+		if err != nil {
+			return err
+		}
+		values = append([]tenant.Tenant(nil), listed...)
+		return nil
+	})
+	return values, err
+}
+
+type DeleteTenantInput struct {
+	OperatorTenantID string
+	OperatorActorID  string
+	Code             string
+}
+
+func (s *Service) DeleteTenant(ctx context.Context, input DeleteTenantInput) error {
+	return s.pipeline.Execute(ctx, shared.Command{
+		Name:     "controlplane.tenants.delete",
+		TenantID: input.OperatorTenantID,
+		ActorID:  input.OperatorActorID,
+		Payload:  input,
+	}, func(txCtx context.Context, _ shared.Command) error {
+		return s.tenantCatalog.Delete(txCtx, strings.TrimSpace(input.Code))
+	})
 }
 
 type UpsertActorInput struct {
@@ -118,6 +183,115 @@ func (s *Service) UpsertActor(ctx context.Context, input UpsertActorInput) (iam.
 		return nil
 	})
 	return actor, err
+}
+
+type GetActorInput struct {
+	OperatorTenantID string
+	OperatorActorID  string
+	TenantID         string
+	ActorID          string
+}
+
+func (s *Service) GetActor(ctx context.Context, input GetActorInput) (iam.Actor, error) {
+	var actor iam.Actor
+	err := s.pipeline.Execute(ctx, shared.Command{
+		Name:     "controlplane.actors.get",
+		TenantID: input.OperatorTenantID,
+		ActorID:  input.OperatorActorID,
+		Payload:  input,
+	}, func(txCtx context.Context, _ shared.Command) error {
+		targetTenantID := strings.TrimSpace(input.TenantID)
+		if targetTenantID == "" {
+			targetTenantID = strings.TrimSpace(input.OperatorTenantID)
+		}
+		current, err := s.iamDirectory.Get(txCtx, targetTenantID, strings.TrimSpace(input.ActorID))
+		if err != nil {
+			return err
+		}
+		actor = current
+		return nil
+	})
+	return actor, err
+}
+
+type ListActorsInput struct {
+	OperatorTenantID string
+	OperatorActorID  string
+	TenantID         string
+	Role             string
+	DepartmentID     string
+	Offset           int
+	Limit            int
+}
+
+func (s *Service) ListActors(ctx context.Context, input ListActorsInput) ([]iam.Actor, error) {
+	var actors []iam.Actor
+	err := s.pipeline.Execute(ctx, shared.Command{
+		Name:     "controlplane.actors.list",
+		TenantID: input.OperatorTenantID,
+		ActorID:  input.OperatorActorID,
+		Payload:  input,
+	}, func(txCtx context.Context, _ shared.Command) error {
+		targetTenantID := strings.TrimSpace(input.TenantID)
+		if targetTenantID == "" {
+			targetTenantID = strings.TrimSpace(input.OperatorTenantID)
+		}
+		listed, err := s.iamDirectory.List(txCtx, targetTenantID)
+		if err != nil {
+			return err
+		}
+		targetRole := strings.TrimSpace(input.Role)
+		targetDepartmentID := strings.TrimSpace(input.DepartmentID)
+		filtered := make([]iam.Actor, 0, len(listed))
+		for _, actor := range listed {
+			if targetRole != "" && !hasRole(actor.Roles, targetRole) {
+				continue
+			}
+			if targetDepartmentID != "" && strings.TrimSpace(actor.DepartmentID) != targetDepartmentID {
+				continue
+			}
+			filtered = append(filtered, actor)
+		}
+
+		start := input.Offset
+		if start < 0 {
+			start = 0
+		}
+		if start >= len(filtered) {
+			actors = []iam.Actor{}
+			return nil
+		}
+
+		end := len(filtered)
+		if input.Limit > 0 && start+input.Limit < end {
+			end = start + input.Limit
+		}
+		actors = append([]iam.Actor(nil), filtered[start:end]...)
+		return nil
+	})
+	return actors, err
+}
+
+type DeleteActorInput struct {
+	OperatorTenantID string
+	OperatorActorID  string
+	TenantID         string
+	ActorID          string
+}
+
+func (s *Service) DeleteActor(ctx context.Context, input DeleteActorInput) error {
+	return s.pipeline.Execute(ctx, shared.Command{
+		Name:     "controlplane.actors.delete",
+		TenantID: input.OperatorTenantID,
+		ActorID:  input.OperatorActorID,
+		Payload:  input,
+	}, func(txCtx context.Context, _ shared.Command) error {
+		targetTenantID := strings.TrimSpace(input.TenantID)
+		if targetTenantID == "" {
+			targetTenantID = strings.TrimSpace(input.OperatorTenantID)
+		}
+		return s.iamDirectory.Delete(txCtx, targetTenantID, strings.TrimSpace(input.ActorID))
+	})
 }
 
 type OpenSessionInput struct {
@@ -169,6 +343,56 @@ func (s *Service) OpenSession(ctx context.Context, input OpenSessionInput) (plat
 	return session, err
 }
 
+type CloseSessionInput struct {
+	TenantID  string
+	ActorID   string
+	SessionID string
+}
+
+func (s *Service) CloseSession(ctx context.Context, input CloseSessionInput) (platformruntime.Session, error) {
+	var session platformruntime.Session
+	err := s.pipeline.Execute(ctx, shared.Command{
+		Name:     "runtime.sessions.close",
+		TenantID: input.TenantID,
+		ActorID:  input.ActorID,
+		Payload:  input,
+	}, func(txCtx context.Context, _ shared.Command) error {
+		current, err := s.sessions.Get(txCtx, strings.TrimSpace(input.TenantID), strings.TrimSpace(input.SessionID))
+		if err != nil {
+			return err
+		}
+		tasks, err := s.tasks.ListBySession(txCtx, current.TenantID, current.ID)
+		if err != nil {
+			return err
+		}
+		for _, task := range tasks {
+			if task.Status == platformruntime.TaskStatusPending || task.Status == platformruntime.TaskStatusRunning {
+				return platformruntime.ErrInvalidSessionTransition
+			}
+		}
+		if err := current.Close(time.Now().UTC()); err != nil {
+			return err
+		}
+		if err := s.sessions.Save(txCtx, current); err != nil {
+			return err
+		}
+		if err := s.emitWorkspaceEvent(platformruntime.WorkspaceEvent{
+			Type:      "runtime.session.closed",
+			TenantID:  current.TenantID,
+			SessionID: current.ID,
+			Payload: map[string]any{
+				"actor_id": current.ActorID,
+				"status":   string(current.Status),
+			},
+		}); err != nil {
+			return err
+		}
+		session = current
+		return nil
+	})
+	return session, err
+}
+
 type EnqueueTaskInput struct {
 	TenantID  string
 	ActorID   string
@@ -202,8 +426,12 @@ func (s *Service) EnqueueTask(ctx context.Context, input EnqueueTaskInput) (plat
 			return err
 		}
 
-		if _, err := s.sessions.Get(txCtx, created.TenantID, created.SessionID); err != nil {
+		session, err := s.sessions.Get(txCtx, created.TenantID, created.SessionID)
+		if err != nil {
 			return err
+		}
+		if session.Status != platformruntime.SessionStatusOpen {
+			return platformruntime.ErrInvalidSessionTransition
 		}
 		if err := s.tasks.Save(txCtx, created); err != nil {
 			return err
@@ -226,6 +454,59 @@ func (s *Service) EnqueueTask(ctx context.Context, input EnqueueTaskInput) (plat
 	return task, err
 }
 
+type ListSessionsInput struct {
+	TenantID     string
+	ActorID      string
+	QueryActorID string
+	Status       platformruntime.SessionStatus
+	Offset       int
+	Limit        int
+}
+
+func (s *Service) ListSessions(ctx context.Context, input ListSessionsInput) ([]platformruntime.Session, error) {
+	var sessions []platformruntime.Session
+	err := s.pipeline.Execute(ctx, shared.Command{
+		Name:     "runtime.sessions.list",
+		TenantID: input.TenantID,
+		ActorID:  input.ActorID,
+		Payload:  input,
+	}, func(txCtx context.Context, _ shared.Command) error {
+		current, err := s.sessions.ListByTenant(txCtx, strings.TrimSpace(input.TenantID))
+		if err != nil {
+			return err
+		}
+		targetStatus := input.Status
+		targetSessionActorID := strings.TrimSpace(input.QueryActorID)
+		filtered := make([]platformruntime.Session, 0, len(current))
+		for _, session := range current {
+			if targetSessionActorID != "" && session.ActorID != targetSessionActorID {
+				continue
+			}
+			if targetStatus != "" && session.Status != targetStatus {
+				continue
+			}
+			filtered = append(filtered, session)
+		}
+
+		start := input.Offset
+		if start < 0 {
+			start = 0
+		}
+		if start >= len(filtered) {
+			sessions = []platformruntime.Session{}
+			return nil
+		}
+
+		end := len(filtered)
+		if input.Limit > 0 && start+input.Limit < end {
+			end = start + input.Limit
+		}
+		sessions = append([]platformruntime.Session(nil), filtered[start:end]...)
+		return nil
+	})
+	return sessions, err
+}
+
 type AdvanceTaskInput struct {
 	TenantID string
 	ActorID  string
@@ -235,72 +516,33 @@ type AdvanceTaskInput struct {
 }
 
 func (s *Service) StartTask(ctx context.Context, input AdvanceTaskInput) (platformruntime.Task, error) {
-	input, _ = normalizeAdvanceTaskInput(ctx, input)
 	return s.mutateTask(ctx, "runtime.tasks.start", "runtime.task.running", input, func(task *platformruntime.Task) error {
 		return task.Start(time.Now().UTC())
 	})
 }
 
 func (s *Service) CompleteTask(ctx context.Context, input AdvanceTaskInput) (platformruntime.Task, error) {
-	input, _ = normalizeAdvanceTaskInput(ctx, input)
 	return s.mutateTask(ctx, "runtime.tasks.complete", "runtime.task.succeeded", input, func(task *platformruntime.Task) error {
 		return task.Complete(input.Output, time.Now().UTC())
 	})
 }
 
 func (s *Service) FailTask(ctx context.Context, input AdvanceTaskInput) (platformruntime.Task, error) {
-	input, _ = normalizeAdvanceTaskInput(ctx, input)
 	return s.mutateTask(ctx, "runtime.tasks.fail", "runtime.task.failed", input, func(task *platformruntime.Task) error {
 		return task.Fail(input.Reason, time.Now().UTC())
 	})
 }
 
-func (s *Service) PauseTask(ctx context.Context, input AdvanceTaskInput) (platformruntime.Task, error) {
-	input, actorProvided := normalizeAdvanceTaskInput(ctx, input)
-	if !actorProvided {
-		input.ActorID = ""
-	}
-	err := s.pipeline.Execute(ctx, shared.Command{
-		Name:     "runtime.tasks.pause",
-		TenantID: input.TenantID,
-		ActorID:  input.ActorID,
-		Payload:  governanceAuditPayload(ctx, s.tasks, "runtime.tasks.pause", input),
-	}, func(context.Context, shared.Command) error {
-		return ErrGovernanceCommandNotImplemented
+func (s *Service) CancelTask(ctx context.Context, input AdvanceTaskInput) (platformruntime.Task, error) {
+	return s.mutateTask(ctx, "runtime.tasks.cancel", "runtime.task.canceled", input, func(task *platformruntime.Task) error {
+		return task.Cancel(input.Reason, time.Now().UTC())
 	})
-	return platformruntime.Task{}, err
 }
 
-func (s *Service) ResumeTask(ctx context.Context, input AdvanceTaskInput) (platformruntime.Task, error) {
-	input, actorProvided := normalizeAdvanceTaskInput(ctx, input)
-	if !actorProvided {
-		input.ActorID = ""
-	}
-	err := s.pipeline.Execute(ctx, shared.Command{
-		Name:     "runtime.tasks.resume",
-		TenantID: input.TenantID,
-		ActorID:  input.ActorID,
-		Payload:  governanceAuditPayload(ctx, s.tasks, "runtime.tasks.resume", input),
-	}, func(context.Context, shared.Command) error {
-		return ErrGovernanceCommandNotImplemented
+func (s *Service) RetryTask(ctx context.Context, input AdvanceTaskInput) (platformruntime.Task, error) {
+	return s.mutateTask(ctx, "runtime.tasks.retry", "runtime.task.requeued", input, func(task *platformruntime.Task) error {
+		return task.Retry(time.Now().UTC())
 	})
-	return platformruntime.Task{}, err
-}
-
-func (s *Service) HandoffTask(ctx context.Context, input AdvanceTaskInput) (platformruntime.Task, error) {
-	input, actorProvided := normalizeAdvanceTaskInput(ctx, input)
-	if !actorProvided {
-		input.ActorID = ""
-	}
-	err := s.pipeline.Execute(ctx, shared.Command{
-		Name:     "runtime.tasks.handoff",
-		TenantID: input.TenantID,
-		ActorID:  input.ActorID,
-		Payload:  governanceAuditPayload(ctx, s.tasks, "runtime.tasks.handoff", input),
-	}, func(context.Context, shared.Command) error {
-		return ErrGovernanceCommandNotImplemented
-	})
-	return platformruntime.Task{}, err
 }
 
 type GetSessionInput struct {
@@ -320,9 +562,6 @@ func (s *Service) GetSession(ctx context.Context, input GetSessionInput) (platfo
 		current, err := s.sessions.Get(txCtx, input.TenantID, input.SessionID)
 		if err != nil {
 			return err
-		}
-		if input.ActorID != "" && current.ActorID != input.ActorID {
-			return platformruntime.ErrSessionNotFound
 		}
 		session = current
 		return nil
@@ -348,15 +587,6 @@ func (s *Service) GetTask(ctx context.Context, input GetTaskInput) (platformrunt
 		if err != nil {
 			return err
 		}
-		if input.ActorID != "" {
-			session, err := s.sessions.Get(txCtx, current.TenantID, current.SessionID)
-			if err != nil {
-				return err
-			}
-			if session.ActorID != input.ActorID {
-				return platformruntime.ErrTaskNotFound
-			}
-		}
 		task = current
 		return nil
 	})
@@ -367,6 +597,9 @@ type ListSessionTasksInput struct {
 	TenantID  string
 	ActorID   string
 	SessionID string
+	Status    platformruntime.TaskStatus
+	Offset    int
+	Limit     int
 }
 
 func (s *Service) ListSessionTasks(ctx context.Context, input ListSessionTasksInput) ([]platformruntime.Task, error) {
@@ -377,198 +610,246 @@ func (s *Service) ListSessionTasks(ctx context.Context, input ListSessionTasksIn
 		ActorID:  input.ActorID,
 		Payload:  input,
 	}, func(txCtx context.Context, _ shared.Command) error {
-		session, err := s.sessions.Get(txCtx, input.TenantID, input.SessionID)
-		if err != nil {
-			return err
-		}
-		if input.ActorID != "" && session.ActorID != input.ActorID {
-			return platformruntime.ErrSessionNotFound
-		}
 		current, err := s.tasks.ListBySession(txCtx, input.TenantID, input.SessionID)
 		if err != nil {
 			return err
 		}
-		tasks = current
+		targetStatus := input.Status
+		filtered := make([]platformruntime.Task, 0, len(current))
+		for _, task := range current {
+			if targetStatus != "" && task.Status != targetStatus {
+				continue
+			}
+			filtered = append(filtered, task)
+		}
+
+		start := input.Offset
+		if start < 0 {
+			start = 0
+		}
+		if start >= len(filtered) {
+			tasks = []platformruntime.Task{}
+			return nil
+		}
+
+		end := len(filtered)
+		if input.Limit > 0 && start+input.Limit < end {
+			end = start + input.Limit
+		}
+		tasks = append([]platformruntime.Task(nil), filtered[start:end]...)
 		return nil
 	})
 	return tasks, err
 }
 
 type ListTasksInput struct {
-	TenantID  string
-	ActorID   string
-	SessionID string
-	Status    platformruntime.TaskStatus
-	Limit     int
-	Cursor    string
+	TenantID      string
+	ActorID       string
+	SessionID     string
+	QueryActorID  string
+	Status        platformruntime.TaskStatus
+	Offset        int
+	Limit         int
 }
 
-func (s *Service) ListTasks(ctx context.Context, input ListTasksInput) (platformruntime.TaskListPage, error) {
-	var page platformruntime.TaskListPage
+func (s *Service) ListTasks(ctx context.Context, input ListTasksInput) ([]platformruntime.Task, error) {
+	var tasks []platformruntime.Task
 	err := s.pipeline.Execute(ctx, shared.Command{
 		Name:     "runtime.tasks.list",
 		TenantID: input.TenantID,
 		ActorID:  input.ActorID,
 		Payload:  input,
 	}, func(txCtx context.Context, _ shared.Command) error {
-		listed, err := s.tasks.List(txCtx, platformruntime.TaskListQuery{
-			TenantID:  strings.TrimSpace(input.TenantID),
-			ActorID:   strings.TrimSpace(input.ActorID),
-			SessionID: strings.TrimSpace(input.SessionID),
-			Status:    input.Status,
-			Limit:     input.Limit,
-			Cursor:    strings.TrimSpace(input.Cursor),
-		})
+		current, err := s.tasks.ListByTenant(txCtx, strings.TrimSpace(input.TenantID))
 		if err != nil {
 			return err
 		}
-		page = listed
-		return nil
-	})
-	return page, err
-}
 
-type ListSessionsInput struct {
-	TenantID string
-	ActorID  string
-	Status   platformruntime.SessionStatus
-	Limit    int
-}
-
-func (s *Service) ListSessions(ctx context.Context, input ListSessionsInput) (platformruntime.SessionListPage, error) {
-	var page platformruntime.SessionListPage
-	err := s.pipeline.Execute(ctx, shared.Command{
-		Name:     "runtime.sessions.list",
-		TenantID: input.TenantID,
-		ActorID:  input.ActorID,
-		Payload:  input,
-	}, func(txCtx context.Context, _ shared.Command) error {
-		listed, err := s.sessions.List(txCtx, platformruntime.SessionListQuery{
-			TenantID: strings.TrimSpace(input.TenantID),
-			ActorID:  strings.TrimSpace(input.ActorID),
-			Status:   input.Status,
-			Limit:    input.Limit,
-		})
-		if err != nil {
-			return err
+		targetSessionID := strings.TrimSpace(input.SessionID)
+		targetQueryActorID := strings.TrimSpace(input.QueryActorID)
+		targetStatus := input.Status
+		filtered := make([]platformruntime.Task, 0, len(current))
+		for _, task := range current {
+			if targetSessionID != "" && task.SessionID != targetSessionID {
+				continue
+			}
+			if targetQueryActorID != "" {
+				session, err := s.sessions.Get(txCtx, task.TenantID, task.SessionID)
+				if err != nil {
+					return err
+				}
+				if session.ActorID != targetQueryActorID {
+					continue
+				}
+			}
+			if targetStatus != "" && task.Status != targetStatus {
+				continue
+			}
+			filtered = append(filtered, task)
 		}
-		page = listed
-		return nil
-	})
-	return page, err
-}
 
-type ListTimelineInput struct {
-	TenantID  string
-	ActorID   string
-	SessionID string
-	TaskID    string
-	Limit     int
-	Cursor    string
-}
-
-func (s *Service) ListTimeline(ctx context.Context, input ListTimelineInput) (platformruntime.ReadSnapshot[platformruntime.TimelineEntry], error) {
-	var page platformruntime.ReadSnapshot[platformruntime.TimelineEntry]
-	err := s.pipeline.Execute(ctx, shared.Command{
-		Name:     "runtime.timeline.list",
-		TenantID: input.TenantID,
-		ActorID:  input.ActorID,
-		Payload:  input,
-	}, func(txCtx context.Context, _ shared.Command) error {
-		listed, err := s.tasks.ListTimeline(
-			txCtx,
-			strings.TrimSpace(input.TenantID),
-			strings.TrimSpace(input.SessionID),
-			strings.TrimSpace(input.TaskID),
-			input.Limit,
-			strings.TrimSpace(input.Cursor),
-		)
-		if err != nil {
-			return err
+		start := input.Offset
+		if start < 0 {
+			start = 0
 		}
-		page = listed
-		return nil
-	})
-	return page, err
-}
-
-type ListEvidenceInput struct {
-	TenantID  string
-	ActorID   string
-	Action    string
-	RequestID string
-	Limit     int
-	Cursor    string
-}
-
-func (s *Service) ListEvidence(ctx context.Context, input ListEvidenceInput) (platformruntime.ReadSnapshot[platformruntime.EvidenceEntry], error) {
-	var page platformruntime.ReadSnapshot[platformruntime.EvidenceEntry]
-	err := s.pipeline.Execute(ctx, shared.Command{
-		Name:     "runtime.evidence.list",
-		TenantID: input.TenantID,
-		ActorID:  input.ActorID,
-		Payload:  input,
-	}, func(txCtx context.Context, _ shared.Command) error {
-		listed, err := s.tasks.ListEvidence(
-			txCtx,
-			strings.TrimSpace(input.TenantID),
-			strings.TrimSpace(input.Action),
-			strings.TrimSpace(input.RequestID),
-			input.Limit,
-			strings.TrimSpace(input.Cursor),
-		)
-		if err != nil {
-			return err
-		}
-		page = listed
-		return nil
-	})
-	return page, err
-}
-
-type ListDeliveriesInput struct {
-	TenantID  string
-	ActorID   string
-	Status    platformruntime.DeliveryStatus
-	SessionID string
-	TaskID    string
-	Limit     int
-}
-
-func (s *Service) ListDeliveries(ctx context.Context, input ListDeliveriesInput) (platformruntime.DeliveryListPage, error) {
-	var page platformruntime.DeliveryListPage
-	err := s.pipeline.Execute(ctx, shared.Command{
-		Name:     "runtime.deliveries.list",
-		TenantID: input.TenantID,
-		ActorID:  input.ActorID,
-		Payload:  input,
-	}, func(txCtx context.Context, _ shared.Command) error {
-		if s.deliveries == nil {
-			page = platformruntime.DeliveryListPage{Items: []platformruntime.DeliveryRecord{}, AsOf: time.Now().UTC()}
+		if start >= len(filtered) {
+			tasks = []platformruntime.Task{}
 			return nil
 		}
-		listed, err := s.deliveries.List(txCtx, platformruntime.DeliveryListQuery{
-			TenantID:  strings.TrimSpace(input.TenantID),
-			ActorID:   strings.TrimSpace(input.ActorID),
-			Status:    input.Status,
-			SessionID: strings.TrimSpace(input.SessionID),
-			TaskID:    strings.TrimSpace(input.TaskID),
-			Limit:     input.Limit,
-		})
+
+		end := len(filtered)
+		if input.Limit > 0 && start+input.Limit < end {
+			end = start + input.Limit
+		}
+		tasks = append([]platformruntime.Task(nil), filtered[start:end]...)
+		return nil
+	})
+	return tasks, err
+}
+
+type UpsertPolicyRuleInput struct {
+	OperatorTenantID string
+	OperatorActorID  string
+	TenantID         string
+	CommandPrefix    string
+	AnyOfRoles       []string
+}
+
+func (s *Service) UpsertPolicyRule(ctx context.Context, input UpsertPolicyRuleInput) (policy.Rule, error) {
+	if s.policyRules == nil {
+		return policy.Rule{}, ErrPolicyRuleStoreUnavailable
+	}
+
+	var rule policy.Rule
+	err := s.pipeline.Execute(ctx, shared.Command{
+		Name:     "controlplane.policy_rules.upsert",
+		TenantID: input.OperatorTenantID,
+		ActorID:  input.OperatorActorID,
+		Payload:  input,
+	}, func(txCtx context.Context, _ shared.Command) error {
+		targetTenantID := strings.TrimSpace(input.TenantID)
+		if targetTenantID == "" {
+			targetTenantID = strings.TrimSpace(input.OperatorTenantID)
+		}
+
+		rule = policy.Rule{
+			CommandPrefix: strings.TrimSpace(input.CommandPrefix),
+			AnyOfRoles:    append([]string(nil), input.AnyOfRoles...),
+		}
+		if err := s.policyRules.Upsert(txCtx, targetTenantID, rule); err != nil {
+			return err
+		}
+
+		listed, err := s.policyRules.List(txCtx, targetTenantID)
 		if err != nil {
 			return err
 		}
-		page = listed
+		for _, candidate := range listed {
+			if candidate.CommandPrefix == rule.CommandPrefix {
+				rule = candidate
+				break
+			}
+		}
 		return nil
 	})
-	return page, err
+	return rule, err
+}
+
+type ListPolicyRulesInput struct {
+	OperatorTenantID string
+	OperatorActorID  string
+	TenantID         string
+	CommandPrefix    string
+	Offset           int
+	Limit            int
+}
+
+func (s *Service) ListPolicyRules(ctx context.Context, input ListPolicyRulesInput) ([]policy.Rule, error) {
+	if s.policyRules == nil {
+		return nil, ErrPolicyRuleStoreUnavailable
+	}
+
+	var rules []policy.Rule
+	err := s.pipeline.Execute(ctx, shared.Command{
+		Name:     "controlplane.policy_rules.list",
+		TenantID: input.OperatorTenantID,
+		ActorID:  input.OperatorActorID,
+		Payload:  input,
+	}, func(txCtx context.Context, _ shared.Command) error {
+		targetTenantID := strings.TrimSpace(input.TenantID)
+		if targetTenantID == "" {
+			targetTenantID = strings.TrimSpace(input.OperatorTenantID)
+		}
+
+		listed, err := s.policyRules.List(txCtx, targetTenantID)
+		if err != nil {
+			return err
+		}
+
+		targetPrefix := strings.TrimSpace(input.CommandPrefix)
+		filtered := make([]policy.Rule, 0, len(listed))
+		for _, rule := range listed {
+			if targetPrefix != "" && !strings.HasPrefix(rule.CommandPrefix, targetPrefix) {
+				continue
+			}
+			filtered = append(filtered, rule)
+		}
+
+		start := input.Offset
+		if start < 0 {
+			start = 0
+		}
+		if start >= len(filtered) {
+			rules = []policy.Rule{}
+			return nil
+		}
+
+		end := len(filtered)
+		if input.Limit > 0 && start+input.Limit < end {
+			end = start + input.Limit
+		}
+		rules = append([]policy.Rule(nil), filtered[start:end]...)
+		return nil
+	})
+	return rules, err
+}
+
+type DeletePolicyRuleInput struct {
+	OperatorTenantID string
+	OperatorActorID  string
+	TenantID         string
+	CommandPrefix    string
+}
+
+func (s *Service) DeletePolicyRule(ctx context.Context, input DeletePolicyRuleInput) error {
+	if s.policyRules == nil {
+		return ErrPolicyRuleStoreUnavailable
+	}
+
+	return s.pipeline.Execute(ctx, shared.Command{
+		Name:     "controlplane.policy_rules.delete",
+		TenantID: input.OperatorTenantID,
+		ActorID:  input.OperatorActorID,
+		Payload:  input,
+	}, func(txCtx context.Context, _ shared.Command) error {
+		targetTenantID := strings.TrimSpace(input.TenantID)
+		if targetTenantID == "" {
+			targetTenantID = strings.TrimSpace(input.OperatorTenantID)
+		}
+		return s.policyRules.Delete(txCtx, targetTenantID, strings.TrimSpace(input.CommandPrefix))
+	})
 }
 
 type ListAuditInput struct {
-	TenantID    string
-	ActorID     string
-	CommandName string
-	Limit       int
+	TenantID      string
+	ActorID       string
+	CommandName   string
+	CommandPrefix string
+	QueryActorID  string
+	QueryDecision policy.Decision
+	QueryOutcome  string
+	Offset        int
+	Limit         int
 }
 
 func (s *Service) ListAudit(ctx context.Context, input ListAuditInput) ([]audit.Record, error) {
@@ -585,7 +866,12 @@ func (s *Service) ListAudit(ctx context.Context, input ListAuditInput) ([]audit.
 	}, func(txCtx context.Context, _ shared.Command) error {
 		listed, err := s.auditReader.List(txCtx, audit.Query{
 			TenantID:    strings.TrimSpace(input.TenantID),
+			ActorID:     strings.TrimSpace(input.QueryActorID),
+			Decision:    input.QueryDecision,
+			Outcome:     strings.TrimSpace(input.QueryOutcome),
 			CommandName: strings.TrimSpace(input.CommandName),
+			CommandPrefix: strings.TrimSpace(input.CommandPrefix),
+			Offset:      input.Offset,
 			Limit:       input.Limit,
 		})
 		if err != nil {
@@ -643,96 +929,7 @@ func (s *Service) emitWorkspaceEvent(evt platformruntime.WorkspaceEvent) error {
 	if s.workspaceEvents == nil {
 		return nil
 	}
-	now := time.Now().UTC()
-	record := platformruntime.DeliveryRecord{
-		EventType:    strings.TrimSpace(evt.Type),
-		TenantID:     strings.TrimSpace(evt.TenantID),
-		SessionID:    strings.TrimSpace(evt.SessionID),
-		TaskID:       strings.TrimSpace(evt.TaskID),
-		AttemptCount: 1,
-		Status:       platformruntime.DeliveryStatusPending,
-		UpdatedAt:    now,
-	}
-	if s.deliveries != nil {
-		if existing, ok, err := s.deliveries.Get(context.Background(), record.TenantID, record.EventType, record.SessionID, record.TaskID); err != nil {
-			return err
-		} else if ok {
-			record = existing
-			record.AttemptCount++
-			record.UpdatedAt = now
-		}
-		if err := s.deliveries.Save(context.Background(), record); err != nil {
-			return err
-		}
-	}
-
-	err := s.workspaceEvents.Broadcast(evt)
-	if err != nil {
-		if s.deliveries != nil {
-			record.Status = platformruntime.DeliveryStatusFailed
-			record.LastError = err.Error()
-			record.UpdatedAt = time.Now().UTC()
-			if saveErr := s.deliveries.Save(context.Background(), record); saveErr != nil {
-				return saveErr
-			}
-		}
-		return err
-	}
-
-	if s.deliveries != nil {
-		if record.Status == platformruntime.DeliveryStatusFailed {
-			record.Status = platformruntime.DeliveryStatusRecovered
-		} else {
-			record.Status = platformruntime.DeliveryStatusDelivered
-		}
-		record.LastError = ""
-		record.UpdatedAt = time.Now().UTC()
-		if err := s.deliveries.Save(context.Background(), record); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func normalizeAdvanceTaskInput(ctx context.Context, input AdvanceTaskInput) (AdvanceTaskInput, bool) {
-	input.TenantID = strings.TrimSpace(input.TenantID)
-	input.ActorID = strings.TrimSpace(input.ActorID)
-	input.TaskID = strings.TrimSpace(input.TaskID)
-	input.Reason = strings.TrimSpace(input.Reason)
-
-	actorProvided := input.ActorID != ""
-	if rc, ok := platformruntime.RequestContextFromContext(ctx); ok && rc != nil {
-		if tenantID := strings.TrimSpace(rc.TenantID); tenantID != "" {
-			input.TenantID = tenantID
-		}
-		if actorID := strings.TrimSpace(rc.ActorID); actorID != "" {
-			input.ActorID = actorID
-		}
-		actorProvided = rc.ActorProvided
-	}
-	return input, actorProvided
-}
-
-func governanceAuditPayload(
-	ctx context.Context,
-	tasks platformruntime.TaskRepository,
-	commandName string,
-	input AdvanceTaskInput,
-) map[string]any {
-	sessionID := ""
-	if tasks != nil && input.TenantID != "" && input.TaskID != "" {
-		if task, err := tasks.Get(ctx, input.TenantID, input.TaskID); err == nil {
-			sessionID = task.SessionID
-		}
-	}
-	return map[string]any{
-		"action":         strings.TrimPrefix(commandName, "runtime.tasks."),
-		"task_id":        input.TaskID,
-		"session_id":     sessionID,
-		"correlation_id": commandName + ":" + input.TenantID + ":" + input.TaskID,
-		"resource_type":  "task",
-		"resource_id":    input.TaskID,
-	}
+	return s.workspaceEvents.Broadcast(evt)
 }
 
 func normalizeRoles(roles []string) []string {
@@ -750,6 +947,19 @@ func normalizeRoles(roles []string) []string {
 		out = append(out, role)
 	}
 	return out
+}
+
+func hasRole(roles []string, targetRole string) bool {
+	targetRole = strings.TrimSpace(targetRole)
+	if targetRole == "" {
+		return false
+	}
+	for _, role := range roles {
+		if strings.TrimSpace(role) == targetRole {
+			return true
+		}
+	}
+	return false
 }
 
 func nextID(prefix string) string {
